@@ -347,6 +347,52 @@ describe('applications', () => {
     expect(store.data.get('ambassador').get(id).statusNote).toBeUndefined();
   });
 
+  it('lets a super_admin set any status from Settings, recorded as an override; an editor is refused', async () => {
+    const { h: editor } = await seeded('editor');
+    const id = parse(
+      await editor.createApplication(
+        makeRequest({ body: { programId: 'program-microsoft-mct' } }),
+        context
+      )
+    ).id;
+    const refused = await editor.patchApplication(
+      makeRequest({ params: { id }, body: { status: 'active', statusOverride: true } }),
+      context
+    );
+    expect(refused.status).toBe(403);
+
+    const { h: admin, store } = await seeded('super_admin');
+    const adminId = parse(
+      await admin.createApplication(
+        makeRequest({ body: { programId: 'program-microsoft-mct' } }),
+        context
+      )
+    ).id;
+    const set = parse(
+      await admin.patchApplication(
+        makeRequest({
+          params: { id: adminId },
+          body: { status: 'active', statusOverride: true, statusNote: 'Set from Settings' },
+        }),
+        context
+      )
+    ).item;
+    expect(set.status).toBe('active');
+    expect(set.history.at(-1)).toMatchObject({
+      from: 'interested',
+      to: 'active',
+      note: 'Set from Settings',
+      override: true,
+    });
+    expect(store.data.get('ambassador').get(adminId).statusOverride).toBeUndefined();
+    // A plain move still obeys the table.
+    const plain = await admin.patchApplication(
+      makeRequest({ params: { id: adminId }, body: { status: 'interested' } }),
+      context
+    );
+    expect(plain.status).toBe(400);
+  });
+
   it('deletes softly and only as publisher', async () => {
     const { h, store } = await seeded();
     const id = parse(

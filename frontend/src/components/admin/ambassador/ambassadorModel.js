@@ -31,6 +31,28 @@ export const AMBASSADOR_STATUS = statusTable({
 /** The statuses in lifecycle order: the table's key order. */
 export const APPLICATION_STATUSES = Object.freeze(Object.keys(AMBASSADOR_STATUS));
 
+/**
+ * Where the owner stands with a program, a fact about the program rather
+ * than a step of an application (owner request 2026-10-05). Mirrors
+ * MEMBERSHIP_STATUSES in functions/src/lib/ambassador/model.js.
+ */
+export const MEMBERSHIP_STATUS = statusTable({
+  none: ['Not a member', 'muted', 'Not held and not being pursued.'],
+  working: ['Working', 'warn', 'Qualifying or applying.'],
+  active: ['Active', 'ok', 'Holding it now.'],
+  denied: ['Denied', 'bad', 'Refused; a new pursuit can start.'],
+});
+export const MEMBERSHIP_STATUSES = Object.freeze(Object.keys(MEMBERSHIP_STATUS));
+
+/** The most recently updated application for a program, or null. */
+export function latestApplicationFor(applications, programId) {
+  return (
+    (applications || [])
+      .filter((a) => a.programId === programId)
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] || null
+  );
+}
+
 /** A program's place in the catalogue, for the Settings table. */
 export const PROGRAM_STATE = statusTable({
   enabled: ['Enabled', 'ok', 'Offered on the Programs tab.'],
@@ -313,6 +335,7 @@ export const EMPTY_PROGRAM_FORM = Object.freeze({
   evidenceTypes: [],
   reminders: { daysBeforeDeadline: 14, daysBeforeRenewal: 30 },
   customFields: [],
+  membershipStatus: 'none',
 });
 
 export const EMPTY_REQUIREMENT = Object.freeze({
@@ -357,6 +380,9 @@ export function programForm(program) {
     },
     renewalCadence: textOf(program.renewalCadence, EMPTY_PROGRAM_FORM.renewalCadence),
     expirationRule: textOf(program.expirationRule),
+    membershipStatus: MEMBERSHIP_STATUSES.includes(program.membershipStatus)
+      ? program.membershipStatus
+      : 'none',
     requirements: (program.requirements || []).map((r) => ({ ...EMPTY_REQUIREMENT, ...r })),
     evidenceTypes: program.evidenceTypes || [],
     reminders: {
@@ -390,6 +416,9 @@ export function programPayload(form) {
       name: form.name.trim(),
       provider: form.provider.trim(),
       category: form.category.trim(),
+      membershipStatus: MEMBERSHIP_STATUSES.includes(form.membershipStatus)
+        ? form.membershipStatus
+        : 'none',
       description: form.description.trim(),
       applicationUrl: form.applicationUrl.trim() || null,
       eligibility: lines(form.eligibility),

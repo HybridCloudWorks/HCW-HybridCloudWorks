@@ -5,6 +5,7 @@
  * The form state and every write stay in ApplicationWorkspace.jsx.
  */
 import React, { useRef } from 'react';
+import { UPLOAD_ACCEPT } from './useApplicationUpload';
 import { Button } from '@/components/ui/button';
 import { CardHeader, CardTitle } from '@/components/ui/card';
 import { Download, FileText, Loader2, Save, Trash2, Upload } from 'lucide-react';
@@ -221,9 +222,9 @@ export function FilesSection({ application, files, form, set, busy }) {
         <input
           ref={uploadRef}
           type="file"
-          accept="image/*"
+          accept={UPLOAD_ACCEPT}
           className="hidden"
-          aria-label="Upload an image"
+          aria-label="Upload a file"
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) files.upload(file);
@@ -242,10 +243,11 @@ export function FilesSection({ application, files, form, set, busy }) {
           ) : (
             <Upload className="mr-1 h-3.5 w-3.5" />
           )}
-          Upload image
+          Upload file
         </Button>
         <span className="text-xs text-muted-foreground">
-          Stored privately under this application; images only, documents as links below.
+          Stored privately under this application: images, and documents to archive (PDF, Word,
+          Excel, PowerPoint, CSV, text). Anything else as a link below.
         </span>
       </div>
       {stored.length > 0 && (

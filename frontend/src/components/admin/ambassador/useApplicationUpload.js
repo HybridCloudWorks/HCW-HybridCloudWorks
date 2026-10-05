@@ -1,10 +1,25 @@
 /**
- * Files and images on an application (ADR 0033 §4). The upload route accepts
- * images only (admin-uploads.js), so the "Files & images" upload takes
- * images and documents go in Links. Uploads land in the private
- * `speakerevents` container under `ambassador/{id}/`, so they are never
- * anonymously reachable; the application records name, URL, size and time.
+ * Files and images on an application (ADR 0033 §4). Uploads land in the
+ * private `speakerevents` container under `ambassador/{id}/`, so they are
+ * never anonymously reachable; the application records name, URL, size and
+ * time. Images and documents (PDF, Word, Excel, PowerPoint, CSV, text) are
+ * accepted — the route allows documents into private containers only
+ * (admin-uploads.js, owner request 2026-10-05: a program's agreement, role
+ * description or export is archived beside the application). Images also
+ * join `images[]`, the gallery the packet prints; documents are files only.
  */
+export const DOCUMENT_TYPES = Object.freeze([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/csv',
+  'text/plain',
+  'text/markdown',
+]);
+export const UPLOAD_ACCEPT = 'image/*,.pdf,.docx,.xlsx,.pptx,.csv,.txt,.md';
+export const isUploadable = (file) =>
+  Boolean(file?.type) && (file.type.startsWith('image/') || DOCUMENT_TYPES.includes(file.type));
 import { useState } from 'react';
 import { postJSON } from '@/lib/api';
 import { useToast } from '@/components/ui/use-toast';
@@ -41,11 +56,12 @@ export default function useApplicationUpload(application, hub) {
       bytes: file.size,
       uploadedAt: new Date().toISOString(),
     };
+    const isImage = file.type.startsWith('image/');
     await hub.writes.patchApplication(
       application.id,
       {
         files: [...(application.files || []), entry],
-        images: [...(application.images || []), entry],
+        ...(isImage ? { images: [...(application.images || []), entry] } : {}),
       },
       { quiet: true }
     );
@@ -54,10 +70,11 @@ export default function useApplicationUpload(application, hub) {
 
   const upload = async (file) => {
     if (!file || uploading) return;
-    if (!file.type.startsWith('image/')) {
+    if (!isUploadable(file)) {
       toast({
-        title: 'Images only',
-        description: 'The upload route accepts images; add documents as links.',
+        title: 'Not an accepted file type',
+        description:
+          'Images, PDF, Word, Excel, PowerPoint, CSV and text files; anything else as a link.',
         variant: 'destructive',
       });
       return;

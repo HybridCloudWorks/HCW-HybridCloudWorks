@@ -154,7 +154,7 @@ export default function DashboardTab({ hub, nav }) {
             <Stat
               label="Evidence"
               value={evidence.data.length}
-              hint={`${expiring.length} ageing out soon`}
+              hint={`${expiring.length} aging out soon`}
             />
           </div>
 

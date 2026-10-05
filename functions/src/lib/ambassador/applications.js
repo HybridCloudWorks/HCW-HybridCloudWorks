@@ -5,6 +5,7 @@
  * plain patch.
  */
 import { actorName } from '../auth/actor-name.js';
+import { satisfiesRole } from '../auth/roles.js';
 import { APPLICATION_TRANSITIONS, CONTAINER, canTransition } from './model.js';
 import { KINDS, byUpdatedDesc, json, loadCreate, loadPatch, stamped } from './steps.js';
 import { str } from './fields.js';
@@ -90,12 +91,12 @@ const TRANSITION_DATES = [
  * repeats the current status is a plain patch with the status dropped.
  * Mutates `updates`; answers the refusal to send, or null.
  */
-function applyTransition(updates, { existing, statusNote, stamp, actor, today }) {
+function applyTransition(updates, { existing, statusNote, stamp, actor, today, override }) {
   if (!updates.status || updates.status === existing.status) {
     delete updates.status;
     return null;
   }
-  if (!canTransition(existing.status, updates.status)) {
+  if (!override && !canTransition(existing.status, updates.status)) {
     return json(400, {
       error: `Cannot move an application from ${existing.status} to ${updates.status}`,
       allowed: APPLICATION_TRANSITIONS[existing.status] || [],
@@ -104,7 +105,14 @@ function applyTransition(updates, { existing, statusNote, stamp, actor, today })
   const history = Array.isArray(existing.history) ? existing.history : [];
   updates.history = [
     ...history,
-    { at: stamp, by: actor, from: existing.status, to: updates.status, note: statusNote || '' },
+    {
+      at: stamp,
+      by: actor,
+      from: existing.status,
+      to: updates.status,
+      note: statusNote || '',
+      ...(override ? { override: true } : {}),
+    },
   ];
   for (const [field, statuses] of TRANSITION_DATES) {
     const unset = !updates[field] && !existing[field];
@@ -116,13 +124,19 @@ function applyTransition(updates, { existing, statusNote, stamp, actor, today })
 /**
  * PATCH cms/ambassador/applications/{id} — a status in the body is a
  * transition, checked against APPLICATION_TRANSITIONS and appended to
- * history[] with its note; every other field is a plain patch.
+ * history[] with its note; every other field is a plain patch. With
+ * `statusOverride: true` (super_admin only — the Settings tab's state
+ * select, owner request 2026-10-05) any status is accepted and the history
+ * row says so, so a record can be corrected without walking the funnel.
  */
 export async function patchApplication(ctx, request, auth) {
   const loaded = await loadPatch(ctx, request, KINDS.application);
   if (loaded.error) return loaded.error;
   const { id, existing } = loaded;
-  const { statusNote, ...updates } = loaded.updates;
+  const { statusNote, statusOverride, ...updates } = loaded.updates;
+  if (statusOverride && !satisfiesRole(auth.role, 'super_admin')) {
+    return json(403, { error: 'Setting a status outside the transition table needs super_admin' });
+  }
   if (updates.programId && updates.programId !== existing.programId) {
     const program = await ctx.readKind('program', updates.programId);
     if (!program) return json(400, { error: `Unknown programId ${updates.programId}` });
@@ -134,6 +148,7 @@ export async function patchApplication(ctx, request, auth) {
     stamp,
     actor: actorName(auth.user),
     today: ctx.today(),
+    override: Boolean(statusOverride),
   });
   if (refused) return refused;
   const updated = await ctx.store.patchDoc(CONTAINER, id, { ...updates, updatedAt: stamp });

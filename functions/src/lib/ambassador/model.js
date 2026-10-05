@@ -50,6 +50,16 @@ export function canTransition(from, to) {
   return Array.isArray(APPLICATION_TRANSITIONS[from]) && APPLICATION_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * Where the owner stands with a program, as a fact about the PROGRAM rather
+ * than a step of an application (owner request 2026-10-05): `working` while
+ * qualifying or applying, `active` while holding it, `denied` after a
+ * refusal, `none` otherwise. Separate from the application status machine
+ * above, which tracks one pursuit; this is the one-word answer the Programs
+ * tab and the Dashboard show.
+ */
+export const MEMBERSHIP_STATUSES = Object.freeze(['none', 'working', 'active', 'denied']);
+
 export const EVIDENCE_SOURCES = Object.freeze([
   'speaking',
   'certifications',

@@ -309,4 +309,40 @@ describe('Settings', () => {
     });
     expect(sendJSON).not.toHaveBeenCalledWith(expect.anything(), 'DELETE');
   });
+
+  it('sets membership on the program and the application state as an override, from the row', async () => {
+    searchParams = 'tab=settings';
+    render(<AmbassadorPage />);
+    const row = (await panel().findByText('Microsoft MVP')).closest('tr');
+    await act(async () => {
+      fireEvent.change(within(row).getByLabelText('Membership status for Microsoft MVP'), {
+        target: { value: 'working' },
+      });
+    });
+    expect(sendJSON).toHaveBeenCalledWith('cms/ambassador/programs/program-mvp', 'PATCH', {
+      membershipStatus: 'working',
+    });
+    // The latest application for the program is the one set, outside the funnel.
+    const state = within(row).getByLabelText('Application state for Microsoft MVP');
+    expect(state).toHaveValue('preparing');
+    await act(async () => {
+      fireEvent.change(state, { target: { value: 'active' } });
+    });
+    expect(sendJSON).toHaveBeenCalledWith('cms/ambassador/applications/application-1', 'PATCH', {
+      status: 'active',
+      statusNote: 'Set from Settings',
+      statusOverride: true,
+    });
+    // A program with no application starts one at the chosen state.
+    const star = (await panel().findByText('GitHub Star')).closest('tr');
+    await act(async () => {
+      fireEvent.change(within(star).getByLabelText('Application state for GitHub Star'), {
+        target: { value: 'denied' },
+      });
+    });
+    expect(postJSON).toHaveBeenCalledWith('cms/ambassador/applications', {
+      programId: 'program-star',
+      status: 'denied',
+    });
+  });
 });

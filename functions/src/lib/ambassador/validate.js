@@ -23,6 +23,7 @@ import {
 } from './fields.js';
 import {
   APPLICATION_STATUSES,
+  MEMBERSHIP_STATUSES,
   EVIDENCE_SOURCES,
   VERIFICATION_STATUSES,
   isHttpUrl,
@@ -153,6 +154,7 @@ const PROGRAM = {
     order: field(wholeNumber),
     reminders: field(cleanReminders),
     customFields: field(cleanCustomFields),
+    membershipStatus: field(oneOf(MEMBERSHIP_STATUSES, 'membershipStatus')),
   },
 };
 
@@ -204,6 +206,9 @@ const APPLICATION = {
     programId: field(requiredText(120, 'programId'), { required: true }),
     title: field(bounded(300)),
     status: field(oneOf(APPLICATION_STATUSES, 'status')),
+    // `true` lets a super_admin set any status from Settings, outside the
+    // transition table; applications.js checks the role and records it.
+    statusOverride: field((value) => value === true),
     statusNote: field(bounded(2000)),
     qualificationPeriod: field(cleanPeriod),
     ...Object.fromEntries(APPLICATION_DATE_FIELDS.map((key) => [key, field(dayOrNull)])),
