@@ -47,10 +47,21 @@ This project has not cut a tagged release; entries are grouped under
   `credentialImage` and `image[0].downloadURL` in the published item, and
   persists the same rewrite to the document so the editor's card agrees.
   A missing blob is reported by name in the response's `legacyBadges` and
-  the document is left as stored; the Publish toast shows the counts.
-  `legacy-badge-url.test.js` pins the URL shapes and the pure rewrite;
-  `snapshots-publish.test.js` pins the exists / missing / no-storage /
-  persist-failure cases.
+  the document is left as stored; the Publish toast shows the counts. The
+  persist is one conditional write per row on the `_etag` it was queried
+  with; a 412 re-reads the row, decides again from what is stored now and
+  writes once more, and a second 412 publishes the fresh row as stored. A
+  row whose `imageUrl` is a live selection is never rewritten (its old
+  upload metadata would otherwise come back in front of the new badge),
+  and the sanitizer now publishes the editor's `imageUrl` ahead of a legacy
+  `credentialImage`, which a re-uploaded badge over a migrated row needed.
+  The nightly cleanup's URL parser recognises the media route, so a
+  re-pointed badge is a referenced blob, never a deletion candidate.
+  `legacy-badge-url.test.js` pins the URL shapes, the alias rewrite, the
+  edited-row rule and `repointAll`; `snapshots-publish.test.js` pins the
+  exists / missing / no-storage / ETag / 412 / edited-row / cleanup cases;
+  the About page's test pins that a dead legacy upload falls past to the
+  published URL.
 - **AI Engine: audio and image tasks join the Tasks table (ADR 0034 slice 5,
   #860).** The last slice of the ADR: the non-text paths are tasks of the
   same registry and selection document as the text ones, and their settings

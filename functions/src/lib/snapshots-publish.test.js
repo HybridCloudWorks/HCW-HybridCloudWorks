@@ -3,6 +3,7 @@
  * non-whitelisted fields must never reach the public _snapshots docs.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { blobNameFromUrl, isImageBlobName } from './timers/cert-image-cleanup.js';
 import {
   createSnapshotPublishHandlers,
   sanitizeCertification,
@@ -57,6 +58,30 @@ describe('sanitizeCertification', () => {
     expect(serializeValue({ toDate: () => new Date('2026-01-01T00:00:00Z') })).toBe(
       '2026-01-01T00:00:00.000Z'
     );
+  });
+});
+
+describe('sanitizeCertification: the badge URL it publishes', () => {
+  const DEAD =
+    'https://firebasestorage.googleapis.com/v0/b/b.appspot.com/o/certifications%2Fc1%2Fimages%2Fold.png?alt=media';
+
+  it("prefers the editor's imageUrl over a legacy credentialImage", () => {
+    const out = sanitizeCertification({
+      id: 'c1',
+      display: true,
+      imageUrl: '/api/public/media/certifications/c1/images/new.png',
+      credentialImage: DEAD,
+    });
+    expect(out.credentialImage).toBe('/api/public/media/certifications/c1/images/new.png');
+  });
+
+  it('keeps a live credentialImage when imageUrl is legacy, and the first defined when every candidate is legacy', () => {
+    expect(
+      sanitizeCertification({ id: 'c1', display: true, imageUrl: DEAD, credentialImage: 'https://images.credly.com/x.png' })
+        .credentialImage
+    ).toBe('https://images.credly.com/x.png');
+    expect(sanitizeCertification({ id: 'c1', display: true, imageUrl: DEAD, credentialImage: DEAD }).credentialImage).toBe(DEAD);
+    expect(sanitizeCertification({ id: 'c1', display: true })).not.toHaveProperty('credentialImage');
   });
 });
 
@@ -317,6 +342,7 @@ describe('legacy badge references (#868)', () => {
       id: 'mct',
       name: 'MCT',
       display: true,
+      _etag: 'etag-1',
       credentialImage: FIREBASE('mct/images/badge-image.png'),
       image: [{ downloadURL: FIREBASE('mct/images/badge-image.png') }],
     },
@@ -332,7 +358,9 @@ describe('legacy badge references (#868)', () => {
     queryDocs: vi.fn(async (container) => (container === 'certifications' ? rows() : [])),
     upsertDoc: vi.fn(async (_c, d) => d),
     patchDoc: vi.fn(async (_c, id, changes) => ({ id, ...changes })),
+    readDoc: vi.fn(async (_c, id) => rows().find((r) => r.id === id) || null),
   });
+  const conflict = () => Object.assign(new Error('precondition failed'), { code: 412 });
   const storage = {
     headBlobForDelivery: vi.fn(async (_c, path) =>
       path === 'mct/images/badge-image.png' ? { contentType: 'image/png' } : null
@@ -355,13 +383,100 @@ describe('legacy badge references (#868)', () => {
     const gone = snap.items.find((i) => i.id === 'gone');
     expect(gone.credentialImage).toContain('firebasestorage');
 
+    // One conditional write per row, on the ETag the row was queried with.
     expect(store.patchDoc).toHaveBeenCalledTimes(1);
-    expect(store.patchDoc).toHaveBeenCalledWith('certifications', 'mct', {
-      imageUrl: MEDIA,
-      credentialImage: MEDIA,
-      image: [{ downloadURL: MEDIA }],
-    });
+    expect(store.patchDoc).toHaveBeenCalledWith(
+      'certifications',
+      'mct',
+      { imageUrl: MEDIA, credentialImage: MEDIA, image: [{ downloadURL: MEDIA }] },
+      { ifMatch: 'etag-1' }
+    );
     expect(storage.headBlobForDelivery).toHaveBeenCalledWith('certifications', 'mct/images/badge-image.png');
+  });
+
+  it('the persisted URL is a reference the nightly cleanup recognises, so the badge is never a deletion candidate', async () => {
+    const store = makeStore();
+    await createSnapshotPublishHandlers({ guard: guardAs('editor'), store, storage, now: () => NOW }).publishSnapshots();
+    const [, , changes] = store.patchDoc.mock.calls[0];
+    for (const url of [changes.imageUrl, changes.credentialImage, changes.image[0].downloadURL]) {
+      const name = blobNameFromUrl(url);
+      expect(name).toBe('mct/images/badge-image.png');
+      expect(isImageBlobName(name)).toBe(true);
+    }
+  });
+
+  it('on a 412 re-reads the row, decides again from what is stored now, and writes once more on the fresh ETag', async () => {
+    const store = makeStore();
+    const edited = {
+      ...rows()[0],
+      _etag: 'etag-2',
+      imageUrl: '/api/public/media/certifications/mct/images/badge-1759600000000.png',
+    };
+    store.readDoc = vi.fn(async () => edited);
+    store.patchDoc = vi.fn(async () => {
+      throw conflict();
+    });
+    const h = createSnapshotPublishHandlers({ guard: guardAs('editor'), store, storage, now: () => NOW });
+    const body = JSON.parse((await h.publishSnapshot(makeRequest(), context)).body);
+    // The editor chose a new badge meanwhile: nothing to re-point, nothing written twice.
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+    expect(body.legacyBadges.repointed).toBe(0);
+    const snap = store.upsertDoc.mock.calls.find(([, d]) => d.id === 'certifications')[1];
+    const mct = snap.items.find((i) => i.id === 'mct');
+    // The fresh row is what is published, and its selected badge is the plain URL.
+    expect(mct.credentialImage).toBe('/api/public/media/certifications/mct/images/badge-1759600000000.png');
+  });
+
+  it('a 412 on a row that still needs the rewrite writes it once more on the fresh ETag; a second 412 publishes the fresh row as stored', async () => {
+    const store = makeStore();
+    const fresh = { ...rows()[0], _etag: 'etag-2', name: 'MCT (renamed)' };
+    store.readDoc = vi.fn(async () => fresh);
+    let calls = 0;
+    store.patchDoc = vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) throw conflict();
+      return {};
+    });
+    const h = createSnapshotPublishHandlers({ guard: guardAs('editor'), store, storage, now: () => NOW });
+    let body = JSON.parse((await h.publishSnapshot(makeRequest(), context)).body);
+    expect(store.patchDoc.mock.calls.map(([, , , opts]) => opts)).toEqual([
+      { ifMatch: 'etag-1' },
+      { ifMatch: 'etag-2' },
+    ]);
+    expect(body.legacyBadges.repointed).toBe(1);
+    let snap = store.upsertDoc.mock.calls.find(([, d]) => d.id === 'certifications')[1];
+    expect(snap.items.find((i) => i.id === 'mct')).toMatchObject({ name: 'MCT (renamed)', credentialImage: MEDIA });
+
+    // Twice: give up on the write, publish the fresh row exactly as stored, say so.
+    const log = { warn: vi.fn() };
+    const store2 = makeStore();
+    store2.readDoc = vi.fn(async () => fresh);
+    store2.patchDoc = vi.fn(async () => {
+      throw conflict();
+    });
+    body = JSON.parse(
+      (await createSnapshotPublishHandlers({ guard: guardAs('editor'), store: store2, storage, now: () => NOW, log }).publishSnapshot(makeRequest(), context)).body
+    );
+    expect(body.legacyBadges.repointed).toBe(0);
+    snap = store2.upsertDoc.mock.calls.find(([, d]) => d.id === 'certifications')[1];
+    expect(snap.items.find((i) => i.id === 'mct').credentialImage).toContain('firebasestorage');
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('changed twice'));
+  });
+
+  it('an edited row keeps its selected badge: imageUrl wins over a legacy credentialImage and the old upload is not revived', async () => {
+    const store = makeStore();
+    const selected = '/api/public/media/certifications/mct/images/badge-1759600000000.png';
+    store.queryDocs = vi.fn(async (container) =>
+      container === 'certifications' ? [{ ...rows()[0], imageUrl: selected }] : []
+    );
+    const h = createSnapshotPublishHandlers({ guard: guardAs('editor'), store, storage, now: () => NOW });
+    await h.publishSnapshot(makeRequest(), context);
+    expect(store.patchDoc).not.toHaveBeenCalled();
+    const snap = store.upsertDoc.mock.calls.find(([, d]) => d.id === 'certifications')[1];
+    const mct = snap.items.find((i) => i.id === 'mct');
+    expect(mct.credentialImage).toBe(selected);
+    // The old upload object is published as it was: dead, and skipped by the page.
+    expect(mct.image[0].downloadURL).toContain('firebasestorage');
   });
 
   it('asks blob storage once per distinct path, never for a non-legacy URL', async () => {

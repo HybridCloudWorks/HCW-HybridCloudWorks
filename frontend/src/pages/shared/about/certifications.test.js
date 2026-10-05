@@ -122,6 +122,20 @@ describe('cleanUrl', () => {
 });
 
 describe('resolveImageUrl', () => {
+  it('falls past a dead legacy upload to the published plain URL (an edited, migrated row)', () => {
+    expect(
+      resolveImageUrl({
+        image: [
+          {
+            downloadURL:
+              'https://firebasestorage.googleapis.com/v0/b/b.appspot.com/o/certifications%2Fc1%2Fimages%2Fold.png?alt=media',
+          },
+        ],
+        credentialImage: '/api/public/media/certifications/c1/images/new.png',
+      })
+    ).toBe('/api/public/media/certifications/c1/images/new.png');
+  });
+
   it('prefers the upload object, reading its first URL-ish field', () => {
     expect(resolveImageUrl({ image: { downloadURL: '/a.png' }, imageUrl: '/b.png' })).toBe(
       '/a.png'

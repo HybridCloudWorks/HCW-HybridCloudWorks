@@ -33,6 +33,19 @@ export function blobNameFromUrl(url, { accountHost = null } = {}) {
   const value = String(url || '').trim();
   if (!value) return null;
   let path = null;
+  // The media delivery route, `/api/public/media/certifications/<path>`,
+  // relative or absolute: what the editor has stored since the port and
+  // what publishSnapshot writes when it re-points a legacy badge (#868).
+  // Not recognising it here would make every re-pointed badge look
+  // unreferenced, and the caller DELETES on that answer.
+  const media = /\/api\/public\/media\/certifications\/([^?#]+)/i.exec(value);
+  if (media) {
+    try {
+      return media[1].split('/').map(decodeURIComponent).join('/');
+    } catch {
+      return media[1];
+    }
+  }
   const fb = /\/o\/([^?]+)/.exec(value); // firebasestorage .../o/<encodedPath>?...
   if (fb) {
     try {

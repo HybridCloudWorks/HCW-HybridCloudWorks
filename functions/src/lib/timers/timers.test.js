@@ -714,6 +714,14 @@ describe('cert image cleanup', () => {
       blobNameFromUrl('https://stsiteprodcus01.blob.core.windows.net/certifications/images/d.png')
     ).toBe('images/d.png');
     expect(blobNameFromUrl('https://example.com/images/e.png')).toBeNull();
+    // The media delivery route, relative (what the editor stores) and
+    // absolute, with an encoded segment: a re-pointed badge is referenced.
+    expect(blobNameFromUrl('/api/public/media/certifications/c1/images/badge-1.png')).toBe(
+      'c1/images/badge-1.png'
+    );
+    expect(
+      blobNameFromUrl('https://api-azure.hybridcloudworks.com/api/public/media/certifications/c1/images/a%20b.png?v=2')
+    ).toBe('c1/images/a b.png');
     expect(
       [
         ...collectReferencedBlobNames([
