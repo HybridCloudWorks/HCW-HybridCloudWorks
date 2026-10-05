@@ -63,4 +63,19 @@ describe('generationFailure', () => {
     expect(response.status).toBe(500);
     expect(JSON.parse(response.body)).toEqual({ error: 'Failed X', message: 'boom' });
   });
+
+  it('keeps the image budget\'s own status and code, so the page can say paused', () => {
+    const context = { error: vi.fn() };
+    const paused = Object.assign(new Error('Image generation paused: $10.00 of the $10 budget used'), {
+      code: 'IMAGE_BUDGET_EXHAUSTED',
+      status: 429,
+    });
+    const response = generationFailure(context, 'generateX', paused, 'Failed X');
+    expect(response.status).toBe(429);
+    expect(JSON.parse(response.body)).toEqual({
+      error: 'Failed X',
+      code: 'IMAGE_BUDGET_EXHAUSTED',
+      message: 'Image generation paused: $10.00 of the $10 budget used',
+    });
+  });
 });

@@ -43,8 +43,22 @@ export async function readNamedSet(store, setName, promptName) {
   return { set: setDoc, prompt: promptDoc };
 }
 
-/** The 500 every generation route answers when the generator or the store throws. */
+/**
+ * The answer every generation route gives when the generator or the store
+ * throws: a 500 with the message and the cause — except for the image
+ * budget (triggers/ai-cover.js), whose refusal carries its own status (429
+ * exhausted, 503 unreadable) and code, kept so the page can say "paused"
+ * rather than "server error" (#854).
+ */
 export function generationFailure(context, label, error, message) {
   context.error(`${label} failed:`, error);
+  const budget = typeof error?.code === 'string' && error.code.startsWith('IMAGE_BUDGET_');
+  if (budget) {
+    return json(error.status || 429, {
+      error: message,
+      code: error.code,
+      message: error.message,
+    });
+  }
   return json(500, { error: message, message: error?.message || 'Unknown error' });
 }

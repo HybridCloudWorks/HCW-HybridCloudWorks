@@ -6,6 +6,7 @@
  * manual-images.js).
  */
 import { generatedImageRecordFields } from '../triggers/ai-cover.js';
+import { USAGE_SOURCES } from '../ai/usage.js';
 import {
   composeSetPrompt,
   lineageFor,
@@ -88,6 +89,7 @@ export async function generatePromptSetSample(ctx, request, context) {
     const prompt = composeSetPrompt({ set, prompt: promptDoc, slot, article, keyword });
     const generated = await replicate.generate(prompt, {
       aspectRatio: set.aspectRatio || undefined,
+      source: USAGE_SOURCES.imageManual,
     });
     const fetched = await fetchImage(generated);
     if (fetched.refused) throw new Error(`Generated sample refused: ${fetched.reason}`);

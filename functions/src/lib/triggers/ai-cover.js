@@ -29,6 +29,7 @@
  *     the delete route needs, and the measured bytes and dimensions.
  */
 import { readKey } from '../ai/router.js';
+import { USAGE_SOURCES, monthToDateUsage, recordAiUsage } from '../ai/usage.js';
 import { mediaUrlFor } from '../blob-paths.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import {
@@ -57,6 +58,20 @@ export const AI_COVER_CLAIM_FIELDS = Object.freeze({
 
 /** The one image provider this site generates with today. */
 export const IMAGE_PROVIDER = 'replicate';
+
+/**
+ * The monthly image budget (2026-10-05). Replicate bills on its own account,
+ * so no Azure budget alerts on it and nothing stops it; these two numbers
+ * do. Dollars count what the rows priced, images count every row, so a
+ * month with no per-image price configured still has a ceiling.
+ */
+const IMAGE_BUDGET_DEFAULT_USD = 10;
+const IMAGE_COUNT_DEFAULT = 200;
+
+const positiveNumber = (value, fallback) => {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
 
 /**
  * The curated per-provider default heroes (T-606): admin_config/default_heroes
@@ -307,6 +322,65 @@ function predictionImageUrl(prediction) {
 }
 
 /**
+ * Refuse before the call, not after the bill. The guard FAILS CLOSED: there
+ * is no Replicate-side limit (the owner declined one, 2026-10-05), so a
+ * month that cannot be read is a month that cannot be bounded, and the
+ * generation waits rather than runs. The image about to be made is counted
+ * against the budget too, so $9.99 used does not permit a $0.02 image.
+ *
+ * What this does not do is serialise: two generations that read the month
+ * at the same moment can both pass, so the overshoot is bounded by the
+ * number of concurrent generations times the per-image price — a few cents
+ * on this site — not unbounded. An atomic reservation document would close
+ * that gap at the cost of a write per image and a reconciliation path;
+ * revisit if the per-image price or the concurrency grows. Module-level
+ * over the client's bookkeeping so the factory stays small (qlty, #854).
+ */
+async function assertImageBudget({
+  store,
+  now,
+  costPerImageUsd,
+  monthlyBudgetUsd,
+  monthlyMaxImages,
+}) {
+  if (!store?.queryDocs) return;
+  let used;
+  try {
+    used = await monthToDateUsage({ store, now }, IMAGE_PROVIDER);
+  } catch (cause) {
+    const err = new Error(
+      `Image generation paused: this month's image spend could not be read (${cause?.message || cause}), and with no account-side limit the budget cannot be enforced blind. Try again shortly.`
+    );
+    err.code = 'IMAGE_BUDGET_UNKNOWN';
+    err.status = 503;
+    throw err;
+  }
+  const pending = costPerImageUsd ?? 0;
+  if (used.costUsd + pending <= monthlyBudgetUsd && used.count + 1 <= monthlyMaxImages) return;
+  const err = new Error(
+    `Image generation paused: $${used.costUsd.toFixed(2)} of the $${monthlyBudgetUsd} monthly image budget used, ${used.count} images since ${used.since.slice(0, 10)}. Raise CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD (or CONTENTFORGE_IMAGE_MONTHLY_MAX) or wait for the first of the month.`
+  );
+  err.code = 'IMAGE_BUDGET_EXHAUSTED';
+  err.status = 429;
+  throw err;
+}
+
+/** One row per output image. recordAiUsage swallows its own failures. */
+async function recordImageUsage({ store, now, uuid, model, costPerImageUsd }, source) {
+  if (!store?.upsertDoc) return;
+  await recordAiUsage(
+    { store, ai: { getCostEstimate: () => costPerImageUsd ?? 0 }, uuid, now },
+    {
+      provider: IMAGE_PROVIDER,
+      model,
+      costUsd: costPerImageUsd ?? undefined,
+      unpriced: costPerImageUsd === null,
+      source: source || USAGE_SOURCES.imageManual,
+    }
+  );
+}
+
+/**
  * Replicate over REST. `generate(prompt)` resolves to the image URL.
  * @param {{ env?: object, fetch?: typeof fetch, sleep?: Function }} deps
  */
@@ -314,17 +388,32 @@ export function createReplicateClient({
   env = process.env,
   fetch: fetchImpl = globalThis.fetch,
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
+  // With a store, every image writes an `ai_usage` row and the monthly
+  // budget is checked first (2026-10-05). Without one — unit tests, tooling —
+  // the client generates and records nothing, as it always did.
+  store = null,
+  now = () => new Date(),
+  uuid = () => crypto.randomUUID(),
 } = {}) {
   const apiKey = readKey(env, 'REPLICATE_API_KEY');
   const model =
     env.CONTENTFORGE_IMAGE_MODEL_HERO || env.CONTENTFORGE_IMAGE_MODEL || 'google/imagen-4-fast';
-  // Per-image price for the usage display; Replicate bills per output, so
-  // this is configuration, not a measurement. Absent = unknown, shown as such.
+  // Per-image price for the usage rows and the display; Replicate bills per
+  // output, so this is configuration, not a measurement. Absent = unknown:
+  // the row is written unpriced and the month's ceiling is the image count.
   const parsedCost = Number(env.CONTENTFORGE_IMAGE_COST_USD);
   const costPerImageUsd = Number.isFinite(parsedCost) && parsedCost >= 0 ? parsedCost : null;
+  const monthlyBudgetUsd = positiveNumber(
+    env.CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD,
+    IMAGE_BUDGET_DEFAULT_USD
+  );
+  const monthlyMaxImages = positiveNumber(env.CONTENTFORGE_IMAGE_MONTHLY_MAX, IMAGE_COUNT_DEFAULT);
 
-  async function generate(prompt, { aspectRatio } = {}) {
+  const bookkeeping = { store, now, uuid, model, costPerImageUsd, monthlyBudgetUsd, monthlyMaxImages };
+
+  async function generate(prompt, { aspectRatio, source } = {}) {
     if (!apiKey) throw new Error('REPLICATE_API_KEY is not configured');
+    await assertImageBudget(bookkeeping);
     const input = {
       prompt,
       aspect_ratio: aspectRatio || '16:9',
@@ -342,7 +431,9 @@ export function createReplicateClient({
       authorization: headers.Authorization,
       sleep,
     });
-    return predictionImageUrl(settled);
+    const imageUrl = predictionImageUrl(settled);
+    await recordImageUsage(bookkeeping, source);
+    return imageUrl;
   }
 
   return {
@@ -350,6 +441,7 @@ export function createReplicateClient({
     provider: IMAGE_PROVIDER,
     model,
     costPerImageUsd,
+    monthlyBudgetUsd,
     generate,
   };
 }
@@ -393,7 +485,10 @@ export async function generateCoversForContent(
   const stamp = now().toISOString();
   for (const target of targets) {
     const slotPrompt = `${prompt}\n\nImage slot: ${target}. Keep composition distinct while preserving style continuity.`;
-    const imageUrl = await replicate.generate(slotPrompt, { aspectRatio });
+    const imageUrl = await replicate.generate(slotPrompt, {
+      aspectRatio,
+      source: USAGE_SOURCES.imageCover,
+    });
     const fetched = await fetchImage(imageUrl);
     // A generation that came back as something other than an image is a failed
     // generation, so it fails the slot rather than being skipped (#415): the

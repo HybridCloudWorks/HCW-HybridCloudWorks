@@ -8,6 +8,7 @@
  * carries.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { createReplicateClient } from './ai-cover.js';
 import {
   aiCoverBlobPath,
   compactStamp,
@@ -203,7 +204,10 @@ describe('createAiCoverGenerator with a library set', () => {
     const result = await gen.run('c1', 'ev1');
     expect(result).toMatchObject({ ran: true, promptSource: 'library' });
     expect(replicate.generate.mock.calls[0][0]).toMatch(/Chibi engineers[\s\S]*Image slot: hero/);
-    expect(replicate.generate.mock.calls[0][1]).toEqual({ aspectRatio: '1:1' });
+    expect(replicate.generate.mock.calls[0][1]).toEqual({
+      aspectRatio: '1:1',
+      source: 'images:cover',
+    });
     expect(storage.uploadBlob.mock.calls[0][1]).toBe('c1-ai-hero-20261003093015.png');
 
     const row = store.data.generated_content_images.get('g1');
@@ -225,5 +229,144 @@ describe('createAiCoverGenerator with a library set', () => {
       altCoverImagePromptSource: 'library',
       altCoverImage: '/api/public/media/covers/c1-ai-hero-20261003093015.png',
     });
+  });
+});
+
+describe('createReplicateClient: usage rows and the monthly budget (2026-10-05)', () => {
+  const settled = { id: 'p1', status: 'succeeded', output: 'https://img.example/x.png' };
+  const fetchOk = () => vi.fn(async () => ({ ok: true, status: 200, json: async () => settled }));
+  const noSleep = async () => {};
+  function usageStore(rows = []) {
+    const written = [];
+    return {
+      written,
+      queryDocs: vi.fn(async () => rows),
+      upsertDoc: vi.fn(async (container, doc) => {
+        written.push({ container, doc });
+        return doc;
+      }),
+    };
+  }
+  const env = { REPLICATE_API_KEY: 'r8_test', CONTENTFORGE_IMAGE_COST_USD: '0.02' };
+
+  it('records one usage row per image, priced per image, with the source the caller names', async () => {
+    const store = usageStore([]);
+    const client = createReplicateClient({
+      env,
+      fetch: fetchOk(),
+      sleep: noSleep,
+      store,
+      now,
+      uuid: () => 'row-1',
+    });
+    const url = await client.generate('a cover', { source: 'images:cover' });
+    expect(url).toBe('https://img.example/x.png');
+    expect(store.written).toHaveLength(1);
+    expect(store.written[0].container).toBe('ai_usage');
+    expect(store.written[0].doc).toMatchObject({
+      id: 'row-1',
+      provider: 'replicate',
+      model: 'google/imagen-4-fast',
+      estimatedCostUsd: 0.02,
+      promptTokens: 0,
+      completionTokens: 0,
+      source: 'images:cover',
+      timestamp: NOW.toISOString(),
+    });
+    expect(store.written[0].doc).not.toHaveProperty('unpriced');
+  });
+
+  it('writes an unpriced row when no per-image price is configured, under the manual source by default', async () => {
+    const store = usageStore([]);
+    const client = createReplicateClient({
+      env: { REPLICATE_API_KEY: 'r8_test' },
+      fetch: fetchOk(),
+      sleep: noSleep,
+      store,
+      now,
+    });
+    await client.generate('x');
+    expect(store.written[0].doc).toMatchObject({
+      estimatedCostUsd: 0,
+      unpriced: true,
+      source: 'images:manual',
+    });
+  });
+
+  it('refuses once the month has reached the budget, before any call to Replicate', async () => {
+    const store = usageStore(Array.from({ length: 500 }, () => ({ estimatedCostUsd: 0.02 })));
+    const fetchImpl = fetchOk();
+    const client = createReplicateClient({ env, fetch: fetchImpl, sleep: noSleep, store, now });
+    await expect(client.generate('x')).rejects.toMatchObject({
+      code: 'IMAGE_BUDGET_EXHAUSTED',
+      status: 429,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(store.queryDocs.mock.calls[0][2]).toEqual([
+      { name: '@provider', value: 'replicate' },
+      { name: '@since', value: '2026-10-01T00:00:00.000Z' },
+    ]);
+    expect(client.monthlyBudgetUsd).toBe(10);
+  });
+
+  it('counts images as well as dollars, so an unpriced month still has a ceiling', async () => {
+    // 199 made this month: the 200th is the last allowed, so the 201st is refused.
+    const store = usageStore(Array.from({ length: 200 }, () => ({ estimatedCostUsd: 0 })));
+    const client = createReplicateClient({
+      env: { REPLICATE_API_KEY: 'r8_test' },
+      fetch: fetchOk(),
+      sleep: noSleep,
+      store,
+      now,
+    });
+    await expect(client.generate('x')).rejects.toMatchObject({ code: 'IMAGE_BUDGET_EXHAUSTED' });
+  });
+
+  it('honours the two settings', async () => {
+    const store = usageStore(Array.from({ length: 3 }, () => ({ estimatedCostUsd: 0.02 })));
+    const client = createReplicateClient({
+      env: { ...env, CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD: '0.05' },
+      fetch: fetchOk(),
+      sleep: noSleep,
+      store,
+      now,
+    });
+    await expect(client.generate('x')).rejects.toMatchObject({ code: 'IMAGE_BUDGET_EXHAUSTED' });
+  });
+
+  it('fails closed: a month that cannot be read refuses with 503 before any call to Replicate', async () => {
+    const store = usageStore([]);
+    store.queryDocs = vi.fn(async () => {
+      throw new Error('cosmos down');
+    });
+    const fetchImpl = fetchOk();
+    const client = createReplicateClient({ env, fetch: fetchImpl, sleep: noSleep, store, now });
+    await expect(client.generate('x')).rejects.toMatchObject({
+      code: 'IMAGE_BUDGET_UNKNOWN',
+      status: 503,
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('counts the image it is about to make: $9.99 used does not permit a $0.02 image, $9.98 does', async () => {
+    const at = (total) => usageStore([{ estimatedCostUsd: total }]);
+    const refused = createReplicateClient({ env, fetch: fetchOk(), sleep: noSleep, store: at(9.99), now });
+    await expect(refused.generate('x')).rejects.toMatchObject({ code: 'IMAGE_BUDGET_EXHAUSTED' });
+    const allowed = createReplicateClient({ env, fetch: fetchOk(), sleep: noSleep, store: at(9.98), now });
+    await expect(allowed.generate('x')).resolves.toBe('https://img.example/x.png');
+  });
+
+  it('a failed row write still returns the image: the record is best effort, the guard is not', async () => {
+    const store = usageStore([]);
+    store.upsertDoc = vi.fn(async () => {
+      throw new Error('cosmos down');
+    });
+    const client = createReplicateClient({ env, fetch: fetchOk(), sleep: noSleep, store, now });
+    await expect(client.generate('x')).resolves.toBe('https://img.example/x.png');
+  });
+
+  it('with no store, generates and records nothing', async () => {
+    const client = createReplicateClient({ env, fetch: fetchOk(), sleep: noSleep, now });
+    await expect(client.generate('x')).resolves.toBe('https://img.example/x.png');
   });
 });

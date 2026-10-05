@@ -464,9 +464,21 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # reached with the app's identity (foundry.tf). Its presence is what makes
     # the `foundry` provider available to the router, the way a key does for
     # the others.
-    "FOUNDRY_ENDPOINT"   = "https://${azurerm_cognitive_account.foundry.custom_subdomain_name}.openai.azure.com"
-    "PERPLEXITY_API_KEY" = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
-    "REPLICATE_API_KEY"  = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/REPLICATE-API-KEY)"
+    "FOUNDRY_ENDPOINT" = "https://${azurerm_cognitive_account.foundry.custom_subdomain_name}.openai.azure.com"
+
+    # Replicate image spend (2026-10-05). Replicate bills on its own account,
+    # where no Azure budget sees it, so these two are what make it visible
+    # and bounded: the per-image price every usage row carries
+    # (google/imagen-4-fast was $0.02 per output image on replicate.com that
+    # day; change it with the model) and the monthly budget the generators
+    # refuse to exceed, in dollars of priced rows. CONTENTFORGE_IMAGE_MONTHLY_MAX
+    # (default 200 images) is the ceiling that holds even when the price is
+    # unset. There is NO Replicate-side spend limit: the owner declined one on
+    # 2026-10-05 (the balance there is small), so this guard is the only stop.
+    "CONTENTFORGE_IMAGE_COST_USD"           = "0.02"
+    "CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD" = "10"
+    "PERPLEXITY_API_KEY"                    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
+    "REPLICATE_API_KEY"                     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/REPLICATE-API-KEY)"
 
     # Listen & Learn audio.
     #

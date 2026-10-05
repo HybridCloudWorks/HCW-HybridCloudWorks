@@ -4,6 +4,7 @@
  * manual-images.js).
  */
 import { generatedImageRecordFields, PROVIDER_THEMES } from '../triggers/ai-cover.js';
+import { USAGE_SOURCES } from '../ai/usage.js';
 import {
   applyKeywordMatrix,
   keywordMatrixLines,
@@ -94,6 +95,7 @@ async function generatePreviewSlot(ctx, slot, run) {
   });
   const generated = await replicate.generate(prompt, {
     aspectRatio: set?.aspectRatio || undefined,
+    source: USAGE_SOURCES.imageManual,
   });
   const fetched = await fetchImage(generated);
   if (fetched.refused) throw new Error(`Generated ${slot} image refused: ${fetched.reason}`);

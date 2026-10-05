@@ -4,6 +4,7 @@
  * (PR #841 split of manual-images.js).
  */
 import { generatedImageRecordFields, PROVIDER_THEMES } from '../triggers/ai-cover.js';
+import { USAGE_SOURCES } from '../ai/usage.js';
 import {
   applyKeywordMatrix,
   keywordMatrixLines,
@@ -97,6 +98,7 @@ export async function generateCuratedArticleImage(ctx, request, context) {
     const { set, prompt: promptDoc } = await readNamedSet(store, body.promptSet, body.promptName);
     const generated = await replicate.generate(prompt, {
       aspectRatio: set?.aspectRatio || undefined,
+      source: USAGE_SOURCES.imageManual,
     });
     const fetched = await fetchImage(generated);
     // Not an image: fail the request rather than store it (#415). The outer

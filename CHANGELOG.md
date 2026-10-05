@@ -19,6 +19,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Replicate image spend is recorded and bounded (owner request
+  2026-10-05).** Replicate bills on its own account, where no Azure budget
+  sees it, and until now a generated image carried a per-image price for
+  the editor's caption and nothing else. Every image the change feed or
+  the Images pages generate now writes an `ai_usage` row (sources
+  `images:cover` and `images:manual`) priced at
+  `CONTENTFORGE_IMAGE_COST_USD`, which Terraform sets to `0.02` (the
+  `google/imagen-4-fast` price on replicate.com that day), so Usage & Cost
+  shows Replicate beside the token providers. Before every generation the
+  client sums the month's rows and refuses with `IMAGE_BUDGET_EXHAUSTED`
+  (429) at `CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD` (Terraform: `10`) or at
+  `CONTENTFORGE_IMAGE_MONTHLY_MAX` images (200), counting the image it is
+  about to make, so an unpriced month still has a ceiling. The guard fails
+  closed: a month that cannot be read refuses with 503, because **no
+  account-level stop is configured** (the owner declined a Replicate-side
+  spend limit on 2026-10-05; the application guard is the only stop).
+  Concurrent generations can overshoot by their number times the per-image
+  price, a few cents, which is accepted and documented. The manual image
+  routes answer the guard's 429 or 503 with its code rather than a generic
+  500. `ai-cover.test.js` pins the row, the unpriced row, both ceilings,
+  the pending-image rule and the fail-closed rule; `manual-images.test.js`
+  pins the route's 429.
+
 - **Microsoft Foundry as a paid AI provider (#849, owner decision
   2026-10-04).** Of a budget of about USD 75 a month, the first call was
   Foundry with the cheapest text models: gpt-5-nano ($0.05 in / $0.40 out
