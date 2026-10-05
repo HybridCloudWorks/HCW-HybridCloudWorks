@@ -19,6 +19,84 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **AI Engine: the Priority list and the Tasks tab (ADR 0034 slice 4,
+  #859).** The three overlapping controls the ADR's context describes are
+  gone from the page and one list and one table stand in their place, both
+  reading and writing the version 2 selection document (slice 3). **AI
+  Services** gains the Priority list above the cards: the providers a call
+  may reach, in `global.priority` order, P1 badged as the default, each row
+  with a model dropdown fed by the catalogue ("Provider default" or a
+  selectable model) and a one-line "will use" for text and vision, moved
+  with keyboard-reachable Up and Down; providers that are switched off, hold
+  no key or are not named yet are listed below with the reason. **Tasks**
+  (the Routing tab renamed; its `?tab=routing` address and `tasks` both
+  open it) is one row per task from the registry: label, description,
+  modality, a public badge, the mode as radios — Recommended with the
+  registry's reason and `asOf`, Global (P1), Custom — the effective model
+  ("gpt-5-mini via Foundry", or the provider default with the model it was
+  judged on) with the first turned-away candidate's sentence under it,
+  badges for a recommendation that did not lead, a custom chain that fell
+  through, an unpriced model or nothing eligible, an exclude control per
+  provider, and for Custom a chain editor of up to four provider → model
+  rows whose model dropdown is filtered by the task's `needs` through the
+  catalogue's capabilities, with a "then the Priority list" switch. A row
+  is a draft until Save; every save PUTs the whole document with the
+  `updatedAt` it read, a 409 reloads and says "changed elsewhere" rather
+  than overwriting, and a document the API refuses ("this task would have
+  no model") is said on the row with the API's sentence. **The effective
+  model is the router's own answer, never a copy of the resolver on the
+  page**: `GET cms/ai-routing/effective` runs `selectChain` for every task
+  over the configuration the router reads (`router.js
+  resolveEffectiveSelection`: the same loader as `chainDetails`, cache
+  dropped first) and answers per task `{ mode, chain, rejected, flags }`
+  beside the registry entry and the document's, per Priority row what a
+  null model resolves to (`defaults` per purpose from `DEFAULT_MODEL_TABLE`
+  with environment overrides, the modality recommendation it is judged on),
+  and `availability`; `effective-selection.contract.test.js` holds the
+  route's answer for every task equal to `selectChain`'s on the same
+  documents under three document sets and two key sets. **A per-task Test**,
+  `POST cms/ai-routing/test/{task}`, walks the task's effective chain with
+  the card Test's prompt and caps (`proxy.js testTaskCandidate`: 16 tokens,
+  45 s, usage source `ai-engine:task-test`, nothing written onto the cards)
+  until a candidate answers and reports who did, how fast, and why each one
+  above it did not; the chain is the resolver's, so the public explain route
+  is never tested against the trial tier (`ai-tasks.test.js` pins it with
+  the real router over a document that puts the trial tier first). **A
+  Model catalogue drawer** opens from both tabs: every provider's models
+  with capabilities, price or "unpriced", status, first and last seen, Hide
+  and Show, each provider's refresh age with "Refresh now", and a banner
+  naming retired models the Priority list or a custom chain still names,
+  read from the resolver's rejections. **A `null` model keeps meaning the
+  provider's default per purpose** (ADR 0034, amendment of 2026-10-05 under
+  "Consequences and accepted risks": §2's modality reading would have moved
+  every drafting task to nano against the owner's 2026-10-04 decision; the
+  Tasks tab's Recommended mode is how a task gets the registry's
+  recommendation). **Removed:** the per-provider placement selects under
+  "Where AI is used" (the switches stay) and the API's placement field
+  (`PUT cms/ai-features` takes only `{ features }`; a stored `placement`
+  stays on the document as the migration's input until the first v2 save),
+  the card's model pin (`setProviderModel`) and the order-of-preference card
+  (`setProviderOrder`; the cards now follow the Priority list), the v1
+  Routing tab (`RoutingTab.jsx`, `RouteEditor.jsx`, `routingModel.js`,
+  `useRoutingTable.js`, `setAiRoute`, `setAiPlacement`), and the v1
+  `{ routes }` body on `PUT cms/ai-routing` with the `routes` and
+  `maxFallbacks` fields of its GET, which nothing sends or reads any more.
+  `features-catalogue.js`'s placement functions and `routing-table.js` stay,
+  marked deprecated: `migrate-selection.js` imports `placementFor`,
+  `PROVIDER_PLACEMENT_DEFAULTS` and `normalizeRouting` to read a stored v1
+  document until its first v2 save. Pinned by `TasksTab.test.jsx`,
+  `PriorityList.test.jsx`, `selectionModel.test.js`,
+  `AIEnginePage.shell.test.jsx` (the five tabs with Tasks, the Priority list
+  from the document, the drawer), `AIEnginePage.test.jsx` (the switches
+  without a placement), `tabs.test.js`, `aiEngine.test.js` (the new usage
+  source has a label), `admin-integrations.test.js` (the placement body
+  refused, the v1 routes body refused, the v2 PUT and 409 unchanged),
+  `ai-tasks.test.js`, `proxy.test.js`, the route inventory and the API
+  contract (`.azure/api-surface.json`), with `public-copy.test.js` and
+  `education-a11y.test.js` green beside them; the page names a provider
+  only through the card's name or the registry, never in a sentence of its
+  own. No app setting or Terraform run: the first save from either tab
+  writes the v2 document, and the deploy carries the routes.
 - **Docker article series, part 3: "Publishing to Docker Hub from GitHub
   Actions without a token" (#787).** `docs/content/blog-docker-03-docker-hub-oidc.md`,
   a how-to taken from the live setup (#790, the `publish-dockerhub` job and

@@ -203,7 +203,8 @@ import {
 // that document by the loader (migrate-selection.js).
 import { UNDECLARED_TASK, selectChain } from './select.js';
 import { defaultSelection } from './migrate-selection.js';
-import { taskFor } from './tasks.js';
+import { AI_TASKS, TASK_NAMES, taskFor } from './tasks.js';
+import { recommendedModelFor } from './provider-recommendations.js';
 import { featureSource, recordAiUsage } from './usage.js';
 import { COST_TABLE, DEFAULT_MODEL_TABLE } from './model-tables.js';
 // Source grounding (#433): the pure half — source checks, prompt, request
@@ -798,6 +799,7 @@ export function createAiRouter({
     callProvider: (params) => callNamedProvider(ctx, params),
     getCostEstimate,
     invalidateConfig: ctx.config.invalidate,
+    resolveEffectiveSelection: () => effectiveSelection(ctx),
   };
 }
 
@@ -1072,6 +1074,77 @@ async function chainDetails(ctx, feature = null) {
     rejected: selected.rejected,
     flags: selected.flags,
     pinned,
+  };
+}
+
+/** The purposes `modelFor` serves, in the order the page lists them. */
+const PURPOSES = Object.freeze(['draft', 'analysis', 'multimodal', 'general']);
+
+/**
+ * The resolver's answer for every task, over the configuration the router
+ * reads (ADR 0034 §4, slice 4, #859): what the Tasks tab shows as each
+ * task's effective model, so the page can never disagree with production.
+ * The browser cannot import the resolver, so this runs it here, on the SAME
+ * loader `chainDetails` uses, with the cache dropped first — a save that
+ * landed a moment ago is what the answer reflects, not the 60 s cache.
+ *
+ * Per task: the registry entry (label, modality, needs, public, recommended),
+ * the document's entry, and the resolver's `{ mode, chain, rejected, flags }`
+ * — the feature switch is NOT applied, because the tab shows what a call
+ * WOULD get, and a switched-off task still has an answer. Per Priority row:
+ * what a null model resolves to — the provider's default per purpose
+ * (`modelFor`, environment overrides included) and the modality
+ * recommendation a null step is judged on (select.js header, NULL MODEL).
+ *
+ * @returns {Promise<{ tasks: Record<string, object>, priority: Array<object>,
+ *   availability: { keyed: string[], enabled: string[], disabled: string[] },
+ *   updatedAt: string|null }>}
+ */
+async function effectiveSelection(ctx) {
+  ctx.config.invalidate();
+  const { providers: docs, selection: loaded, catalog } = await ctx.config.load();
+  const selection = loaded || defaultSelection();
+  const keyed = keyedProviders(ctx);
+  const { order: enabled, disabled } = resolveProviderOrder(docs, keyed);
+  const availability = { keyed, enabled };
+
+  const tasks = {};
+  for (const task of TASK_NAMES) {
+    const def = AI_TASKS[task];
+    const { mode, chain, rejected, flags } = selectChain({ task, selection, catalog, availability });
+    tasks[task] = {
+      label: def.label,
+      description: def.description,
+      route: def.route,
+      modality: def.modality,
+      needs: [...def.needs],
+      public: def.public,
+      recommended: def.recommended,
+      entry: selection.tasks?.[task] || { mode: 'global' },
+      mode,
+      chain,
+      rejected,
+      flags,
+    };
+  }
+
+  const priority = (selection.global?.priority || []).map(({ provider, model }) => ({
+    provider,
+    model,
+    keyed: keyed.includes(provider),
+    enabled: enabled.includes(provider),
+    defaults: Object.fromEntries(PURPOSES.map((p) => [p, modelFor(ctx, provider, p)])),
+    modality: {
+      text: recommendedModelFor(provider, 'text')?.model || null,
+      vision: recommendedModelFor(provider, 'vision')?.model || null,
+    },
+  }));
+
+  return {
+    tasks,
+    priority,
+    availability: { keyed, enabled, disabled },
+    updatedAt: selection.updatedAt ?? null,
   };
 }
 
@@ -1763,4 +1836,5 @@ export const {
   generateGroundedJsonResponse,
   callProvider,
   invalidateConfig,
+  resolveEffectiveSelection,
 } = defaultRouter;

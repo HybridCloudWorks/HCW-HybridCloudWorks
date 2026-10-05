@@ -9,10 +9,14 @@
  * no longer calls `applyFeaturePlacement`; the selection document carries
  * what a placement said (migrate-selection.js: `first` → a custom chain,
  * `off` → `exclude`), and its locks are the resolver's policy locks
- * (select.js). `placementFor` and `PROVIDER_PLACEMENT_DEFAULTS` stay as the
- * migration's input and as the default document's source until slice 4
- * (#859) removes the "Where AI is used" placement controls; the feature
- * switches (`isFeatureEnabled`, AI_FEATURES) are not deprecated.
+ * (select.js). Slice 4 (#859) removed the "Where AI is used" placement
+ * controls and the API's placement field; `placementFor` and
+ * `PROVIDER_PLACEMENT_DEFAULTS` stay because migrate-selection.js imports
+ * them — a stored v1 document and its placements are read through them
+ * until the first v2 save, and `defaultSelection()` is built from the
+ * defaults here. `applyFeaturePlacement` is called by nothing but
+ * ai-config.test.js and the "before" half of select.contract.test.js. The
+ * feature switches (`isFeatureEnabled`, AI_FEATURES) are not deprecated.
  */
 
 import { AI_TASKS } from './tasks.js';

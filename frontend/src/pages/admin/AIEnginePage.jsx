@@ -2,18 +2,23 @@
  * AI Engine — Admin Page  (/admin/ai-engine)
  *
  * Five tabs (components/admin/ai-engine/tabs.js), selected by `?tab=`:
- *   1. AI Services   — order of preference, feature switches, provider cards
- *                      with status, enable toggle, model pin (or Auto), Test
- *   2. Routing       — which provider and model serve each task, with
- *                      fallbacks (ADR 0033 §4); a task with no route follows
- *                      the order of preference
+ *   1. AI Services   — the Priority list (ADR 0034 §4), feature switches,
+ *                      provider cards with status, enable toggle, the
+ *                      catalogue's model list, Test
+ *   2. Tasks         — one row per AI task: its mode (Recommended / Global /
+ *                      Custom), the effective model the router will use,
+ *                      and a per-task Test (ADR 0034 §4)
  *   3. MCP Servers   — server cards with tool browser, Sync, Add Server form
  *   4. Playground    — one provider or MCP tool, a prompt, the answer and cost
  *   5. Usage         — every recorded call, by provider and by feature
  *
+ * The model catalogue drawer (CatalogDrawer) opens from the first two tabs.
  * The "Site Services" tab that sat between them until ADR 0033 was a
  * placeholder: local state over a stale provider list that saved nothing.
- * Its address lands on Routing, which answers the question it posed.
+ * Its address lands on Tasks, which answers the question it posed. The
+ * per-feature placement selects and the cards' model pin left with ADR 0034
+ * slice 4 (#859): the Priority list's per-row model and the Tasks tab
+ * replaced them, and the selection document is what the router reads.
  */
 
 import React, { useCallback, useEffect, useMemo, useState, lazy, Suspense } from 'react';
@@ -48,8 +53,6 @@ import {
   Info,
   DollarSign,
   BookOpen,
-  ArrowUp,
-  ArrowDown,
   ToggleLeft,
 } from 'lucide-react';
 import {
@@ -62,19 +65,13 @@ import { catalogEntries, describeRefresh, withCatalogModels } from '@/lib/aiEngi
 import HubTabs from '@/components/admin/HubTabs';
 import PageHeader from '@/components/admin/shared/PageHeader';
 import EmptyState from '@/components/admin/shared/EmptyState';
-import RoutingTab from '@/components/admin/ai-engine/RoutingTab';
+import TasksTab from '@/components/admin/ai-engine/TasksTab';
+import PriorityList from '@/components/admin/ai-engine/PriorityList';
+import CatalogDrawer from '@/components/admin/ai-engine/CatalogDrawer';
+import useSelection from '@/components/admin/ai-engine/useSelection';
 import { TABS, resolveTab } from '@/components/admin/ai-engine/tabs';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * The model select's "no pin" value. Radix Select cannot carry an empty
- * string as an item, and a provider whose `defaultModel` is unset (NVIDIA by
- * default) is the Auto state: the router picks a model per purpose, or per
- * task when Routing names one (ADR 0033). Until this there was no way back
- * to Auto once a model had been picked.
- */
-export const AUTO_MODEL = '__auto__';
 
 function StatusBadge({ status }) {
   const map = {
@@ -242,56 +239,7 @@ function ModelList({ provider, entry, onHideModel }) {
   );
 }
 
-/**
- * The card's pin: one model for every purpose, or Auto. The list is the
- * catalogue's (#857), merged onto the card by the page. A pin the catalogue
- * no longer lists (hidden, retired, or never listed) stays selectable so it
- * can be seen and cleared, and is said to be so.
- */
-function ModelPin({ provider, onModelChange }) {
-  const models = Array.isArray(provider.models) ? provider.models : [];
-  const unlistedPin = Boolean(provider.defaultModel) && !models.includes(provider.defaultModel);
-  if (models.length === 0 && !unlistedPin) return null;
-  return (
-    <div className="mt-2">
-      <Select
-        value={provider.defaultModel || AUTO_MODEL}
-        onValueChange={(val) => onModelChange(provider.id, val === AUTO_MODEL ? null : val)}
-      >
-        <SelectTrigger
-          className="h-7 text-xs w-full max-w-xs"
-          aria-label={`Model for ${provider.name}`}
-        >
-          <SelectValue placeholder="Select model" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={AUTO_MODEL} className="text-xs">
-            Auto (per task)
-          </SelectItem>
-          {models.map((m) => (
-            <SelectItem key={m} value={m} className="text-xs">
-              {m}
-            </SelectItem>
-          ))}
-          {unlistedPin && (
-            <SelectItem value={provider.defaultModel} className="text-xs">
-              {provider.defaultModel} (not listed)
-            </SelectItem>
-          )}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-export function ProviderCard({
-  provider,
-  catalogEntry = null,
-  onToggle,
-  onModelChange,
-  onTest,
-  onHideModel,
-}) {
+export function ProviderCard({ provider, catalogEntry = null, onToggle, onTest, onHideModel }) {
   const [testing, setTesting] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const navigate = useNavigate();
@@ -326,8 +274,7 @@ export function ProviderCard({
             </div>
             <p className="text-xs text-slate-500 mt-0.5">{provider.description}</p>
 
-            {/* Model selector: a pin for every purpose, or Auto */}
-            {!isUnavailable && <ModelPin provider={provider} onModelChange={onModelChange} />}
+            {/* The catalogue's list; the model a call uses is chosen on the Priority list and the Tasks tab */}
             {!isUnavailable && catalogEntry && (
               <ModelList provider={provider} entry={catalogEntry} onHideModel={onHideModel} />
             )}
@@ -415,28 +362,13 @@ export function ProviderCard({
  * The list of switches comes from the API, not from a constant here. A copy of
  * that list kept in the browser is exactly how this page came to advertise
  * providers the server had removed, and a switch that governs nothing is worse
- * than no switch at all — it reads as working.
+ * than no switch at all — it reads as working. Which provider serves a task
+ * when it is on is the Tasks tab's question (ADR 0034 §4), not this card's.
  */
-/** Display names for providers placed per feature (#701). */
-const PLACED_PROVIDER_LABELS = { nvidia: 'NVIDIA', foundry: 'Foundry' };
-
-/**
- * What each placement means, in the words the select shows. 'order' is the
- * default for content features since 2026-09-29, in the owner's words for
- * that decision: in order, as a backup.
- */
-const PLACEMENT_OPTIONS = [
-  { value: 'first', label: 'First — tried before every other provider' },
-  { value: 'order', label: 'In order — the backup' },
-  { value: 'off', label: 'Off — never for this feature' },
-];
-
 export function FeatureSwitches() {
   const { toast } = useToast();
   const [features, setFeatures] = useState(null);
   const [catalogue, setCatalogue] = useState({});
-  const [placement, setPlacement] = useState({});
-  const [placementDefaults, setPlacementDefaults] = useState({});
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
 
@@ -444,12 +376,10 @@ export function FeatureSwitches() {
     let cancelled = false;
     aiEngine
       .getAiFeatures()
-      .then(({ features: f, catalogue: c, placement: p, placementDefaults: d }) => {
+      .then(({ features: f, catalogue: c }) => {
         if (cancelled) return;
         setFeatures(f);
         setCatalogue(c);
-        setPlacement(p || {});
-        setPlacementDefaults(d || {});
       })
       .catch((err) => !cancelled && setError(err?.message || 'Could not load AI feature settings'));
     return () => {
@@ -477,27 +407,6 @@ export function FeatureSwitches() {
     }
   };
 
-  // Same optimistic-then-reconciled pattern as the switch. The API refuses a
-  // placement in a locked feature, so the select is never offered there.
-  const handlePlacement = async (provider, name, next) => {
-    const previous = placement[provider]?.[name];
-    setBusy(`${provider}:${name}`);
-    setPlacement((prev) => ({ ...prev, [provider]: { ...prev[provider], [name]: next } }));
-    try {
-      const saved = await aiEngine.setAiPlacement(provider, name, next);
-      setPlacement((prev) => ({ ...prev, ...saved }));
-    } catch (err) {
-      setPlacement((prev) => ({ ...prev, [provider]: { ...prev[provider], [name]: previous } }));
-      toast({
-        title: 'Could not save',
-        description: err?.message || 'The placement has been put back.',
-        variant: 'destructive',
-      });
-    } finally {
-      setBusy(null);
-    }
-  };
-
   if (error) {
     return (
       <Card>
@@ -506,7 +415,6 @@ export function FeatureSwitches() {
     );
   }
 
-  const placedProviders = Object.keys(placementDefaults);
   const names = Object.keys(catalogue);
   const offCount = features ? names.filter((n) => features[n] === false).length : 0;
 
@@ -547,40 +455,6 @@ export function FeatureSwitches() {
                 <div className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">
                   {catalogue[name]?.route}
                 </div>
-                {placedProviders.map((provider) => {
-                  const label = PLACED_PROVIDER_LABELS[provider] || provider;
-                  // 'off' as the code-level default is a lock: configuration
-                  // can disable, never enable. Say so instead of offering a
-                  // control the API would refuse.
-                  if (placementDefaults[provider]?.[name] === 'off') {
-                    return (
-                      <div key={provider} className="text-xs text-slate-400 mt-1">
-                        {label}: not used here
-                      </div>
-                    );
-                  }
-                  const id = `placement-${provider}-${name}`;
-                  return (
-                    <div key={provider} className="flex items-center gap-2 mt-1">
-                      <label htmlFor={id} className="text-xs text-slate-500">
-                        {label}
-                      </label>
-                      <select
-                        id={id}
-                        className="h-7 rounded-md border border-slate-200 dark:border-slate-700 bg-transparent px-2 text-xs"
-                        value={placement[provider]?.[name] || placementDefaults[provider]?.[name]}
-                        disabled={busy === `${provider}:${name}`}
-                        onChange={(e) => handlePlacement(provider, name, e.target.value)}
-                      >
-                        {PLACEMENT_OPTIONS.map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  );
-                })}
               </div>
               <Switch
                 checked={features[name] !== false}
@@ -614,10 +488,28 @@ export function describeRefreshSummary(summary) {
   return { text: parts.join(' · '), failed: failed.length > 0 };
 }
 
-function ServicesTab({ providers, catalog, onCatalogChanged }) {
+/**
+ * The provider cards in the Priority list's order (ADR 0034 §4), a provider
+ * the list does not name after every one it does, in the cards' own order.
+ */
+export function orderByPriority(providers, selection) {
+  const rank = new Map((selection?.global?.priority || []).map((s, i) => [s.provider, i]));
+  return [...providers].sort(
+    (a, b) =>
+      (rank.get(a.id) ?? 1000 + (a.order ?? 99)) - (rank.get(b.id) ?? 1000 + (b.order ?? 99))
+  );
+}
+
+function ServicesTab({
+  providers,
+  catalog,
+  onHideModel,
+  onRefreshCatalog,
+  refreshing,
+  onOpenCatalog,
+}) {
   const { toast } = useToast();
-  const [reordering, setReordering] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const { state, saving, reload, save } = useSelection();
 
   // Each write says so when it fails. Until ADR 0033 a rejected PATCH here
   // was an unhandled promise: the switch stayed where it was clicked while
@@ -628,16 +520,11 @@ function ServicesTab({ providers, catalog, onCatalogChanged }) {
   const handleToggle = async (id, enabled) => {
     try {
       await aiEngine.setEnabled('ai_providers', id, enabled);
+      // A switch decides who is in the Priority list; the resolver's answer
+      // is read again so the list and every card agree.
+      await reload();
     } catch (err) {
       failed('Could not change the provider')(err);
-    }
-  };
-
-  const handleModelChange = async (id, model) => {
-    try {
-      await aiEngine.setProviderModel(id, model);
-    } catch (err) {
-      failed('Could not save the model')(err);
     }
   };
 
@@ -654,67 +541,20 @@ function ServicesTab({ providers, catalog, onCatalogChanged }) {
     }
   };
 
-  // The catalogue (#857): a hide or a refresh lands on the API, then the
-  // page re-reads the document so every card shows what it holds.
-  const handleHideModel = async (id, model, hidden) => {
-    try {
-      await aiEngine.setModelHidden(id, model, hidden);
-      await onCatalogChanged?.();
-    } catch (err) {
-      failed(hidden ? 'Could not hide the model' : 'Could not show the model')(err);
-    }
-  };
+  // A refused save (400) is said here; a 409 is said and reloaded by the hook.
+  const handleSave = (next) =>
+    save(next).catch((err) => {
+      if (err?.status !== 409) failed('Could not save the Priority list')(err);
+      throw err;
+    });
 
-  const handleRefreshCatalog = async () => {
-    setRefreshing(true);
-    try {
-      const summary = await aiEngine.refreshModelCatalog();
-      const { text, failed: anyFailed } = describeRefreshSummary(summary);
-      toast({
-        title: anyFailed ? 'Model lists refreshed, with errors' : 'Model lists refreshed',
-        description: text,
-        ...(anyFailed ? { variant: 'destructive' } : {}),
-      });
-      await onCatalogChanged?.();
-    } catch (err) {
-      failed('Could not refresh the model lists')(err);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  // The API tries providers in this order and uses the first one that is both
-  // enabled and holds a key, so the sort here is the real running order.
-  const ordered = [...providers].sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
-
-  const move = async (index, delta) => {
-    const next = [...ordered];
-    const target = index + delta;
-    if (target < 0 || target >= next.length) return;
-    [next[index], next[target]] = [next[target], next[index]];
-    setReordering(true);
-    try {
-      await aiEngine.setProviderOrder(next.map((p) => p.id));
-    } catch (err) {
-      toast({
-        title: 'Could not save the new order',
-        description: err?.message || 'Nothing was changed.',
-        variant: 'destructive',
-      });
-    } finally {
-      setReordering(false);
-    }
-  };
-
+  const ordered = orderByPriority(providers, state.selection);
   const enabledCount = ordered.filter((p) => p.enabled && p.status !== 'unavailable').length;
   const connectedCount = ordered.filter((p) => p.status === 'connected').length;
-  // Which provider a request lands on right now. A key is required as well as
-  // the switch, so an enabled provider with no key is not the answer.
-  const active = ordered.find((p) => p.enabled && p.status !== 'unavailable');
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="font-semibold text-lg">AI Services</h2>
           <p className="text-sm text-slate-500 mt-0.5">
@@ -722,81 +562,38 @@ function ServicesTab({ providers, catalog, onCatalogChanged }) {
             to verify your API key
           </p>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          className="shrink-0"
-          onClick={handleRefreshCatalog}
-          disabled={refreshing}
-          title="List every provider's models now; the weekly check does this on Mondays"
-        >
-          {refreshing ? (
-            <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-          ) : (
-            <RefreshCw className="h-3.5 w-3.5 mr-1" />
-          )}
-          Refresh model lists
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" variant="outline" onClick={onOpenCatalog}>
+            Model catalogue
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onRefreshCatalog}
+            disabled={refreshing}
+            title="List every provider's models now; the weekly check does this on Mondays"
+          >
+            {refreshing ? (
+              <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5 mr-1" />
+            )}
+            Refresh model lists
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Order of preference</CardTitle>
-          <CardDescription>
-            {active ? (
-              <>
-                Requests go to <span className="font-medium">{active.name}</span> first. If it has
-                no API key, is switched off, or cannot serve the call, the next one down is used
-                instead.
-              </>
-            ) : (
-              'No provider is both enabled and holding an API key, so AI calls will fail.'
-            )}
-            {ordered.some((p) => p.id === 'nvidia') && (
-              <>
-                {' '}
-                NVIDIA is also placed per feature under “Where AI is used”: for content features it
-                is the backup unless you choose First there, and it is never used for the public
-                explain buttons. Once its timer is armed, a weekly check runs the Test on every
-                provider with a key and records the result on its card.
-              </>
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-1">
-          {ordered.map((p, index) => (
-            <div
-              key={p.id}
-              className="flex items-center gap-3 py-2 border-b last:border-b-0 border-slate-100 dark:border-slate-800"
-            >
-              <span className="w-5 text-sm text-slate-400 tabular-nums">{index + 1}</span>
-              <span className="text-lg leading-none">{p.icon}</span>
-              <span className="flex-1 text-sm font-medium truncate">{p.name}</span>
-              {!p.enabled && <span className="text-xs text-slate-400">off</span>}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                disabled={index === 0 || reordering}
-                onClick={() => move(index, -1)}
-                aria-label={`Move ${p.name} up`}
-              >
-                <ArrowUp className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                disabled={index === ordered.length - 1 || reordering}
-                onClick={() => move(index, 1)}
-                aria-label={`Move ${p.name} down`}
-              >
-                <ArrowDown className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      <PriorityList
+        providers={providers}
+        catalog={catalog}
+        selection={state.selection}
+        effective={state.effective}
+        status={state.status}
+        error={state.error}
+        saving={saving}
+        onSave={handleSave}
+        onRetry={reload}
+      />
 
       <FeatureSwitches />
 
@@ -807,9 +604,8 @@ function ServicesTab({ providers, catalog, onCatalogChanged }) {
             provider={p}
             catalogEntry={catalog?.providers?.[p.id] || null}
             onToggle={handleToggle}
-            onModelChange={handleModelChange}
             onTest={handleTest}
-            onHideModel={handleHideModel}
+            onHideModel={onHideModel}
           />
         ))}
       </div>
@@ -1252,7 +1048,7 @@ function PlaygroundTab({ providers, servers }) {
                         onValueChange={(nextProvider) => {
                           setProvider(nextProvider);
                           const next = providers.find((p) => p.id === nextProvider);
-                          setModel(next?.defaultModel || '');
+                          setModel(next?.models?.[0] || '');
                         }}
                       >
                         <SelectTrigger className="h-8 text-xs mt-1">
@@ -1453,9 +1249,9 @@ const UsageTab = lazy(() => import('@/pages/admin/AIEngineUsageTab'));
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 const HELP = [
-  'AI Services holds the order of preference: a call goes to the first enabled provider with a key, and falls through to the next when that one cannot serve. Each card can pin one model for every purpose, or stay on Auto. The model lists come from the providers themselves, refreshed by the weekly check or the Refresh model lists button; a model can be hidden from the selects per card.',
-  'Routing assigns a provider, a model and a fallback chain to one task (drafting, grading, captions, Telegram…). A task with no route follows the order of preference.',
-  'Where AI is used (on AI Services) switches a task off entirely; Routing decides who serves it when it is on.',
+  'AI Services holds the Priority list: a call goes to P1 first and falls through in order when a provider cannot serve. Each row names the model the list uses for that provider, or leaves it on the provider’s default. The model lists come from the providers themselves, refreshed by the weekly check or the Refresh model lists button, and the Model catalogue shows every model with its price and status; a model can be hidden from the dropdowns.',
+  'Tasks shows one row per AI task (drafting, grading, captions, the assistant…) with the model the router will use right now. Recommended takes the model the site recommends for the task, Global follows the Priority list, Custom names a chain of its own; a task can also exclude a provider. Test runs the task’s chain and says which candidate answered.',
+  'Where AI is used (on AI Services) switches a task off entirely; Tasks decides who serves it when it is on.',
   'MCP Servers are tool servers the Playground and the bots can call; keys stay in app settings named MCP_* and are never sent to the browser.',
   'Usage & Cost lists every recorded call. Since ADR 0033 every call through the router records one row, sourced to its task.',
 ];
@@ -1521,6 +1317,46 @@ export default function AIEnginePage() {
     [providers, catalog]
   );
 
+  // The catalogue's writes (#857) live here because two tabs and the drawer
+  // share them: a hide or a refresh lands on the API, then the page
+  // re-reads the document so every card and dropdown shows what it holds.
+  const { toast } = useToast();
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const handleHideModel = async (id, model, hidden) => {
+    try {
+      await aiEngine.setModelHidden(id, model, hidden);
+      await loadCatalog();
+    } catch (err) {
+      toast({
+        title: hidden ? 'Could not hide the model' : 'Could not show the model',
+        description: err?.message || 'Nothing was changed.',
+        variant: 'destructive',
+      });
+    }
+  };
+  const handleRefreshCatalog = async () => {
+    setRefreshing(true);
+    try {
+      const summary = await aiEngine.refreshModelCatalog();
+      const { text, failed: anyFailed } = describeRefreshSummary(summary);
+      toast({
+        title: anyFailed ? 'Model lists refreshed, with errors' : 'Model lists refreshed',
+        description: text,
+        ...(anyFailed ? { variant: 'destructive' } : {}),
+      });
+      await loadCatalog();
+    } catch (err) {
+      toast({
+        title: 'Could not refresh the model lists',
+        description: err?.message || 'Nothing was changed.',
+        variant: 'destructive',
+      });
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const setTab = (id) => {
     if (id === activeTab) return;
     setSearchParams({ tab: id });
@@ -1534,10 +1370,19 @@ export default function AIEnginePage() {
       <ServicesTab
         providers={providersWithModels}
         catalog={catalog}
-        onCatalogChanged={loadCatalog}
+        onHideModel={handleHideModel}
+        onRefreshCatalog={handleRefreshCatalog}
+        refreshing={refreshing}
+        onOpenCatalog={() => setCatalogOpen(true)}
       />
     ),
-    routing: () => <RoutingTab providers={providersWithModels} />,
+    routing: () => (
+      <TasksTab
+        providers={providersWithModels}
+        catalog={catalog}
+        onOpenCatalog={() => setCatalogOpen(true)}
+      />
+    ),
     mcp: () => <McpTab servers={servers} />,
     playground: () => <PlaygroundTab providers={providersWithModels} servers={servers} />,
     usage: () => (
@@ -1601,6 +1446,16 @@ export default function AIEnginePage() {
       >
         <div className="pt-4">{body}</div>
       </HubTabs>
+
+      <CatalogDrawer
+        open={catalogOpen}
+        onOpenChange={setCatalogOpen}
+        catalog={catalog}
+        providers={providers}
+        onHideModel={handleHideModel}
+        onRefresh={handleRefreshCatalog}
+        refreshing={refreshing}
+      />
     </div>
   );
 }

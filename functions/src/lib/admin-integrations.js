@@ -41,6 +41,7 @@ import {
 import { json, LIST_WINDOW, listAllHandler, validBody } from './http/admin-handler.js';
 import { createAiFeatureHandlers } from './admin-integrations/ai-features.js';
 import { createAiRoutingHandlers } from './admin-integrations/ai-routing.js';
+import { createAiTaskHandlers } from './admin-integrations/ai-tasks.js';
 import { createConfigCollectionHandlers } from './admin-integrations/config-collections.js';
 
 const dateValue = (v) => {
@@ -343,6 +344,10 @@ async function listUsage(ctx, request, context) {
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  * @param {() => void} [deps.onAiConfigChanged]
+ * @param {() => string[]} [deps.availableProviders]
+ * @param {() => Promise<object>} [deps.effectiveSelection]
+ * @param {{ callProvider: Function, getCostEstimate: Function }} [deps.ai]
+ * @param {() => number} [deps.clock]
  */
 export function createAdminIntegrationHandlers({
   guard,
@@ -358,6 +363,13 @@ export function createAdminIntegrationHandlers({
   // selection document's "would have no model" rule (ADR 0034 §6, #858).
   // Omitted, that one rule is not checked on save.
   availableProviders = null,
+  // The resolver's answer over the loaded configuration
+  // (router.resolveEffectiveSelection) and the router's call, for the Tasks
+  // tab's effective read and per-task Test (ADR 0034 slice 4, #859).
+  // Omitted, those two routes answer 503.
+  effectiveSelection = null,
+  ai = null,
+  clock = () => Date.now(),
 }) {
   const aiConfigChanged = () => {
     try {
@@ -366,7 +378,17 @@ export function createAdminIntegrationHandlers({
       // Invalidation is a convenience; the write already happened.
     }
   };
-  const ctx = { guard, store, now, uuid, aiConfigChanged, availableProviders };
+  const ctx = {
+    guard,
+    store,
+    now,
+    uuid,
+    clock,
+    aiConfigChanged,
+    availableProviders,
+    effectiveSelection,
+    ai,
+  };
 
   return {
     listRecordings: (request, context) => listRecordings(ctx, request, context),
@@ -382,6 +404,7 @@ export function createAdminIntegrationHandlers({
     putSettings: (request, context) => putSettings(ctx, request, context),
     ...createAiFeatureHandlers(ctx),
     ...createAiRoutingHandlers(ctx),
+    ...createAiTaskHandlers(ctx),
     listImages: (request, context) => listImages(ctx, request, context),
     getCuratedImage: (request, context) => getCuratedImage(ctx, request, context),
     ...createConfigCollectionHandlers(ctx),

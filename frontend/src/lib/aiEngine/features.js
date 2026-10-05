@@ -1,6 +1,12 @@
 /**
- * AI Engine — feature switches, per-feature placement and routing by task
- * (ADR 0033 §4). Imported through `@/lib/aiEngine`, which re-exports it.
+ * AI Engine — feature switches and the selection document (ADR 0034 §2 and
+ * §4). Imported through `@/lib/aiEngine`, which re-exports it.
+ *
+ * The per-feature placement (`setAiPlacement`) and the v1 route per task
+ * (`setAiRoute`) left with slice 4 (#859): the Priority list and the Tasks
+ * tab read and write one version 2 document, and the effective model per
+ * task is the router's own answer (`getEffectiveRouting`), never a copy of
+ * the resolver kept here.
  */
 import { getJSON, sendJSON } from '@/lib/api';
 
@@ -17,11 +23,6 @@ export async function getAiFeatures() {
   return {
     features: res.features || {},
     catalogue: res.catalogue || {},
-    // #701: { nvidia: { <feature>: 'first'|'order'|'off' } } as the router
-    // will apply it, and the code-level defaults — where a default is 'off'
-    // the feature is locked and the page shows it as such.
-    placement: res.placement || {},
-    placementDefaults: res.placementDefaults || {},
   };
 }
 
@@ -32,40 +33,57 @@ export async function setAiFeature(name, enabled) {
 }
 
 /**
- * Place a per-feature provider for one feature: 'first', 'order' or 'off'.
- * Returns the resolved placement map. The API refuses anything but 'off' for
- * a locked feature — configuration can disable, never enable.
- */
-export async function setAiPlacement(provider, feature, placement) {
-  const res = await sendJSON('cms/ai-features', 'PUT', {
-    placement: { [provider]: { [feature]: placement } },
-  });
-  return res.placement || {};
-}
-
-/**
- * Which provider and model serve each feature. `routes` holds only the
- * features that have a route; a feature absent from it follows the global
- * order ("Simple mode"). The catalogue and provider list come from the API,
- * never from a copy here.
+ * The selection document, version 2: `global.priority` (the Priority list)
+ * and `tasks` (each task's mode, chain and exclusions). `migrated` says the
+ * stored document is still the old shape and what came back was derived in
+ * memory; the first save stores version 2. The task catalogue and the
+ * provider list come from the API, never from a copy here.
  */
 export async function getAiRouting() {
   const res = await getJSON('cms/ai-routing');
   return {
-    routes: res.routes || {},
+    selection: res.selection || null,
+    migrated: Boolean(res.migrated),
     catalogue: res.catalogue || {},
     providers: res.providers || [],
-    maxFallbacks: res.maxFallbacks || 3,
     updatedAt: res.updatedAt || null,
   };
 }
 
 /**
- * Set one feature's route, or clear it with `null` so it follows the global
- * order again. Merges server-side; other features are untouched. Returns
- * every route as stored.
+ * Save the whole document. `updatedAt` must be the one read: the API answers
+ * 409 when the document changed underneath, and the thrown error carries
+ * `status` so the page can reload rather than overwrite (ADR 0034 §6). A
+ * refused document (400) throws with the API's own sentence, which the page
+ * shows inline. Returns the stored document.
  */
-export async function setAiRoute(feature, route) {
-  const res = await sendJSON('cms/ai-routing', 'PUT', { routes: { [feature]: route } });
-  return res.routes || {};
+export async function saveAiRouting(selection) {
+  const res = await sendJSON('cms/ai-routing', 'PUT', { ...selection, version: 2 });
+  return { selection: res.selection || null, updatedAt: res.updatedAt || null };
+}
+
+/**
+ * The resolver's answer for every task over the configuration the router
+ * reads: per task `{ mode, chain, rejected, flags }` beside the registry
+ * entry and the document's, per Priority row what a null model resolves to,
+ * and what holds a key and is switched on. The page renders this and never
+ * computes a chain of its own.
+ */
+export async function getEffectiveRouting() {
+  const res = await getJSON('cms/ai-routing/effective');
+  return {
+    tasks: res.tasks || {},
+    priority: res.priority || [],
+    availability: res.availability || { keyed: [], enabled: [], disabled: [] },
+    updatedAt: res.updatedAt || null,
+  };
+}
+
+/**
+ * Run one task's effective chain with the Test's limits until a candidate
+ * answers. Returns `{ ok, answeredBy, skipped, rejected, flags, error? }`;
+ * `ok: false` with every candidate in `skipped` when none did.
+ */
+export async function testAiTask(task) {
+  return sendJSON(`cms/ai-routing/test/${encodeURIComponent(task)}`, 'POST', {});
 }

@@ -20,7 +20,7 @@
  * This file is the one import path; the halves live beside it (PR #841):
  *   aiEngine/seed.js      the default documents and the first-load seed
  *   aiEngine/config.js    config routes, subscriptions, provider and server writes
- *   aiEngine/features.js  feature switches, placement and routing by task
+ *   aiEngine/features.js  feature switches and the selection document (ADR 0034)
  *   aiEngine/calls.js     the Azure Function calls (aiProxy, mcpProxy, tests)
  *   aiEngine/usage.js     usage records and totals
  */
@@ -41,17 +41,16 @@ import {
   setEnabled,
   setMcpOAuthToken,
   setModelHidden,
-  setProviderModel,
-  setProviderOrder,
   subscribeMcpServers,
   subscribeProviders,
 } from './aiEngine/config';
 import {
   getAiFeatures,
   getAiRouting,
+  getEffectiveRouting,
+  saveAiRouting,
   setAiFeature,
-  setAiPlacement,
-  setAiRoute,
+  testAiTask,
 } from './aiEngine/features';
 import { chat, mcpTool, syncMcpTools, testProvider } from './aiEngine/calls';
 import { aggregateByProvider, aggregateBySource, getUsageRecords } from './aiEngine/usage';
@@ -70,15 +69,14 @@ export {
   setEnabled,
   setMcpOAuthToken,
   setModelHidden,
-  setProviderModel,
-  setProviderOrder,
   subscribeMcpServers,
   subscribeProviders,
   getAiFeatures,
   getAiRouting,
+  getEffectiveRouting,
+  saveAiRouting,
   setAiFeature,
-  setAiPlacement,
-  setAiRoute,
+  testAiTask,
   chat,
   mcpTool,
   syncMcpTools,
@@ -91,7 +89,9 @@ export {
 // Named export bundle for convenience
 export const aiEngine = {
   getAiRouting,
-  setAiRoute,
+  getEffectiveRouting,
+  saveAiRouting,
+  testAiTask,
   chat,
   testProvider,
   syncMcpTools,
@@ -100,14 +100,11 @@ export const aiEngine = {
   subscribeProviders,
   subscribeMcpServers,
   setEnabled,
-  setProviderModel,
-  setProviderOrder,
   fetchModelCatalog,
   setModelHidden,
   refreshModelCatalog,
   getAiFeatures,
   setAiFeature,
-  setAiPlacement,
   setMcpOAuthToken,
   addMcpServer,
   removeMcpServer,

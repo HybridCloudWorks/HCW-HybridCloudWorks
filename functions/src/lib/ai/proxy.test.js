@@ -16,6 +16,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   createAiProxyHandlers,
   testProviderConnection,
+  testTaskCandidate,
   TEST_MAX_TOKENS,
   TEST_TIMEOUT_MS,
 } from './proxy.js';
@@ -333,5 +334,55 @@ describe('testProviderConnection — the Test with no HTTP, shared with the week
     ).rejects.toThrow(/Unknown test trigger: cron/);
     expect(d.ai.callProvider).not.toHaveBeenCalled();
     expect(d.store.patchDoc).not.toHaveBeenCalled();
+  });
+});
+
+describe('testTaskCandidate — the call half alone, for the Tasks tab’s per-task Test (#859)', () => {
+  const deps = (over = {}) => ({
+    store: makeStore(),
+    ai: okAi(),
+    now: fixed.now,
+    uuid: fixed.uuid,
+    clock: (() => {
+      let t = 0;
+      return () => (t += 300);
+    })(),
+    ...over,
+  });
+
+  it('sends the Test’s prompt and caps to the named model, records a task-test usage row, and writes nothing on the card', async () => {
+    const d = deps();
+    const outcome = await testTaskCandidate(d, { providerId: 'openai', model: 'gpt-5-mini' });
+    expect(outcome).toEqual({ ok: true, status: 'connected', latencyMs: 300, model: 'gpt-5-mini' });
+    expect(d.ai.callProvider).toHaveBeenCalledWith({
+      provider: 'openai',
+      model: 'gpt-5-mini',
+      prompt: expect.any(String),
+      maxTokens: TEST_MAX_TOKENS,
+      timeoutMs: TEST_TIMEOUT_MS,
+    });
+    expect(d.store.upsertDoc).toHaveBeenCalledWith(
+      'ai_usage',
+      expect.objectContaining({ provider: 'openai', model: 'gpt-5-mini', source: USAGE_SOURCES.aiTaskTest })
+    );
+    expect(d.store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('a refusal is the outcome, with the message and code, and still nothing on the card', async () => {
+    const ai = okAi();
+    ai.callProvider.mockRejectedValueOnce(Object.assign(new Error('model not found'), { code: 'AI_PROVIDER_ERROR' }));
+    const log = { error: vi.fn() };
+    const d = deps({ ai, log });
+    const outcome = await testTaskCandidate(d, { providerId: 'gemini', model: 'gemini-9' });
+    expect(outcome).toEqual({
+      ok: false,
+      status: 'error',
+      latencyMs: 300,
+      error: 'model not found',
+      code: 'AI_PROVIDER_ERROR',
+    });
+    expect(d.store.patchDoc).not.toHaveBeenCalled();
+    expect(d.store.upsertDoc).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledWith('testAiTask(gemini) failed:', expect.any(Error));
   });
 });

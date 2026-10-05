@@ -48,6 +48,9 @@ export const SOURCE_LABELS = {
   'podcast:sample': 'Podcast voice — live check',
   admin_test: 'AI Engine — Test',
   'ai-engine:probe': 'AI Engine — weekly check',
+  // The Tasks tab's per-task Test (ADR 0034 slice 4): the same one-word
+  // prompt, sent down a task's chain until a candidate answers.
+  'ai-engine:task-test': 'AI Engine — task Test',
   // Replicate image generation (2026-10-05): one row per output image, priced per image.
   'images:cover': 'Cover images (Replicate)',
   'images:manual': 'Images made on the Images pages (Replicate)',

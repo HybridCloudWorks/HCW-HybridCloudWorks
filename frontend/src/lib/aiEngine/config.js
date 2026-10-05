@@ -80,17 +80,6 @@ export async function setEnabled(colName, docId, enabled) {
   await notifyConfigSubscribers(route);
 }
 
-/**
- * Update the default model for a provider. `null` (or '') clears the pin:
- * the router then picks a model per purpose, or per task when a route names
- * one (ADR 0033). Until this there was no way back from a pinned model.
- */
-export async function setProviderModel(providerId, model) {
-  const defaultModel = typeof model === 'string' && model.trim() ? model.trim() : null;
-  await sendJSON(`cms/config/ai-providers/${providerId}`, 'PATCH', { defaultModel });
-  await notifyConfigSubscribers('ai-providers');
-}
-
 /** Add a custom MCP server. */
 export async function addMcpServer(data) {
   const id = crypto.randomUUID();
@@ -163,27 +152,4 @@ export async function setModelHidden(providerId, model, hidden) {
 export async function refreshModelCatalog() {
   const res = await sendJSON('cms/ai-model-catalog/refresh', 'POST', {});
   return res.summary || { providers: {} };
-}
-
-/**
- * Persist a new preference order.
- *
- * Rewrites `order` on every provider from its position in `orderedIds`, rather
- * than patching the two that moved. Contiguous 1..n values mean the API never
- * has to break a tie, and a tie is the one case where the active provider could
- * look non-deterministic between Function App instances.
- */
-export async function setProviderOrder(orderedIds) {
-  // Sequential, not parallel (ADR 0033): with Promise.all a failure on the
-  // third PATCH left the first two written and the list half-moved, and the
-  // page reported "nothing was changed". Written in order, a failure stops
-  // at the first unwritten row; the subscribers are then re-notified in the
-  // `finally` so the cards show what the API actually holds, success or not.
-  try {
-    for (const [index, id] of orderedIds.entries()) {
-      await sendJSON(`cms/config/ai-providers/${id}`, 'PATCH', { order: index + 1 });
-    }
-  } finally {
-    await notifyConfigSubscribers('ai-providers');
-  }
 }

@@ -26,8 +26,25 @@ export function catalogEntryFor(catalog, provider) {
   return isObject(entry) ? entry : null;
 }
 
-/** A model a text call can be sent to: the `text` capability from the enrichment table. */
-const servesText = (m) => Array.isArray(m?.capabilities) && m.capabilities.includes('text');
+/** A model carrying every capability in `needs` (the enrichment table's list). */
+const carries = (m, needs) =>
+  Array.isArray(m?.capabilities) && needs.every((need) => m.capabilities.includes(need));
+
+/**
+ * The ids a select may offer for a task's `needs` (ADR 0034 §4): live or
+ * unknown, carrying every capability named, not hidden, live first then by
+ * id. The Tasks tab's chain editor filters by the task's `needs`; the
+ * Priority list's model dropdown and the cards ask for `['text']`.
+ */
+export function selectableModelsFor(catalog, provider, needs = ['text']) {
+  const models = catalogEntryFor(catalog, provider)?.models;
+  if (!isObject(models)) return [];
+  const rank = (status) => (status === 'live' ? 0 : 1);
+  return Object.values(models)
+    .filter((m) => SELECTABLE.has(m?.status) && m.hidden !== true && carries(m, needs))
+    .sort((a, b) => rank(a.status) - rank(b.status) || a.id.localeCompare(b.id))
+    .map((m) => m.id);
+}
 
 /**
  * The ids a card may offer: live or unknown, carrying the `text` capability,
@@ -37,13 +54,7 @@ const servesText = (m) => Array.isArray(m?.capabilities) && m.capabilities.inclu
  * where a text call to them fails.
  */
 export function visibleModelsFor(catalog, provider) {
-  const models = catalogEntryFor(catalog, provider)?.models;
-  if (!isObject(models)) return [];
-  const rank = (status) => (status === 'live' ? 0 : 1);
-  return Object.values(models)
-    .filter((m) => SELECTABLE.has(m?.status) && m.hidden !== true && servesText(m))
-    .sort((a, b) => rank(a.status) - rank(b.status) || a.id.localeCompare(b.id))
-    .map((m) => m.id);
+  return selectableModelsFor(catalog, provider, ['text']);
 }
 
 /**
