@@ -90,6 +90,20 @@ export const ISSUERS = [
     color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300',
   },
   {
+    // Owner request 2026-10-05: the Claude certifications had no issuer to
+    // pick. Anthropic's learning site is the learn link; a code is searched.
+    id: 'anthropic',
+    name: 'Anthropic',
+    aliases: ['anthropic', 'anthropic pbc', 'claude'],
+    vendor: 'other',
+    learnBase: 'https://www.anthropic.com/learn',
+    learnSearch: (code) =>
+      code
+        ? `https://www.google.com/search?q=${encodeURIComponent(`anthropic certification ${code}`)}`
+        : 'https://www.anthropic.com/learn',
+    color: 'bg-stone-100 text-stone-800 dark:bg-stone-800/60 dark:text-stone-200',
+  },
+  {
     id: 'isc2',
     name: '(ISC)²',
     aliases: ['isc2', '(isc)2', '(isc)²', 'isc squared'],
