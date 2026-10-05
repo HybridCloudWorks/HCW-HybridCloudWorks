@@ -16,6 +16,8 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
+import { legacyBadgePathsOf, repointCertification } from './legacy-badge-url.js';
+
 export function serializeValue(value) {
   if (value === null || value === undefined) return value;
   if (typeof value === 'object' && typeof value.toDate === 'function') {
@@ -225,18 +227,84 @@ const SANITIZERS = {
 const SNAPSHOT_COLLECTIONS = ['certifications', 'speakerevents'];
 
 /**
+ * Re-point the certifications whose badge still names the decommissioned
+ * Firebase bucket at the same path in the `certifications` container, where
+ * the migration copied the blobs (legacy-badge-url.js, #868). Only when
+ * blob storage confirms the blob exists: a reference rewritten to nothing
+ * would swap a placeholder for a broken frame. The rewrite is persisted
+ * through `store.patchDoc` when the store has one, so the editor's card and
+ * every later publish agree with the page; a missing blob is reported by
+ * name and the document is left as it was.
+ *
+ * @param {object[]} rows the raw certification documents
+ * @param {{ blobExists: (path: string) => Promise<boolean>, patch: ((id: string, changes: object) => Promise<unknown>)|null, log: object }} deps
+ * @returns {Promise<{ rows: object[], repointed: number, missing: string[] }>}
+ */
+async function repointLegacyBadges(rows, { blobExists, patch, log }) {
+  const out = [];
+  const missing = [];
+  let repointed = 0;
+  for (const row of rows) {
+    const paths = legacyBadgePathsOf(row);
+    if (paths.length === 0) {
+      out.push(row);
+      continue;
+    }
+    let current = row;
+    for (const path of paths) {
+      if (!(await blobExists(path))) {
+        missing.push(`${row.name || row.Name || row.id}: ${path}`);
+        continue;
+      }
+      const { doc, changes } = repointCertification(current, path);
+      if (Object.keys(changes).length === 0) continue;
+      current = doc;
+      repointed += 1;
+      if (patch) {
+        try {
+          await patch(row.id, changes);
+        } catch (error) {
+          log?.warn?.(`[publishSnapshot] could not persist the re-pointed badge of ${row.id}: ${error?.message || error}`);
+        }
+      }
+    }
+    out.push(current);
+  }
+  return { rows: out, repointed, missing };
+}
+
+/**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
- * @param {{ queryDocs: Function, upsertDoc: Function, readDoc?: Function }} deps.store
+ * @param {{ queryDocs: Function, upsertDoc: Function, readDoc?: Function, patchDoc?: Function }} deps.store
+ * @param {{ headBlobForDelivery: Function }|null} [deps.storage] blob storage; with none, legacy badges are left as they are
  * @param {() => Date} [deps.now]
+ * @param {object} [deps.log]
  */
-export function createSnapshotPublishHandlers({ guard, store, now = () => new Date() }) {
+export function createSnapshotPublishHandlers({
+  guard,
+  store,
+  storage = null,
+  now = () => new Date(),
+  log = console,
+}) {
+  const blobExists = storage?.headBlobForDelivery
+    ? async (path) => Boolean(await storage.headBlobForDelivery('certifications', path))
+    : null;
+  const patch = store?.patchDoc ? (id, changes) => store.patchDoc('certifications', id, changes) : null;
+
   async function publishSnapshots(collectionNames = SNAPSHOT_COLLECTIONS) {
     const generatedAt = now().toISOString();
     const results = {};
+    let legacyBadges;
 
     for (const collectionName of collectionNames) {
-      const rows = await store.queryDocs(collectionName, 'SELECT TOP 2000 * FROM c', []);
+      let rows = await store.queryDocs(collectionName, 'SELECT TOP 2000 * FROM c', []);
+      if (collectionName === 'certifications' && blobExists) {
+        const outcome = await repointLegacyBadges(rows, { blobExists, patch, log });
+        rows = outcome.rows;
+        legacyBadges = { repointed: outcome.repointed, missing: outcome.missing };
+      }
       let items = rows.map((d) => serializeValue(d));
       const sanitize = SANITIZERS[collectionName];
       if (sanitize) items = items.map(sanitize).filter(Boolean);
@@ -254,17 +322,25 @@ export function createSnapshotPublishHandlers({ guard, store, now = () => new Da
       results[collectionName] = items.length;
     }
 
-    return { results, generatedAt };
+    return { results, generatedAt, ...(legacyBadges ? { legacyBadges } : {}) };
   }
 
   return {
+    // The weekly reVerifyCertifications timer (schedulers.js) republishes
+    // through this after it marks a certificate expired, revoked or renewed.
+    // It was wired to `snapshots.publishSnapshots` since the port and this
+    // object never carried it, so that branch threw "is not a function" after
+    // the patches were written and the snapshot stayed stale (#868, found
+    // 2026-10-05). The timers test pins the name now.
+    publishSnapshots,
+
     /** POST /api/publishSnapshot — editor. */
     async publishSnapshot(request, context) {
       const auth = await guard.requireRole(request, 'editor');
       if (auth.error) return auth.error;
       try {
-        const { results, generatedAt } = await publishSnapshots();
-        return json(200, { ...results, generatedAt });
+        const { results, generatedAt, legacyBadges } = await publishSnapshots();
+        return json(200, { ...results, generatedAt, ...(legacyBadges ? { legacyBadges } : {}) });
       } catch (error) {
         context.error('publishSnapshot failed:', error);
         return json(500, {

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { createSnapshotPublishHandlers } from '../snapshots-publish.js';
 import { mergeDigest, raiseAlert, writeSystemAudit, toMillis } from './workflow-records.js';
 import { createReviewerDigest, createReviewerDigestManualHandler } from './reviewer-digest.js';
 import {
@@ -1116,5 +1117,16 @@ describe('forge scheduled', () => {
     expect(forge.runForgePipeline).toHaveBeenCalledWith(
       expect.objectContaining({ contentId: 'hot' })
     );
+  });
+});
+
+describe('reVerifyCertifications wiring (#868)', () => {
+  it('the publish handlers carry the publishSnapshots the scheduler passes to the timer', () => {
+    const snapshots = createSnapshotPublishHandlers({
+      guard: { requireRole: vi.fn() },
+      store: { queryDocs: vi.fn(), upsertDoc: vi.fn() },
+    });
+    // schedulers.js: createCertReverify({ publishSnapshots: snapshots.publishSnapshots })
+    expect(typeof snapshots.publishSnapshots).toBe('function');
   });
 });

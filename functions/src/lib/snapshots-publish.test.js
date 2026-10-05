@@ -297,3 +297,102 @@ describe('publishSnapshot handler', () => {
     expect(store.queryDocs).not.toHaveBeenCalled();
   });
 });
+
+describe('the timer entry point', () => {
+  it('exposes publishSnapshots, the name schedulers.js hands the re-verify timer', async () => {
+    const store = { queryDocs: vi.fn(async () => []), upsertDoc: vi.fn(async (_c, d) => d) };
+    const h = createSnapshotPublishHandlers({ guard: guardAs('editor'), store, now: () => NOW });
+    expect(typeof h.publishSnapshots).toBe('function');
+    const out = await h.publishSnapshots(['certifications']);
+    expect(out).toMatchObject({ results: { certifications: 0 }, generatedAt: NOW.toISOString() });
+    expect(store.upsertDoc).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('legacy badge references (#868)', () => {
+  const FIREBASE = (path) =>
+    `https://firebasestorage.googleapis.com/v0/b/b.appspot.com/o/${encodeURIComponent(`certifications/${path}`)}?alt=media`;
+  const rows = () => [
+    {
+      id: 'mct',
+      name: 'MCT',
+      display: true,
+      credentialImage: FIREBASE('mct/images/badge-image.png'),
+      image: [{ downloadURL: FIREBASE('mct/images/badge-image.png') }],
+    },
+    {
+      id: 'gone',
+      name: 'Gone',
+      display: true,
+      credentialImage: FIREBASE('gone/images/badge-1.png'),
+    },
+    { id: 'fine', name: 'Fine', display: true, imageUrl: 'https://images.credly.com/x.png' },
+  ];
+  const makeStore = () => ({
+    queryDocs: vi.fn(async (container) => (container === 'certifications' ? rows() : [])),
+    upsertDoc: vi.fn(async (_c, d) => d),
+    patchDoc: vi.fn(async (_c, id, changes) => ({ id, ...changes })),
+  });
+  const storage = {
+    headBlobForDelivery: vi.fn(async (_c, path) =>
+      path === 'mct/images/badge-image.png' ? { contentType: 'image/png' } : null
+    ),
+  };
+  const MEDIA = '/api/public/media/certifications/mct/images/badge-image.png';
+
+  it('publishes the media URL for a badge whose blob exists, persists it, and names the missing one', async () => {
+    const store = makeStore();
+    const h = createSnapshotPublishHandlers({ guard: guardAs('editor'), store, storage, now: () => NOW });
+    const body = JSON.parse((await h.publishSnapshot(makeRequest(), context)).body);
+    expect(body.legacyBadges).toEqual({ repointed: 1, missing: ['Gone: gone/images/badge-1.png'] });
+
+    const snap = store.upsertDoc.mock.calls.find(([, d]) => d.id === 'certifications')[1];
+    const mct = snap.items.find((i) => i.id === 'mct');
+    expect(mct.credentialImage).toBe(MEDIA);
+    expect(mct.image[0].downloadURL).toBe(MEDIA);
+    expect(JSON.stringify(mct)).not.toContain('firebasestorage');
+    // The missing one is left exactly as stored: the page already skips it.
+    const gone = snap.items.find((i) => i.id === 'gone');
+    expect(gone.credentialImage).toContain('firebasestorage');
+
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+    expect(store.patchDoc).toHaveBeenCalledWith('certifications', 'mct', {
+      imageUrl: MEDIA,
+      credentialImage: MEDIA,
+      image: [{ downloadURL: MEDIA }],
+    });
+    expect(storage.headBlobForDelivery).toHaveBeenCalledWith('certifications', 'mct/images/badge-image.png');
+  });
+
+  it('asks blob storage once per distinct path, never for a non-legacy URL', async () => {
+    const store = makeStore();
+    storage.headBlobForDelivery.mockClear();
+    await createSnapshotPublishHandlers({ guard: guardAs('editor'), store, storage, now: () => NOW }).publishSnapshots();
+    expect(storage.headBlobForDelivery.mock.calls.map(([, p]) => p).sort()).toEqual([
+      'gone/images/badge-1.png',
+      'mct/images/badge-image.png',
+    ]);
+  });
+
+  it('with no blob storage wired, leaves every reference as stored and reports nothing', async () => {
+    const store = makeStore();
+    const h = createSnapshotPublishHandlers({ guard: guardAs('editor'), store, now: () => NOW });
+    const body = JSON.parse((await h.publishSnapshot(makeRequest(), context)).body);
+    expect(body).not.toHaveProperty('legacyBadges');
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('a persist failure is logged and the publish still carries the re-pointed URL', async () => {
+    const store = makeStore();
+    store.patchDoc = vi.fn(async () => {
+      throw new Error('cosmos down');
+    });
+    const log = { warn: vi.fn() };
+    const h = createSnapshotPublishHandlers({ guard: guardAs('editor'), store, storage, now: () => NOW, log });
+    const body = JSON.parse((await h.publishSnapshot(makeRequest(), context)).body);
+    expect(body.legacyBadges.repointed).toBe(1);
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('could not persist'));
+    const snap = store.upsertDoc.mock.calls.find(([, d]) => d.id === 'certifications')[1];
+    expect(snap.items.find((i) => i.id === 'mct').credentialImage).toBe(MEDIA);
+  });
+});
