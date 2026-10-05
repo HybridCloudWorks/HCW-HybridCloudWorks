@@ -41,6 +41,24 @@ This project has not cut a tagged release; entries are grouped under
   500. `ai-cover.test.js` pins the row, the unpriced row, both ceilings,
   the pending-image rule and the fail-closed rule; `manual-images.test.js`
   pins the route's 429.
+- **The AI task registry, with a recommended model and the reason per
+  task (ADR 0034 slice 1, #856).** `functions/src/lib/ai/tasks.js` names
+  every piece of work the site sends to a model: label, description and
+  route as before, plus the kind of answer it needs (`modality`), the
+  capabilities a model must carry (`needs`), whether anonymous visitors can
+  trigger it (`public`), and `recommended: { provider, model, reason, asOf }`.
+  `AI_FEATURES` is derived from it, so the feature switches, the call-site
+  test and the portal's toggles are unchanged. `provider-recommendations.js`
+  carries each provider's best model per modality for the `null` entries of
+  the global priority list to come. `tasks.test.js` refuses a recommendation
+  that names an unpriced model, a public task that recommends the trial
+  tier, or a grounding need outside Gemini. Nothing reads the new fields
+  yet; slices 2–5 do.
+- **OpenAI's gpt-5-mini and gpt-5-nano are priced** ($0.25 / $2.00 and
+  $0.05 / $0.40 per 1M tokens, OpenAI's published rates, the same figures
+  Azure lists for the same models; owner confirmation 2026-10-05). They had
+  been unpriced since ADR 0033 pending that confirmation; rows written
+  before stay at $0, flagged. The OpenAI card's note says so.
 
 - **Microsoft Foundry as a paid AI provider (#849, owner decision
   2026-10-04).** Of a budget of about USD 75 a month, the first call was

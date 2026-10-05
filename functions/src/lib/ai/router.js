@@ -321,14 +321,14 @@ export const COST_TABLE = Object.freeze({
     'gpt-4o-mini': [0.15, 0.6],
     o1: [15.0, 60.0],
     'o3-mini': [1.1, 4.4],
-    // gpt-5-mini / gpt-5-nano (the defaults) have no confirmed rate anywhere
-    // in this repository, so they are UNPRICED (null) rather than charged at
-    // the gpt-4o default as they were until ADR 0033: a row priced at a model
-    // it did not use is a wrong number that reads as a right one. An unpriced
-    // row costs 0 and carries `unpriced: true`, which the Usage tab counts and
-    // says. Replace null with [input, output] per 1M once the owner confirms.
-    'gpt-5-mini': null,
-    'gpt-5-nano': null,
+    // gpt-5-mini / gpt-5-nano were UNPRICED (null) from ADR 0033 until
+    // 2026-10-05, when the owner confirmed OpenAI's published rates — the
+    // same figures the Azure OpenAI pricing page lists for the same models
+    // (read 2026-10-04). Rows written while they were null stay at 0 with
+    // `unpriced: true`; the Usage tab counts and says so. A null row is still
+    // how a model with no confirmed rate is kept honest (isPriced).
+    'gpt-5-mini': [0.25, 2.0],
+    'gpt-5-nano': [0.05, 0.4],
     default: [5.0, 15.0],
   },
   gemini: {

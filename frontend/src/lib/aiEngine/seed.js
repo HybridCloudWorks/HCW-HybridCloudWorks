@@ -73,7 +73,7 @@ export const DEFAULT_PROVIDERS = [
     order: 2,
     schemaVersion: PROVIDER_SCHEMA_VERSION,
     notes:
-      'Seed OPENAI-API-KEY in Key Vault. gpt-5 rates are not in the cost table yet, so usage totals fall back to gpt-4o pricing.',
+      "Seed OPENAI-API-KEY in Key Vault. GPT-5 mini and nano are priced at OpenAI's published rates (owner confirmation 2026-10-05); rows written before that day stay at $0, flagged unpriced.",
   },
   {
     id: 'anthropic',
