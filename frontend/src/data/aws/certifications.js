@@ -83,11 +83,42 @@
  * editing this file; `src/data/education-catalogues.test.js` then fails until
  * the row is re-verified and updated, which is the intended reminder.
  *
+ *
+ * FULL RE-READ 2026-10-05 (owner request: review every Learn portal for exams
+ * newly in beta or expired). All thirteen exam pages, the certification hub
+ * (refreshed by AWS that same day), the September blog and the blog index
+ * were live-fetched. No status or date here disagrees with AWS, no exam,
+ * beta or version is missing (the hub lists exactly these thirteen; MLS-C01
+ * retired 2026-03-31 and is rightly absent), and the two posts since
+ * 2026-09-28 are microcredentials and Jam, not certifications. Two things
+ * worth recording:
+ *
+ *   The one-day conflict above is closed, by AWS. Both exam pages were edited
+ *     on 2026-10-02 and now read "The last day to take the current exam
+ *     (SAP-C02) is November 16, 2026." and "… (DVA-C02) is November 30,
+ *     2026." — the blog's dates, which this file kept. Nothing stored
+ *     changes; the "second look" for SAP and DVA is no longer owed. The
+ *     exam guides for SAP-C03 and DVA-C03 are still 404 until registration
+ *     opens on 2026-10-27, so `studyGuideUrl: null` stays on both rows.
+ *   MLA-C02 is as described: the exam page still says "TBD" for GA while the
+ *     blog says 2027-01-14, so the rule above still holds. (Its comparison
+ *     table prints the code as "ME1-C02"; the exam guide it links is titled
+ *     MLA-C02, which is what the row carries.)
+ *
+ * Language-only retirements AWS now prints, none of which changes an
+ * English-site status: CLF-C02 Italian and German after 2026-12-31; AIF-C01
+ * Italian and German after 2026-10-15; SAA-C03 Italian after 2026-12-31;
+ * SOA-C03 Simplified Chinese and Korean after 2026-11-19; DOP-C02 Korean
+ * after 2026-12-31; SCS-C03 Simplified Chinese, Spanish (Latin America) and
+ * Portuguese (Brazil) after 2026-12-31. aws.amazon.com/certification/
+ * coming-soon/ is stale (its only content is the 2025 SOA change) and is not
+ * a source. All sixteen rows were re-read, so `DATA_AS_OF` moves.
+ *
  * Field notes: `expiryDate` is the last day the exam can be taken;
  * `availableDate` the first GA day of a new version; `previousSlugs` keeps
  * old detail-page links resolving after a version bump.
  */
-export const DATA_AS_OF = '2026-09-10';
+export const DATA_AS_OF = '2026-10-05';
 
 export const DATA_SOURCE = {
   label: 'AWS Certification',

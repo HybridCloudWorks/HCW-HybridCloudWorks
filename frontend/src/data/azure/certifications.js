@@ -2,7 +2,7 @@
 // Verified by hand against the Learn credentials browse API
 // (https://learn.microsoft.com/api/contentbrowser/search/credentials) and the credential-retirement page
 // (https://learn.microsoft.com/en-us/credentials/support/credential-retirement) on the date below.
-// Last manual sync: 2026-09-28
+// Last manual sync: 2026-10-05
 //
 // THE GITHUB EXAMS ARE NOT CARRIED HERE (#496, owner decision 2026-09-11).
 // GH-100, GH-200, GH-300, GH-500, GH-600 and GH-900 used to sit in this file as
@@ -50,7 +50,74 @@
  * derived from the dates at render time (src/lib/certStatus.js) so a date that
  * passes between syncs cannot keep showing "Expiring" or "Beta".
  */
-export const DATA_AS_OF = '2026-09-28';
+//
+// FULL RE-READ 2026-10-05 (owner request: "review and update all Learn portals
+// … as new tests are in beta/expired"). Every row was checked against its
+// Microsoft Learn credential page (a retirement shows there as a top Warning
+// block; "Schedule exam" confirmed through the Pearson VUE examUid link), the
+// credential-retirement page, the credentials browse API and the Skills Hub
+// blog. Most single-exam /exams/<code>/ URLs now redirect to the credential
+// page, so that page is the source where the exam page is gone. What moved:
+//
+//   AI-500 — `active`. The exam page H1 is now "Exam AI-500: Designing and
+//     Implementing Multi-Agent AI Solutions" with no "(beta)" (AB-650's still
+//     carries it), the credential H1 "Microsoft Certified: Multi-Agent AI
+//     Solutions Expert" likewise, "Retirement date: none", Schedule exam
+//     present; the page's updated_at is 2026-09-29. Microsoft announced "Beta
+//     in July 2026. Generally available in September 2026." and published no
+//     day, so no `gaDate` is stored.
+//     https://learn.microsoft.com/en-us/credentials/certifications/exams/ai-500/
+//   PL-400 — `expiring`, `expiryDate` 2026-10-30, `replacedBy: 'ab-400'`. The
+//     exam page: "PL-400 is transitioning to AB-400 … October 16, 2026:
+//     Registration for PL-400 closes, and registration opens exclusively for
+//     AB-400." and "Learners who register for PL-400 on or before October 16
+//     can continue to schedule and take the exam through October 30, 2026."
+//     The Skills Hub post of 2026-09-15: "While the exam number is changing,
+//     the certification earned remains unchanged." So the credential (Power
+//     Platform Developer Associate) continues under the new code.
+//     https://learn.microsoft.com/en-us/credentials/certifications/exams/pl-400/
+//     https://techcommunity.microsoft.com/blog/skills-hub-blog/updates-to-azure-cosmos-db-and-power-platform-developer-certifications/4528353
+//   AB-400 — added, `upcoming` with `availableDate` 2026-10-16: "The updated
+//     AB-400 exam will be available beginning October 16, 2026, and
+//     registration is available today." Not a beta. English, "Retirement
+//     date: none". The row turns `active` on the day by itself.
+//     https://learn.microsoft.com/en-us/credentials/certifications/exams/ab-400/
+//   MS-102 — `replacedBy: 'ab-650'`: the June 2026 credentials roundup names
+//     "Microsoft 365 Certified: AI Services Administrator Associate (Exam
+//     AB-650)" as the recommended new certification. Status and date agree:
+//     "This exam will retire on November 30, 2026, at 11:59 PM Central
+//     Standard Time."
+//   DP-420 — nothing stored changes today. The credential page: "The updated
+//     certification will be Microsoft Certified: Azure Cosmos DB AI Developer
+//     Associate. This change will go into effect on October 6, 2026." and
+//     "Updated exam available: October 6, 2026". The row's `level` Associate
+//     is one day early; the title and slug follow on or after 2026-10-06 —
+//     re-check that /azure-cosmos-db-developer-specialty/ still resolves then
+//     (200 today). A timeline entry dated 2026-10-06 records it.
+//   MB-330 — nothing stored changes. The June roundup: retirement "Expected in
+//     December 2026", successor "Supply Chain Management AI Consultant
+//     Associate (Exam AB-330)", "Beta expected in November 2026". Months only,
+//     no page for AB-330 yet (404), so no date and no row — re-check in
+//     November. The `longDescription` says so.
+//   AB-650 — still `beta` ("Exam AB-650: Administering Microsoft 365 and AI
+//     Services (beta)"). Microsoft said "Generally available in October 2026"
+//     and the row has no `betaEndDate`, so the label will not flip on its own:
+//     re-read before the next sync.
+//   Retired rows gain the successor the June roundup names: AZ-204 → AI-200,
+//     AZ-500 → SC-500, PL-200 → AB-410, MB-280 → AB-210.
+//   learnUrl — twelve rows pointed at Learn slugs that now 404 (AB-900,
+//     AZ-700, MB-230, MB-280, MB-310, MB-330, MB-500, MB-700, MB-800, MB-820,
+//     MS-700, MS-721) and ten AB/AI/DP rows at the bare browse root; every one
+//     now carries the live credential page, each fetched 200 on the day. The
+//     site's own slugs are unchanged — a slug is our route, not Microsoft's.
+//
+// Nothing on the retirement page dated 2026-09-01..2027-06-30 is missing: the
+// only scheduled item is MS-102. The GA days Microsoft published for AB-210,
+// AB-410, AB-620 and AB-250 are months, not days; their stored `gaDate`s are
+// earlier than the stored `betaEndDate`s and are left as they were because an
+// `active` row reads neither. All 62 rows were re-read, so `DATA_AS_OF` moves.
+
+export const DATA_AS_OF = '2026-10-05';
 
 /**
  * The page a reader can check this catalogue's freshness claim against.
@@ -124,7 +191,8 @@ export const certifications = [
     hours: 60,
     prepTime: '~5 months',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/agentic-ai-business-solutions-architect/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-100',
     practiceUrl:
@@ -157,7 +225,8 @@ export const certifications = [
     hours: 35,
     prepTime: '~6 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-sales-ai-consultant-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-210',
     practiceUrl:
@@ -184,7 +253,8 @@ export const certifications = [
     hours: 35,
     prepTime: '~6 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-contact-center-ai-engineer-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-250',
     practiceUrl:
@@ -193,6 +263,40 @@ export const certifications = [
     appliedSkills: [],
     prerequisites: 'MS-721 or contact center experience.',
     nextCerts: [],
+  },
+  {
+    id: 'ab-400',
+    slug: 'ab-400',
+    code: 'AB-400',
+    officialCode: 'AB-400',
+    title: 'Extending Microsoft Power Platform Solutions with Code and AI',
+    level: 'Associate',
+    status: 'upcoming',
+    availableDate: '2026-10-16',
+    description:
+      'The Power Platform Developer exam under its new number, from October 16, 2026: code-first Power Platform solutions with AI.',
+    longDescription:
+      'PL-400 becomes AB-400 on October 16, 2026. Registration for PL-400 closes that day and opens for AB-400 alone; anyone registered for PL-400 by then can still take it through October 30, 2026. The certification earned is unchanged — Microsoft Certified: Power Platform Developer Associate. Microsoft announced the renumbering on September 15, 2026; registration for AB-400 is open now.',
+    topics: [
+      'Custom Connectors',
+      'PCF Controls',
+      'Plugins',
+      'Power Apps Component Framework',
+      'Azure Integration',
+    ],
+    hours: 40,
+    prepTime: '~3 months',
+    successRate: null,
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/power-platform-developer-associate/',
+    studyGuideUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-400',
+    practiceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/practice-assessments-for-microsoft-certifications',
+    modules: [],
+    appliedSkills: [],
+    prerequisites: 'PL-200 or equivalent Power Platform experience; development experience.',
+    nextCerts: ['ab-100'],
   },
   {
     id: 'ab-410',
@@ -217,7 +321,8 @@ export const certifications = [
     hours: 35,
     prepTime: '~6 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/intelligent-applications-builder-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-410',
     practiceUrl:
@@ -244,7 +349,8 @@ export const certifications = [
     hours: 35,
     prepTime: '~6 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/ai-agent-builder-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-620',
     practiceUrl:
@@ -310,7 +416,8 @@ export const certifications = [
     hours: 8,
     prepTime: '~3 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/ai-business-professional/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-730',
     practiceUrl:
@@ -341,7 +448,8 @@ export const certifications = [
     hours: 20,
     prepTime: '~6 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/ai-transformation-leader/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-731',
     practiceUrl:
@@ -368,7 +476,7 @@ export const certifications = [
     prepTime: '~4 weeks',
     successRate: null,
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/microsoft-365-copilot-and-agent-administration-fundamentals/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/copilot-and-agent-administration-fundamentals/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ab-900',
     practiceUrl:
@@ -518,7 +626,8 @@ export const certifications = [
     hours: 35,
     prepTime: '~6 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/operationalizing-machine-learning-and-generative-ai-solutions/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ai-300',
     practiceUrl:
@@ -535,11 +644,11 @@ export const certifications = [
     officialCode: 'AI-500',
     title: 'Designing and Implementing Multi-Agent AI Solutions',
     level: 'Expert',
-    status: 'beta',
+    status: 'active',
     description:
       'Design, build, and operate production-ready multi-agent AI solutions with Microsoft Foundry and Azure.',
     longDescription:
-      'Expert-level exam for practitioners who architect, develop, evaluate, secure, and deploy scalable multi-agent AI systems using Microsoft Foundry, Microsoft Agent Framework, MCP, and Azure services. Earns Microsoft Certified: Multi-Agent AI Solutions Expert, in beta on Microsoft Learn.',
+      'Expert-level exam for practitioners who architect, develop, evaluate, secure, and deploy scalable multi-agent AI systems using Microsoft Foundry, Microsoft Agent Framework, MCP, and Azure services. Earns Microsoft Certified: Multi-Agent AI Solutions Expert; out of beta and generally available on Microsoft Learn since September 2026.',
     topics: [
       'Multi-Agent Architecture',
       'Microsoft Foundry',
@@ -786,6 +895,7 @@ export const certifications = [
     level: 'Associate',
     status: 'retired',
     expiryDate: '2026-07-31',
+    replacedBy: 'azure-ai-cloud-developer-associate',
     description: 'Design, build, test, and maintain cloud solutions on Azure.',
     longDescription:
       'Validate your ability to design and build cloud-native solutions on Azure. Retiring July 31, 2026 — check Microsoft Learn for successor exams.',
@@ -926,6 +1036,7 @@ export const certifications = [
     level: 'Associate',
     status: 'retired',
     expiryDate: '2026-08-31',
+    replacedBy: 'cloud-and-ai-security-engineer-associate',
     description: 'Implement and manage security across Azure workloads.',
     longDescription:
       'Validate ability to implement security controls across Azure infrastructure. Retiring August 31, 2026 — check Microsoft Learn for the successor exam.',
@@ -983,7 +1094,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '73%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/azure-network-engineer/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/azure-network-engineer-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-700',
     practiceUrl:
@@ -1221,7 +1332,7 @@ export const certifications = [
     status: 'active',
     description: 'Design and implement cloud-native applications with Azure Cosmos DB.',
     longDescription:
-      'Validate expertise designing and implementing data models, data distribution strategies, and solutions using Azure Cosmos DB for NoSQL.',
+      'Validate expertise designing and implementing data models, data distribution strategies, and solutions using Azure Cosmos DB for NoSQL. From October 6, 2026 the certification is Microsoft Certified: Azure Cosmos DB AI Developer Associate (until then Azure Cosmos DB Developer Specialty), and the exam is updated the same day.',
     topics: [
       'Cosmos DB for NoSQL',
       'Data Modeling',
@@ -1321,7 +1432,8 @@ export const certifications = [
     hours: 35,
     prepTime: '~6 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/implementing-data-engineering-solutions-using-azure-databricks/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/dp-750',
     practiceUrl:
@@ -1348,7 +1460,8 @@ export const certifications = [
     hours: 35,
     prepTime: '~6 weeks',
     successRate: null,
-    learnUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/',
+    learnUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/developing-ai-enabled-database-solutions/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/dp-800',
     practiceUrl:
@@ -1423,7 +1536,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '73%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/dynamics-365-customer-service-functional-consultant-associate/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-functional-consultant-customer-service-v3/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/mb-230',
     practiceUrl:
@@ -1470,6 +1583,7 @@ export const certifications = [
     level: 'Associate',
     status: 'retired',
     expiryDate: '2026-07-31',
+    replacedBy: 'ab-210',
     description: 'Analyze and improve customer experience using Dynamics 365 and Power Platform.',
     longDescription:
       'Validate expertise using Dynamics 365 and Power Platform to analyze customer journeys and improve customer experience. Retiring July 31, 2026.',
@@ -1484,7 +1598,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '72%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/dynamics-365-customer-experience-analyst/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-customer-experience-analyst-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/mb-280',
     practiceUrl:
@@ -1510,7 +1624,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '71%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/dynamics-365-finance-functional-consultant-associate/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-functional-consultant-financials/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/mb-310',
     practiceUrl:
@@ -1530,7 +1644,7 @@ export const certifications = [
     status: 'active',
     description: 'Configure Dynamics 365 Supply Chain Management solutions.',
     longDescription:
-      'Validate expertise implementing supply chain management solutions using Dynamics 365, including inventory, procurement, manufacturing, and logistics.',
+      'Validate expertise implementing supply chain management solutions using Dynamics 365, including inventory, procurement, manufacturing, and logistics. Microsoft expects MB-330 to retire in December 2026, succeeded by AB-330 (Supply Chain Management AI Consultant Associate; beta expected November 2026); no date is published yet.',
     topics: [
       'Inventory Management',
       'Procurement',
@@ -1542,7 +1656,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '70%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/dynamics-365-supply-chain-management-functional-consultant-associate/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-functional-consultant-supply-chain-management/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/mb-330',
     practiceUrl:
@@ -1602,7 +1716,7 @@ export const certifications = [
     prepTime: '~4 months',
     successRate: '70%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/dynamics-365-finance-operations-developer-associate/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-finance-and-operations-apps-developer-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/mb-500',
     practiceUrl:
@@ -1635,7 +1749,7 @@ export const certifications = [
     prepTime: '~5 months',
     successRate: '67%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/dynamics-365-finance-and-operations-apps-solution-architect-expert/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-finance-and-operations-apps-solution-architect-expert/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/mb-700',
     practiceUrl:
@@ -1667,7 +1781,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '72%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/dynamics-365-business-central-functional-consultant-associate/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-business-central-functional-consultant-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/mb-800',
     practiceUrl:
@@ -1693,7 +1807,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '71%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/dynamics-365-business-central-developer-associate/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/d365-business-central-developer-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/mb-820',
     practiceUrl:
@@ -1744,9 +1858,10 @@ export const certifications = [
     level: 'Expert',
     status: 'expiring',
     expiryDate: '2026-11-30',
+    replacedBy: 'ab-650',
     description: 'Administer Microsoft 365 tenants, including identity, compliance, and security.',
     longDescription:
-      'Validate expertise administering Microsoft 365 environments — tenant management, identity, security, compliance, and Microsoft 365 service integration.',
+      'Validate expertise administering Microsoft 365 environments — tenant management, identity, security, compliance, and Microsoft 365 service integration. Retires November 30, 2026; Microsoft recommends AB-650 (Microsoft 365 and AI Services Administrator Associate) in its place.',
     topics: ['Tenant Management', 'Identity', 'Security', 'Compliance', 'Microsoft 365 Services'],
     hours: 60,
     prepTime: '~5 months',
@@ -1784,7 +1899,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '73%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/teams-administrator-associate/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/m365-teams-administrator-associate/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ms-700',
     practiceUrl:
@@ -1810,7 +1925,7 @@ export const certifications = [
     prepTime: '~3 months',
     successRate: '72%',
     learnUrl:
-      'https://learn.microsoft.com/en-us/credentials/certifications/collaboration-communications-systems-engineer/',
+      'https://learn.microsoft.com/en-us/credentials/certifications/m365-collaboration-communications-systems-engineer/',
     studyGuideUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/ms-721',
     practiceUrl:
@@ -1829,6 +1944,7 @@ export const certifications = [
     level: 'Associate',
     status: 'retired',
     expiryDate: '2026-08-31',
+    replacedBy: 'ab-410',
     description: 'Configure and extend Power Platform components to build business solutions.',
     longDescription:
       'Validate skills configuring Microsoft Dataverse, Power Apps, Power Automate, and Power Virtual Agents. Retiring August 31, 2026.',
@@ -1886,10 +2002,12 @@ export const certifications = [
     officialCode: 'PL-400',
     title: 'Microsoft Power Platform Developer',
     level: 'Associate',
-    status: 'active',
+    status: 'expiring',
+    expiryDate: '2026-10-30',
+    replacedBy: 'ab-400',
     description: 'Design, develop, secure, and troubleshoot Power Platform solutions.',
     longDescription:
-      'Validate expertise developing custom Power Platform components, connectors, and integrations using code-first approaches and Azure services.',
+      'Validate expertise developing custom Power Platform components, connectors, and integrations using code-first approaches and Azure services. PL-400 becomes AB-400 on October 16, 2026: registration for PL-400 closes that day, and anyone registered by then can take it through October 30, 2026. The certification earned, Power Platform Developer Associate, is unchanged.',
     topics: [
       'Custom Connectors',
       'PCF Controls',
@@ -2813,8 +2931,8 @@ export const appliedSkills = [
 ];
 
 // Timeline events — hand-maintained. The three entries added on 2026-09-09 (mb-240-retire,
-// az-800-az-801-retire, ms-102-retire) cite the Microsoft Learn pages they were verified
-// against; every earlier entry keeps its original Skills Hub blog sourceUrl and was not
+// az-800-az-801-retire, ms-102-retire) and the two added on 2026-10-05 (dp-420-rename,
+// pl-400-ab-400) cite the Microsoft Learn pages they were verified against; every earlier entry keeps its original Skills Hub blog sourceUrl and was not
 // re-verified. This array is NOT written by the Friday Skills Hub RSS scraper
 // (functions/src/lib/timers/skills-hub.js). That timer writes the certEvents container, which
 // the Azure education page reads through GET /api/public/cert-events and merges over these
@@ -2946,5 +3064,26 @@ export const timelineEvents = [
       'Microsoft 365 Certified: Administrator Expert and exam MS-102 retire; the certification can no longer be earned or renewed after this date.',
     sourceUrl:
       'https://learn.microsoft.com/en-us/credentials/certifications/m365-administrator-expert/',
+  },
+  {
+    id: 'dp-420-rename',
+    date: '2026-10-06',
+    type: 'update',
+    certCode: 'DP-420',
+    title: 'DP-420 Becomes Azure Cosmos DB AI Developer Associate',
+    description:
+      'The certification is renamed Microsoft Certified: Azure Cosmos DB AI Developer Associate (from Azure Cosmos DB Developer Specialty) and the exam is updated the same day. No action is required of current holders.',
+    sourceUrl:
+      'https://learn.microsoft.com/en-us/credentials/certifications/azure-cosmos-db-developer-specialty/',
+  },
+  {
+    id: 'pl-400-ab-400',
+    date: '2026-10-16',
+    type: 'update',
+    certCode: 'PL-400',
+    title: 'PL-400 Becomes AB-400',
+    description:
+      'Registration for PL-400 closes and opens exclusively for AB-400; PL-400 registrations made by this day can be taken through October 30, 2026. The Power Platform Developer Associate certification is unchanged.',
+    sourceUrl: 'https://learn.microsoft.com/en-us/credentials/certifications/exams/pl-400/',
   },
 ];

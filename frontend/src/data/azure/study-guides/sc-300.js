@@ -83,7 +83,7 @@ export default {
           title: 'Plan, implement, and manage Microsoft Entra user authentication',
           objectives: [
             'Plan for authentication',
-            'Implement and manage authentication methods, including certificate-based authentication, Temporary Access Pass, OAuth 2.0 tokens, Microsoft Authenticator, and passkeys (FIDO2)',
+            'Implement and manage authentication methods, including certificate-based authentication, Temporary Access Pass, Microsoft Authenticator, and passkeys (FIDO2)',
             'Implement and manage tenant-wide multifactor authentication (MFA) settings',
             'Configure and deploy self-service password reset (SSPR)',
             'Implement and manage Windows Hello for Business',
@@ -121,9 +121,9 @@ export default {
           title: 'Implement Global Secure Access',
           objectives: [
             'Deploy Global Secure Access clients',
-            'Deploy and manage Private Access',
-            'Deploy and manage Internet Access',
-            'Deploy and manage Internet Access for Microsoft 365',
+            'Deploy and manage Microsoft Entra Private Access',
+            'Deploy and manage Microsoft Entra Internet Access',
+            'Deploy and manage the Microsoft traffic profile for Microsoft 365',
           ],
         },
       ],
@@ -220,7 +220,7 @@ export default {
             'Plan and configure PIM for Groups',
             'Manage the PIM request and approval process',
             'Analyze PIM audit history and reports',
-            'Create and manage break-glass accounts',
+            'Create and manage emergency access accounts',
           ],
         },
         {
