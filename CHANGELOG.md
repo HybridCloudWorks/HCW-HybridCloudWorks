@@ -52,7 +52,10 @@ This project has not cut a tagged release; entries are grouped under
   live one; `ensureSeededPrograms` now runs on every programs read and
   inserts any seed whose id is absent after the highest stored `order`,
   never overwriting a stored program and never bringing back one the owner
-  disabled or soft-deleted. Four programs join the seeds from the program
+  disabled or soft-deleted; a stored seed that has no `applicationQuestions`
+  or no `scoring` of its own takes the seed's in the same read (one patch on
+  the row's ETag, nothing else on the document touched), so the live MVP
+  gets its question list without losing an edit. Four programs join the seeds from the program
   rules as published in 2026 — Microsoft Elevate Educator – Expert (MIEE,
   with the official 2026-2027 question list and its May to 31 July 2026
   window), GitKraken Ambassador, the Microsoft Management Community (scored

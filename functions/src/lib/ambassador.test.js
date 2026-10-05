@@ -325,6 +325,103 @@ describe('programs', () => {
     expect(store.upsertDoc).toHaveBeenCalledTimes(3);
   });
 
+  it('backfills a stored seed with the questions and scoring it gained, and nothing else', async () => {
+    const stamp = NOW.toISOString();
+    const [mvpSeed, mctSeed] = DEFAULT_PROGRAMS;
+    const management = DEFAULT_PROGRAMS.find(
+      (p) => p.id === 'program-microsoft-management-community'
+    );
+    const without = (program, ...keys) =>
+      Object.fromEntries(Object.entries(program).filter(([key]) => !keys.includes(key)));
+    const base = { docType: 'program', enabled: true, createdAt: stamp, updatedAt: '2026-01-01' };
+    // A stored seeded MVP the owner edited, from before the questions existed.
+    const storedMvp = {
+      ...without(mvpSeed, 'applicationQuestions'),
+      ...base,
+      seeded: true,
+      order: 1,
+      name: 'MVP (my edit)',
+      description: 'My own words.',
+      requirements: [mvpSeed.requirements[0]],
+      enabled: false,
+      membershipStatus: 'working',
+      _etag: '"etag-mvp"',
+    };
+    // A stored seeded program carrying its own questions already.
+    const own = [{ id: 'mine', section: 'S', prompt: 'My question', kind: 'text' }];
+    const storedMct = { ...mctSeed, ...base, seeded: true, order: 2, applicationQuestions: own };
+    // The owner's own program under a seed's id: not seeded, left alone.
+    const ownManagement = {
+      ...without(management, 'scoring', 'applicationQuestions'),
+      ...base,
+      order: 3,
+      name: 'My community',
+    };
+    // A seeded program whose scoring was never stored.
+    const otherSeeds = DEFAULT_PROGRAMS.filter(
+      (p) => ![mvpSeed.id, mctSeed.id, management.id].includes(p.id)
+    ).map((p, i) => ({ ...p, ...base, seeded: true, order: 10 + i }));
+    const store = memStore({ ambassador: [storedMvp, storedMct, ownManagement, ...otherSeeds] });
+    const log = { error: vi.fn(), info: vi.fn() };
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed, log });
+    const body = parse(await h.listPrograms(makeRequest(), context));
+
+    const mvp = body.items.find((p) => p.id === mvpSeed.id);
+    expect(mvp.applicationQuestions).toEqual(mvpSeed.applicationQuestions);
+    expect(mvp).toMatchObject({
+      name: 'MVP (my edit)',
+      description: 'My own words.',
+      requirements: [mvpSeed.requirements[0]],
+      enabled: false,
+      membershipStatus: 'working',
+      order: 1,
+      updatedAt: stamp,
+    });
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+    expect(store.patchDoc).toHaveBeenCalledWith(
+      'ambassador',
+      mvpSeed.id,
+      { applicationQuestions: mvpSeed.applicationQuestions, updatedAt: stamp },
+      { ifMatch: '"etag-mvp"' }
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      '[ambassador] seed backfill program-microsoft-mvp: applicationQuestions'
+    );
+    // Its own questions stay; the owner's program is untouched; the management seed is absent, so added whole.
+    expect(body.items.find((p) => p.id === mctSeed.id).applicationQuestions).toEqual(own);
+    const mine = body.items.find((p) => p.id === management.id);
+    expect(mine.name).toBe('My community');
+    expect(mine.seeded).toBeUndefined();
+    expect(mine.scoring).toBeUndefined();
+    expect(mine.applicationQuestions).toBeUndefined();
+    expect(store.upsertDoc).not.toHaveBeenCalledWith(
+      'ambassador',
+      expect.objectContaining({ docType: 'program' })
+    );
+    // Nothing more on the next read.
+    await h.listPrograms(makeRequest(), context);
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('backfills scoring on a stored seed that has none, through a store without ETags', async () => {
+    const management = DEFAULT_PROGRAMS.find(
+      (p) => p.id === 'program-microsoft-management-community'
+    );
+    const stored = Object.fromEntries(Object.entries(management).filter(([k]) => k !== 'scoring'));
+    const store = memStore({
+      ambassador: [{ ...stored, docType: 'program', enabled: true, seeded: true, order: 1 }],
+    });
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const body = parse(await h.listPrograms(makeRequest(), context));
+    expect(body.items.find((p) => p.id === management.id).scoring).toEqual(management.scoring);
+    expect(store.patchDoc).toHaveBeenCalledWith(
+      'ambassador',
+      management.id,
+      { scoring: management.scoring, updatedAt: NOW.toISOString() },
+      {}
+    );
+  });
+
   it('scores a credits program by summing metrics.credits against each tier', () => {
     const program = DEFAULT_PROGRAMS.find((p) => p.id === 'program-microsoft-management-community');
     expect(program.scoring).toMatchObject({ unit: 'credits' });

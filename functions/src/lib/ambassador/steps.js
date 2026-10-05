@@ -93,10 +93,11 @@ function seededDoc(ctx, program, order) {
  * from `rows` but still stored, and the read of its id is what keeps it out.
  */
 export async function ensureSeededPrograms(ctx, rows) {
-  const present = new Set(rows.map((row) => row.id));
+  const current = await backfillSeedFields(ctx, rows);
+  const present = new Set(current.map((row) => row.id));
   const missing = DEFAULT_PROGRAMS.filter((program) => !present.has(program.id));
-  if (missing.length === 0) return rows;
-  let order = rows.reduce((max, row) => Math.max(max, Number(row.order) || 0), 0);
+  if (missing.length === 0) return current;
+  let order = current.reduce((max, row) => Math.max(max, Number(row.order) || 0), 0);
   const added = [];
   for (const program of missing) {
     const stored = await ctx.store.readDoc(CONTAINER, program.id, program.id);
@@ -106,7 +107,59 @@ export async function ensureSeededPrograms(ctx, rows) {
     await ctx.store.upsertDoc(CONTAINER, doc);
     added.push(doc);
   }
-  return [...rows, ...added];
+  return [...current, ...added];
+}
+
+const hasQuestions = (doc) =>
+  Array.isArray(doc?.applicationQuestions) && doc.applicationQuestions.length > 0;
+
+/**
+ * The fields a seed gained after it was stored that a stored seed may take
+ * without losing an edit: the official `applicationQuestions` when the
+ * document has none, and `scoring` when it has none. Each is a whole value
+ * the owner has never set (missing or empty), so filling it in cannot
+ * overwrite anything; the field's own editor takes over from there.
+ */
+const BACKFILL_FIELDS = [
+  ['applicationQuestions', (stored, seed) => hasQuestions(seed) && !hasQuestions(stored)],
+  ['scoring', (stored, seed) => Boolean(seed.scoring) && !stored.scoring],
+];
+
+/**
+ * Give a stored seed (`seeded: true`, the id in DEFAULT_PROGRAMS, listed so
+ * not soft-deleted) the fields the seed gained since it was stored, when the
+ * document has none of its own: one patch per program that needs it, on the
+ * stored ETag where the store exposes one. Nothing else on the document is
+ * touched — requirements, description, enabled, order, membership and every
+ * other field stay as the owner left them. A program the owner created, or a
+ * seed already carrying its own value, is left alone.
+ */
+async function backfillSeedFields(ctx, rows) {
+  const seeds = new Map(DEFAULT_PROGRAMS.map((program) => [program.id, program]));
+  const out = [];
+  for (const stored of rows) {
+    const seed = stored.seeded === true ? seeds.get(stored.id) : null;
+    const updates = {};
+    if (seed) {
+      for (const [field, wanted] of BACKFILL_FIELDS) {
+        if (wanted(stored, seed)) updates[field] = seed[field];
+      }
+    }
+    const fields = Object.keys(updates);
+    if (fields.length === 0) {
+      out.push(stored);
+      continue;
+    }
+    const patched = await ctx.store.patchDoc(
+      CONTAINER,
+      stored.id,
+      { ...updates, updatedAt: ctx.nowIso() },
+      stored._etag ? { ifMatch: stored._etag } : {}
+    );
+    ctx.log.info?.(`[ambassador] seed backfill ${stored.id}: ${fields.join(', ')}`);
+    out.push(patched || { ...stored, ...updates });
+  }
+  return out;
 }
 
 /** Every program, the seeds filled in on every read, in display order. */
