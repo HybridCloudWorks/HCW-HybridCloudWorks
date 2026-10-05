@@ -16,7 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Loader2, Upload } from 'lucide-react';
-import { TextAreaField } from './Parts';
+import { ProgramsFieldset, TextAreaField } from './Parts';
 
 const MAX_TEXT = 150_000;
 
@@ -96,30 +96,7 @@ export default function CsvImportDialog({ source, programs, onClose, onImport, i
             placeholder="MTM Class ID,Course,Learning Method,Instructor,Start Date,End Date,Location"
             hint="The first line is the header; column names are matched however the export spells them."
           />
-          <fieldset className="space-y-1">
-            <legend className="text-xs font-medium">Counts for</legend>
-            <p className="text-[11px] text-muted-foreground">
-              Leave clear to count for every program.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {programs.map((p) => (
-                <label key={p.id} className="flex items-center gap-1.5 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={programIds.includes(p.id)}
-                    onChange={() =>
-                      setProgramIds(
-                        programIds.includes(p.id)
-                          ? programIds.filter((id) => id !== p.id)
-                          : [...programIds, p.id]
-                      )
-                    }
-                  />
-                  {p.name}
-                </label>
-              ))}
-            </div>
-          </fieldset>
+          <ProgramsFieldset programs={programs} value={programIds} onChange={setProgramIds} />
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
           <Button type="button" variant="outline" onClick={onClose} disabled={importing}>

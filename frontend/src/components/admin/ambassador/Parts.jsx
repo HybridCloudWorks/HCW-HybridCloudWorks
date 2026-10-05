@@ -214,6 +214,30 @@ export function CopyButton({ value, label, disabled = false, children = 'Copy', 
   );
 }
 
+/**
+ * "Counts for": checkboxes over the programs an import's rows should name;
+ * none ticked means the rows count for every program. Shared by the import
+ * dialogs so the wording and the toggle are written once.
+ */
+export function ProgramsFieldset({ programs, value, onChange }) {
+  const toggle = (id) =>
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return (
+    <fieldset className="space-y-1">
+      <legend className="text-xs font-medium">Counts for</legend>
+      <p className="text-[11px] text-muted-foreground">Leave clear to count for every program.</p>
+      <div className="flex flex-wrap gap-2">
+        {programs.map((p) => (
+          <label key={p.id} className="flex items-center gap-1.5 text-xs">
+            <input type="checkbox" checked={value.includes(p.id)} onChange={() => toggle(p.id)} />
+            {p.name}
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 /** Checkboxes over the evidence sources. */
 export function SourcePicker({ idPrefix, value, onChange, sources }) {
   const toggle = (source) =>

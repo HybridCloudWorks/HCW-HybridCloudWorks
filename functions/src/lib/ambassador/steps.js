@@ -110,6 +110,8 @@ export async function ensureSeededPrograms(ctx, rows) {
   return [...current, ...added];
 }
 
+const SEEDS_BY_ID = new Map(DEFAULT_PROGRAMS.map((program) => [program.id, program]));
+
 const hasQuestions = (doc) =>
   Array.isArray(doc?.applicationQuestions) && doc.applicationQuestions.length > 0;
 
@@ -135,31 +137,38 @@ const BACKFILL_FIELDS = [
  * seed already carrying its own value, is left alone.
  */
 async function backfillSeedFields(ctx, rows) {
-  const seeds = new Map(DEFAULT_PROGRAMS.map((program) => [program.id, program]));
   const out = [];
   for (const stored of rows) {
-    const seed = stored.seeded === true ? seeds.get(stored.id) : null;
-    const updates = {};
-    if (seed) {
-      for (const [field, wanted] of BACKFILL_FIELDS) {
-        if (wanted(stored, seed)) updates[field] = seed[field];
-      }
-    }
-    const fields = Object.keys(updates);
-    if (fields.length === 0) {
+    const patch = seedBackfillFor(stored, SEEDS_BY_ID.get(stored.id));
+    if (!patch) {
       out.push(stored);
       continue;
     }
     const patched = await ctx.store.patchDoc(
       CONTAINER,
       stored.id,
-      { ...updates, updatedAt: ctx.nowIso() },
+      { ...patch, updatedAt: ctx.nowIso() },
       stored._etag ? { ifMatch: stored._etag } : {}
     );
-    ctx.log.info?.(`[ambassador] seed backfill ${stored.id}: ${fields.join(', ')}`);
-    out.push(patched || { ...stored, ...updates });
+    ctx.log.info?.(`[ambassador] seed backfill ${stored.id}: ${Object.keys(patch).join(', ')}`);
+    out.push(patched || { ...stored, ...patch });
   }
   return out;
+}
+
+/**
+ * What a stored program should take from its seed: the BACKFILL_FIELDS it
+ * has none of, as the patch to write, or null when there is nothing to do —
+ * no seed for the id, a program the owner made (not `seeded`), or a seed
+ * already carrying its own values. Pure, so the decision is testable alone.
+ */
+export function seedBackfillFor(stored, seed) {
+  if (!seed || stored?.seeded !== true) return null;
+  const patch = {};
+  for (const [field, wanted] of BACKFILL_FIELDS) {
+    if (wanted(stored, seed)) patch[field] = seed[field];
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
 }
 
 /** Every program, the seeds filled in on every read, in display order. */

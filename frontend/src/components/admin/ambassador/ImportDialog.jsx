@@ -22,6 +22,7 @@ import { Loader2 } from 'lucide-react';
 import { TabError, TabLoading } from '@/components/admin/integrations/TabNotice';
 import useGuardedLoad from '@/components/admin/shared/useGuardedLoad';
 import { sourceLabel } from './ambassadorModel';
+import { ProgramsFieldset } from './Parts';
 import { loadImportSources } from './useAmbassadorData';
 
 const NO_ROWS = Object.freeze([]);
@@ -122,30 +123,7 @@ export default function ImportDialog({ sourceModule, programs, onClose, onImport
               </ul>
             </>
           )}
-          <fieldset className="space-y-1">
-            <legend className="text-xs font-medium">Counts for</legend>
-            <p className="text-[11px] text-muted-foreground">
-              Leave clear to count for every program.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {programs.map((p) => (
-                <label key={p.id} className="flex items-center gap-1.5 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={programIds.includes(p.id)}
-                    onChange={() =>
-                      setProgramIds(
-                        programIds.includes(p.id)
-                          ? programIds.filter((id) => id !== p.id)
-                          : [...programIds, p.id]
-                      )
-                    }
-                  />
-                  {p.name}
-                </label>
-              ))}
-            </div>
-          </fieldset>
+          <ProgramsFieldset programs={programs} value={programIds} onChange={setProgramIds} />
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
           <Button type="button" variant="outline" onClick={onClose} disabled={importing}>
