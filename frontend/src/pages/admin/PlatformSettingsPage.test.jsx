@@ -139,12 +139,13 @@ describe('tabs', () => {
     await screen.findByText('Podcast feeds');
     await screen.findByText('Listen & Learn voice');
     await screen.findByText('Not configured');
-    // Its three settings and the podcast voice's status (ElevenLabs,
-    // 2026-09-26; the podcast voices, #725). No key, so no voice list.
-    await waitFor(() => expect(routesAsked()).toHaveLength(4));
+    // Its two settings and the podcast voice's status (ElevenLabs,
+    // 2026-09-26; the podcast voices, #725). No key, so no voice list. The
+    // Listen & Learn voice card loads nothing: the model is chosen under AI
+    // Engine → Tasks (ADR 0034 slice 5).
+    await waitFor(() => expect(routesAsked()).toHaveLength(3));
     expect(routesAsked().sort()).toEqual(
       [
-        settingRoute('listen-and-learn-speech'),
         settingRoute('podcast-feeds'),
         settingRoute('podcast-voices'),
         ELEVENLABS_STATUS_ROUTE,

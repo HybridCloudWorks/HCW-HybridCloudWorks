@@ -35,7 +35,7 @@
 import { validateGroundingSources } from '../ai/router.js';
 import { recordAiUsageBatch, totalCostUsd, USAGE_SOURCES } from '../ai/usage.js';
 import { generateEpisodeScript } from './script.js';
-import { synthesizeDialogue } from './speech/index.js';
+import { speechUsageRows, synthesizeDialogue } from './speech/index.js';
 import { renderAudio, SUPPORTED_PLATFORMS, isSupportedPlatform } from './generate.js';
 import {
   EPISODE_KIND,
@@ -186,7 +186,7 @@ function resolveDeps(deps = {}) {
  * @param {object} params.storage Blob: uploadBlob
  * @param {{ generateGroundedJsonResponse: Function, getCostEstimate: Function }} params.ai the router
  * @param {object} [params.env]
- * @param {string|null} [params.ttsModel] the Gemini model the job resolved, or null (speech-settings.js)
+ * @param {string|null} [params.ttsModel] the model the job resolved for the listenAndLearnSpeech task, or null (listen-and-learn-jobs.js)
  * @param {string|null} [params.actorId]
  * @param {string} [params.now]
  * @param {object} [params.deps] test seams; see resolveDeps
@@ -316,18 +316,7 @@ export async function generateSourceEpisode({
   // row for work that was then lost would overstate spend.
   const usage = await recordUsage([
     ...scriptUsage.map((u) => ({ ...u, source: USAGE_SOURCES.listenAndLearnSourceScript })),
-    ...(audio.speechProvider
-      ? [
-          {
-            provider: audio.speechProvider,
-            model: audio.speechModel,
-            promptTokens: audio.promptTokens,
-            completionTokens: audio.completionTokens,
-            estimatedTokens: audio.estimatedTokens,
-            source: USAGE_SOURCES.listenAndLearnAudio,
-          },
-        ]
-      : []),
+    ...speechUsageRows('listenAndLearn', audio),
   ]);
 
   return {

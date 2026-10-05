@@ -50,7 +50,6 @@ export function bookPayload(form, { editing }) {
 export function catalogDefaults(catalog) {
   return {
     provider: 'auto',
-    model: null,
     speakers: { Maya: 'Kore', Elena: 'Leda' },
     narrator: 'Kore',
     language: 'en-US',

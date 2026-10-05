@@ -117,8 +117,9 @@ export default function AIEngineUsageTab() {
   }));
 
   // Grouped by what spent the money. Provider answers "which vendor"; this
-  // answers "which feature", which is the question when one vendor serves
-  // several and their rates differ by an order of magnitude.
+  // answers "which task" — the audio and image rows carry their task as the
+  // source too since ADR 0034 slice 5 — which is the question when one
+  // vendor serves several and their rates differ by an order of magnitude.
   const sourceRows = Object.entries(aiEngine.aggregateBySource(records))
     .map(([source, data]) => ({
       source,
@@ -243,7 +244,7 @@ export default function AIEngineUsageTab() {
       {sourceRows.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Breakdown by Feature</CardTitle>
+            <CardTitle className="text-sm">Breakdown by Task</CardTitle>
             <p className="text-xs text-slate-500">
               What spent the money, rather than who was paid. Listen &amp; Learn audio is priced on
               an output rate an order of magnitude above text, so a run&apos;s cost sits almost

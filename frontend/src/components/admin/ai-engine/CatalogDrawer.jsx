@@ -27,12 +27,17 @@ const STATUS_TONE = {
   unknown: 'border-amber-200 bg-amber-50 text-amber-700',
 };
 
-/** "$0.25 / $2.00 per 1M" from the catalogue's pricing, or "unpriced". */
+/**
+ * "$0.25 / $2.00 per 1M" from the catalogue's pricing, or "unpriced". A row
+ * priced in another unit says so (ADR 0034 slice 5): ElevenLabs per 1M
+ * characters, Replicate per image.
+ */
 export function describePrice(model) {
   if (model?.unpriced || !model?.pricing) return 'unpriced';
-  const { inputPer1M, outputPer1M } = model.pricing;
+  const { inputPer1M, outputPer1M, perUnitUsd, unit } = model.pricing;
+  if (typeof perUnitUsd === 'number') return `$${perUnitUsd} per ${unit || 'unit'}`;
   if (typeof inputPer1M !== 'number' || typeof outputPer1M !== 'number') return 'unpriced';
-  return `$${inputPer1M} / $${outputPer1M} per 1M`;
+  return `$${inputPer1M} / $${outputPer1M} per ${unit || '1M'}`;
 }
 
 function ModelRow({ provider, model, busy, onHide }) {
@@ -131,7 +136,8 @@ export default function CatalogDrawer({
           <DialogTitle>Model catalogue</DialogTitle>
           <DialogDescription>
             Every model the providers list, refreshed weekly or on demand. Hidden models leave the
-            dropdowns and stay here so they can be shown again.
+            dropdowns and stay here so they can be shown again. ElevenLabs and Replicate list here
+            too: they have no card, and a key is what switches them on.
           </DialogDescription>
         </DialogHeader>
 

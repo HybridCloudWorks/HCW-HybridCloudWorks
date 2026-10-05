@@ -32,14 +32,19 @@ import { AI_TASKS } from './tasks.js';
  *
  * Derived from the task registry (tasks.js, ADR 0034 slice 1): a feature is a
  * task's label, description and route, under the same id. One list, kept in
- * one place; the modality, needs and recommendation live on the task.
+ * one place; the modality, needs and recommendation live on the task. A
+ * `planned` task (slice 5: speech-to-text, OCR, embeddings, registered
+ * ahead of any provider that serves them) is NOT a feature: a switch for
+ * something that cannot happen reads as a working switch and does nothing.
  */
 export const AI_FEATURES = Object.freeze(
   Object.fromEntries(
-    Object.entries(AI_TASKS).map(([id, task]) => [
-      id,
-      Object.freeze({ label: task.label, description: task.description, route: task.route }),
-    ])
+    Object.entries(AI_TASKS)
+      .filter(([, task]) => task.planned !== true)
+      .map(([id, task]) => [
+        id,
+        Object.freeze({ label: task.label, description: task.description, route: task.route }),
+      ])
   )
 );
 
@@ -126,6 +131,13 @@ const placements = ({ content, altText }) =>
     sourceGrounding: 'off',
     pricingExplain: 'off',
     landingZoneExplain: 'off',
+    // The media tasks (ADR 0034 slice 5, #860): a chat provider never reads
+    // a voice or makes an image, so no placement applies; migrate-selection.js
+    // skips them and the resolver turns a chat provider away by capability.
+    listenAndLearnSpeech: 'off',
+    podcastVoice: 'off',
+    coverArt: 'off',
+    manualImages: 'off',
   });
 
 export const PROVIDER_PLACEMENT_DEFAULTS = Object.freeze({

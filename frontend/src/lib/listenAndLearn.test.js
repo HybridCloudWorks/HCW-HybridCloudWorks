@@ -158,19 +158,13 @@ describe('generation runs as a job', () => {
     expect(payload).not.toHaveProperty('areas');
   });
 
-  it('carries the per-run voice model only when one was chosen — "Stored default" sends none', async () => {
-    // The worker reads the stored default when the payload names no model
-    // (speech-settings.js); a blank string would be refused there, and an
-    // omitted field is what "Stored default" means (Copilot on #462).
+  it('never carries a voice model: the model is the Listen & Learn speech task’s (ADR 0034 slice 5)', async () => {
     runJob.mockResolvedValue({});
     const base = { platform: 'azure', examCode: 'AZ-104', studyGuideUrl: 'https://x' };
-    await generateEpisodes({ ...base, ttsModel: '' });
-    await generateEpisodes({ ...base, ttsModel: undefined });
+    await generateEpisodes({ ...base });
     await generateEpisodes({ ...base, ttsModel: 'gemini-2.5-flash-preview-tts' });
-
     expect(runJob.mock.calls[0][1]).not.toHaveProperty('ttsModel');
     expect(runJob.mock.calls[1][1]).not.toHaveProperty('ttsModel');
-    expect(runJob.mock.calls[2][1]).toMatchObject({ ttsModel: 'gemini-2.5-flash-preview-tts' });
   });
 
   it('passes the optional fields through when they are set', async () => {
@@ -306,12 +300,10 @@ describe('the Audio Library calls (ADR 0033 §4)', async () => {
     runJob.mockResolvedValue({ status: 'succeeded' });
     postJSON.mockResolvedValue({ ok: true, jobId: 'j' });
     const onAccepted = vi.fn();
-    await lib.regenerateChapter(
-      { ...key, chapterId: 'area-1', ttsModel: 'gemini-2.5-flash-preview-tts' },
-      { onAccepted }
-    );
+    await lib.regenerateChapter({ ...key, chapterId: 'area-1' }, { onAccepted });
     const [, payload, options] = runJob.mock.calls.at(-1);
-    expect(payload).toEqual({ ttsModel: 'gemini-2.5-flash-preview-tts' });
+    // No model travels: the job reads the task's (ADR 0034 slice 5).
+    expect(payload).toEqual({});
     expect(options.onAccepted).toBe(onAccepted);
     await options.fetchers.enqueue({ payload });
     expect(postJSON).toHaveBeenCalledWith(

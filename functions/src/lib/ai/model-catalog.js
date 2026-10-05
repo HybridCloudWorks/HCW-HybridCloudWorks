@@ -38,17 +38,28 @@
  * pricing come from ENRICHMENT_TABLE and COST_TABLE, both code. A model
  * with no table row is `['text']` and unpriced, and an unpriced model is
  * badged on the card and never recommended (ADR 0034 §2).
+ *
+ * THE MEDIA PROVIDERS ARE CATALOGUE PROVIDERS (ADR 0034 slice 5, #860).
+ * ElevenLabs and Replicate have entries like the chat providers, keyed by
+ * ELEVENLABS_API_KEY and REPLICATE_API_KEY (router.js MEDIA_KEY_ENV), and
+ * NO CARD: a key is what switches them on, there is no order to set and no
+ * Test to run, and the catalogue drawer says so. ElevenLabs lists its
+ * models; Replicate's list is the static set of image models this
+ * repository calls. Gemini's TTS models were in its list already (they
+ * answer generateContent) and now carry `tts` through the enrichment table.
  */
 import {
   KEY_ENV,
+  MEDIA_KEY_ENV,
   NVIDIA_BASE_URL,
-  PROVIDERS,
   createFoundryTokenProvider,
   defaultGetToken,
   foundryBaseUrl,
   foundryTokenScope,
   readKey,
 } from './router.js';
+import { KNOWN_PROVIDERS as PROVIDERS } from './provider-order.js';
+import { MEDIA_DEFAULT_MODELS } from './model-tables.js';
 import { SETTINGS_CONTAINER } from './containers.js';
 import {
   CATALOG_DOC_ID,
@@ -82,6 +93,7 @@ export {
   readModelCatalog,
   seedModelsFor,
   seedProviderEntry,
+  selectableModelsFor,
   visibleModelsFor,
 } from './model-catalog-doc.js';
 
@@ -196,7 +208,33 @@ const LISTERS = {
     }
     return ids;
   },
+  // The media providers (ADR 0034 slice 5, #860). ElevenLabs lists its
+  // models at GET /v1/models as a bare array of { model_id, name, … }
+  // (https://elevenlabs.io/docs/api-reference/models/list, read 2026-10-05);
+  // the ids come from `model_id`, and an answer that is not an array is a
+  // malformed list, for the reason collectionOf gives.
+  elevenlabs: async (ctx) => {
+    const data = await getJson(
+      ctx.fetchImpl,
+      'https://api.elevenlabs.io/v1/models',
+      { 'xi-api-key': readKey(ctx.env, MEDIA_KEY_ENV.elevenlabs) },
+      ctx.timeoutMs
+    );
+    if (!Array.isArray(data)) throw new Error('Malformed list: the answer was not an array of models');
+    return data
+      .map((row) => (typeof row?.model_id === 'string' ? row.model_id.trim() : ''))
+      .filter(Boolean);
+  },
+  // Replicate has no list this site should read: its catalogue is every
+  // public model on the platform. The list is STATIC — the image models
+  // this repository calls (model-tables.js MEDIA_DEFAULT_MODELS) — so a
+  // refresh confirms them `live` and a model the code stops calling
+  // retires like any other.
+  replicate: async () => [...MEDIA_DEFAULT_MODELS.replicate],
 };
+
+/** The env name that makes a provider possible: a chat key, or a media key (router.js MEDIA_KEY_ENV). */
+const keyEnvFor = (provider) => KEY_ENV[provider] || MEDIA_KEY_ENV[provider];
 
 /**
  * One Gemini page's chat-capable ids: `models/<id>` entries whose
@@ -255,7 +293,7 @@ export function createListContext({
 export async function listModels(ctx, provider) {
   const lister = LISTERS[provider];
   if (!lister) throw new Error(`Unknown AI provider: ${provider}`);
-  if (!readKey(ctx.env, KEY_ENV[provider])) return null;
+  if (!readKey(ctx.env, keyEnvFor(provider))) return null;
   const ids = await lister(ctx);
   return [...new Set(ids)];
 }

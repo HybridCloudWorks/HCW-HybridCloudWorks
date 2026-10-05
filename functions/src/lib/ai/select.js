@@ -64,10 +64,26 @@
  * ask for it. The contract test (select.contract.test.js) holds the
  * resolver to the chains the pre-slice router produced.
  *
+ * THE MEDIA TASKS RESOLVE HERE TOO (ADR 0034 slice 5, #860). Listen & Learn
+ * speech, the podcast voice and the image tasks are tasks with `needs` of
+ * `tts` or `image`; ElevenLabs and Replicate are providers the chain may
+ * name (KNOWN_PROVIDERS) and `availability.keyed` lists when their key is
+ * present — keyed is enabled for them, they have no card. The Priority list
+ * stays a chat list: a media provider never joins it, a media task defaults
+ * to mode `recommended` (tasks.js defaultMode), and a chat provider walked
+ * from the list for a media task is turned away for want of the capability,
+ * so the task shows "no eligible model" rather than a text model that
+ * cannot speak. A media task also carries a product rule, `only`, as a
+ * policy lock, and its recommendation stands while the catalogue has not
+ * yet confirmed it (recommendedVerdict). Rule 5 gains a provider half for capabilities
+ * (PROVIDER_CAPABILITIES): a provider that cannot carry the need at all is
+ * rejected before any model is looked at, which is what keeps a planned
+ * task (stt, ocr, embedding) honest until an adapter exists.
+ *
  * Free of I/O and of `ctx`: everything it reads is an argument.
  */
-import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
-import { taskFor } from './tasks.js';
+import { DEFAULT_PROVIDER_ORDER, KNOWN_PROVIDERS, PROVIDER_CAPABILITIES } from './provider-order.js';
+import { MEDIA_MODALITIES, defaultModeFor, isMediaTask, taskFor } from './tasks.js';
 import { recommendedModelFor } from './provider-recommendations.js';
 import { enrichmentFor } from './model-enrichment.js';
 
@@ -108,10 +124,14 @@ function definitionOf(task) {
   return found ? { id: task, ...found } : UNDECLARED_TASK;
 }
 
-/** The task's entry in the document: `{ mode, chain?, thenGlobal?, exclude? }`, `global` when absent. */
+/**
+ * The task's entry in the document: `{ mode, chain?, thenGlobal?, exclude? }`,
+ * or the task's own default mode when absent — `global` for a chat task,
+ * `recommended` for a media one (tasks.js defaultMode, header).
+ */
 function entryOf(selection, def) {
   const entry = def.id ? selection?.tasks?.[def.id] : null;
-  return isPlainObject(entry) ? entry : { mode: 'global' };
+  return isPlainObject(entry) ? entry : { mode: defaultModeFor(def) };
 }
 
 /**
@@ -156,7 +176,16 @@ const reject = (step, code, why) => ({
 function providerRejection(step, { def, availability, exclude }) {
   const facts = { provider: step.provider, def, availability, exclude };
   const failed = PROVIDER_CHECKS.find((check) => check.fails(facts));
-  return failed ? reject(step, failed.code, failed.why(facts)) : null;
+  if (!failed) return null;
+  // `providerLevel` marks a rejection that holds whatever model a later
+  // step names, so the walk settles the provider on it (PROVIDER_LEVEL).
+  return { ...reject(step, failed.code, failed.why(facts)), ...failed.extra?.(facts), providerLevel: true };
+}
+
+/** The task's MEDIA needs the provider cannot carry at all (PROVIDER_CAPABILITIES, tasks.js MEDIA_MODALITIES). */
+function missingFromProvider(provider, def) {
+  const carried = PROVIDER_CAPABILITIES[provider] || [];
+  return def.needs.filter((need) => MEDIA_MODALITIES.includes(need) && !carried.includes(need));
 }
 
 /**
@@ -166,7 +195,7 @@ function providerRejection(step, { def, availability, exclude }) {
 const PROVIDER_CHECKS = Object.freeze([
   {
     code: 'unknown',
-    fails: ({ provider }) => !DEFAULT_PROVIDER_ORDER.includes(provider),
+    fails: ({ provider }) => !KNOWN_PROVIDERS.includes(provider),
     why: ({ provider }) => `not available: ${provider} is not a provider the router implements`,
   },
   {
@@ -194,6 +223,31 @@ const PROVIDER_CHECKS = Object.freeze([
     fails: ({ provider, def }) =>
       def.needs.includes('grounding') && !GROUNDING_PROVIDERS.includes(provider),
     why: () => 'not eligible: grounding is Gemini-only',
+  },
+  {
+    // The media half of rule 5's provider check (header): a provider that
+    // cannot carry a media need at all — a chat provider walked from the
+    // Priority list for a speech task, any provider for a planned task — is
+    // turned away before a model is looked at. The chat needs (text, json,
+    // vision, grounding) stay judged per model and by the locks above, as
+    // they were. Carries `missing` like the model-level rejection, so the
+    // router's sentence names the capability.
+    code: 'capability',
+    fails: ({ provider, def }) => missingFromProvider(provider, def).length > 0,
+    why: ({ provider, def }) =>
+      `not eligible: ${provider} cannot carry ${missingFromProvider(provider, def).join(', ')}`,
+    extra: ({ provider, def }) => ({ missing: missingFromProvider(provider, def) }),
+  },
+  {
+    // The product rule a media task carries in code (tasks.js `only`): the
+    // podcast voice is ElevenLabs-only, Listen & Learn speech Gemini-only,
+    // the images Replicate-only (ADR 0029 §2b). No document lifts it. After
+    // the capability check, so a provider that could not serve anyway is
+    // reported for that, and this names only the one the rule itself turns
+    // away (Gemini, which carries tts, from the podcast).
+    code: 'policy',
+    fails: ({ provider, def }) => Array.isArray(def.only) && !def.only.includes(provider),
+    why: ({ def }) => `not eligible: ${def.label} is served by ${def.only.join(' or ')} only`,
   },
 ]);
 
@@ -238,7 +292,13 @@ function recommendedVerdict(step, { def, catalog }) {
   const verdict = modelVerdict(step, step.model, { def, catalog });
   if (verdict.rejection) return verdict;
   const { entry } = verdict;
-  if (entry.status !== 'live') {
+  // A media task has no Priority list behind it (header: THE MEDIA TASKS),
+  // so its recommendation stands while the catalogue has not confirmed it
+  // — the week between a deploy and the next refresh is the difference
+  // between a voice and silence — with the not-yet-listed note; only a
+  // retired, unable or unpriced one falls. A chat task keeps the strict
+  // reading: the list serves until the refresh says live.
+  if (entry.status !== 'live' && !(isMediaTask(def) && entry.status === 'unknown')) {
     return {
       rejection: reject(
         step,
@@ -386,8 +446,11 @@ function walk(steps, deps, rejected) {
       chain.push(accepted);
       settled.add(step.provider);
     } else {
-      rejected.push(rejection);
-      if (deps.explicitModel || PROVIDER_LEVEL.includes(rejection.code)) settled.add(step.provider);
+      const { providerLevel, ...reported } = rejection;
+      rejected.push(reported);
+      if (deps.explicitModel || providerLevel || PROVIDER_LEVEL.includes(rejection.code)) {
+        settled.add(step.provider);
+      }
     }
   }
   return chain;

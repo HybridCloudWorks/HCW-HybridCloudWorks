@@ -294,8 +294,9 @@ describe('generateSourceEpisode — the run', () => {
     const rows = deps.recordUsage.mock.calls[0][0];
     expect(rows.map((r) => r.source)).toEqual([
       USAGE_SOURCES.listenAndLearnSourceScript,
-      USAGE_SOURCES.listenAndLearnAudio,
+      'ai:listenAndLearnSpeech',
     ]);
+    expect(rows[1].product).toBe(USAGE_SOURCES.listenAndLearnAudio);
     expect(USAGE_SOURCES.listenAndLearnSourceScript).toBe('listen-and-learn:source-script');
     expect(rows[0]).toMatchObject({ provider: 'gemini', promptTokens: 9000 });
   });

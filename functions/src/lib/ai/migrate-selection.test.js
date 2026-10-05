@@ -7,7 +7,7 @@ import { defaultSelection, migrateSelection, taskEntryFor } from './migrate-sele
 import { resolveProviderOrder } from './ai-config.js';
 import { PROVIDER_PLACEMENT_DEFAULTS } from './features-catalogue.js';
 import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
-import { TASK_NAMES } from './tasks.js';
+import { AI_TASKS, TASK_NAMES, isMediaTask } from './tasks.js';
 
 const CONTENT = [
   'inspector',
@@ -82,7 +82,10 @@ describe('placements and routes → tasks', () => {
     for (const task of ['sourceGrounding', 'pricingExplain', 'landingZoneExplain']) {
       expect(tasks[task], task).toEqual({ mode: 'global', exclude: ['nvidia', 'foundry'] });
     }
-    expect(Object.keys(tasks).sort()).toEqual([...TASK_NAMES].sort());
+    // The media tasks never had a placement or a route (slice 5): no entry.
+    expect(Object.keys(tasks).sort()).toEqual(
+      TASK_NAMES.filter((task) => !isMediaTask(AI_TASKS[task])).sort()
+    );
     expect(defaultSelection()).toEqual(migrateSelection({}));
     expect(defaultSelection()).toBe(defaultSelection());
   });

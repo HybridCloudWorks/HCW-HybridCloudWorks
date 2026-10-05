@@ -53,10 +53,18 @@
  */
 
 import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
-import { FEATURES_DOC_ID, PROVIDERS_CONTAINER, SETTINGS_CONTAINER } from './containers.js';
+import {
+  ADMIN_CONFIG_CONTAINER,
+  ADMIN_CONFIG_PARTITION,
+  FEATURES_DOC_ID,
+  LISTEN_AND_LEARN_SPEECH_DOC_ID,
+  PODCAST_VOICE_MODEL_SETTING,
+  PROVIDERS_CONTAINER,
+  SETTINGS_CONTAINER,
+} from './containers.js';
 import { ROUTING_DOC_ID, normalizeRouting } from './routing-table.js';
 import { isSelectionV2, normalizeSelection } from './selection.js';
-import { migrateSelection } from './migrate-selection.js';
+import { applyMediaMigration, migrateSelection } from './migrate-selection.js';
 import { readModelCatalog } from './model-catalog-doc.js';
 
 /**
@@ -188,21 +196,48 @@ async function readCatalog(store, { now, log }) {
  * none — migrated in memory from the three documents. Nothing is written
  * on read; the first PUT after the migration stores version 2.
  */
-export function selectionFrom({ providers, features, routing }) {
+export function selectionFrom({ providers, features, routing, media = null }) {
   return isSelectionV2(routing)
-    ? normalizeSelection(routing)
-    : migrateSelection({ providers, features, routing });
+    ? applyMediaMigration(normalizeSelection(routing), media)
+    : migrateSelection({ providers, features, routing, media });
+}
+
+/**
+ * The model choices the settings pages carried before the Tasks tab owned
+ * them (ADR 0034 slice 5, #860; migrate-selection.js header): the Listen &
+ * Learn speech model stored on Platform settings and the podcast voice
+ * model setting. Read so a choice made before this slice survives it; a
+ * document that cannot be read is "none stored" (the task stays on its
+ * recommendation) and never fails the other reads.
+ */
+async function readMediaModels(store, { env, log }) {
+  let speech = null;
+  try {
+    speech = await store.readDoc(
+      ADMIN_CONFIG_CONTAINER,
+      LISTEN_AND_LEARN_SPEECH_DOC_ID,
+      ADMIN_CONFIG_PARTITION
+    );
+  } catch (error) {
+    log.warn?.(`[ai-config] could not read the Listen & Learn speech setting: ${error?.message || error}`);
+  }
+  const podcast = String(env?.[PODCAST_VOICE_MODEL_SETTING] || '').trim();
+  return {
+    listenAndLearnSpeech: typeof speech?.geminiModel === 'string' ? speech.geminiModel : null,
+    podcastVoice: podcast && !podcast.startsWith('@Microsoft.KeyVault(') ? podcast : null,
+  };
 }
 
 /** The three documents and the catalogue, read together and normalised. */
 async function readAiConfig(store, deps) {
-  const [providers, features, routing, catalog] = await Promise.all([
+  const [providers, features, routing, catalog, media] = await Promise.all([
     store.queryDocs(PROVIDERS_CONTAINER, 'SELECT * FROM c'),
     store.readDoc(SETTINGS_CONTAINER, FEATURES_DOC_ID, FEATURES_DOC_ID),
     // The selection document (ADR 0034 §2), or the per-task routing it
     // migrates from (ADR 0033). A missing document is the code defaults.
     store.readDoc(SETTINGS_CONTAINER, ROUTING_DOC_ID, ROUTING_DOC_ID),
     readCatalog(store, deps),
+    readMediaModels(store, deps),
   ]);
   const cards = Array.isArray(providers) ? providers : [];
   return {
@@ -210,7 +245,12 @@ async function readAiConfig(store, deps) {
     features: features || null,
     // The v1 view, kept for the Routing tab until slice 4 removes it.
     routing: routing ? normalizeRouting(routing) : null,
-    selection: selectionFrom({ providers: cards, features: features || null, routing: routing || null }),
+    selection: selectionFrom({
+      providers: cards,
+      features: features || null,
+      routing: routing || null,
+      media,
+    }),
     catalog,
   };
 }
@@ -270,9 +310,12 @@ export function createAiConfigLoader({
   ttlMs = 60_000,
   now = () => Date.now(),
   log = console,
+  // The environment the media migration reads the podcast voice model
+  // setting from (readMediaModels); the router hands over its own.
+  env = process.env,
 } = {}) {
   const state = { cache: null, inflight: null }; // cache: { at, value }
-  const deps = { store, ttlMs, now, log };
+  const deps = { store, ttlMs, now, log, env };
   return {
     load: async () => loadAiConfig(state, deps),
     invalidate: () => (state.cache = null),

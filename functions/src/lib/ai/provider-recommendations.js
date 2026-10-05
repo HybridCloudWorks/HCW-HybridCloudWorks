@@ -9,7 +9,10 @@
  * Reviewed like the cost table, in the same pull request as a new rate.
  *
  * This is the table slice 2's adapters carry as `recommendedByModality`; it
- * lives here until the adapters exist. Nothing reads it yet.
+ * lives here until the adapters exist. The resolver (select.js) judges a
+ * null step on it, and the media call sites read it for a custom step that
+ * names a provider and no model (slice 5, #860): the media providers carry
+ * their one modality each, and Gemini carries `tts` beside its text ones.
  */
 
 const ASOF = '2026-10-05';
@@ -22,6 +25,13 @@ export const RECOMMENDED_BY_MODALITY = Object.freeze({
     json: rec('gemini-3.6-flash', 'Structured output that holds on long inputs; $1.50 / $7.50.'),
     vision: rec('gemini-3.6-flash', 'Reads images; the same model the inspector used for alt text before 2026-10-04.'),
     grounding: rec('gemini-3.6-flash', 'The only model the Interactions API grounds on pages and YouTube (router.js header).'),
+    tts: rec('gemini-2.5-flash-preview-tts', 'The Economy voice: half the price of 3.1 Flash TTS per audio token ($0.50 / $10.00 per 1M).'),
+  }),
+  elevenlabs: Object.freeze({
+    tts: rec('eleven_v3', 'The one model the Text to Dialogue endpoint serves; USD 0.10 per 1,000 characters.'),
+  }),
+  replicate: Object.freeze({
+    image: rec('google/imagen-4-fast', 'USD 0.02 per output image on replicate.com (read 2026-10-05), about three seconds an image.'),
   }),
   openai: Object.freeze({
     text: rec('gpt-5-nano', 'The cheapest OpenAI model: $0.05 / $0.40 per 1M tokens (published rates, owner confirmation 2026-10-05).'),

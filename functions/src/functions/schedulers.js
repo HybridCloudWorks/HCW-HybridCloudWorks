@@ -274,7 +274,8 @@ timer('probeAiProviders', 'PROBE_AI_PROVIDERS', '0 15 6 * * 1', async (context) 
     const ctx = catalog.createListContext();
     return catalog.refreshModelCatalog({
       store,
-      providers: ai.availableProviders(),
+      // The media providers list too (ADR 0034 slice 5): keyed is enabled for them.
+      providers: [...ai.availableProviders(), ...ai.availableMediaProviders()],
       listModels: (provider) => catalog.listModels(ctx, provider),
     });
   };

@@ -640,6 +640,8 @@ describe('regenerateChapter — one chapter, the right job', () => {
       sets: { 'azure_az-104': set() },
       chapters: { 'area-1': chapter('area-1') },
     });
+    // A ttsModel in the body is ignored (ADR 0034 slice 5): the model is the
+    // listenAndLearnSpeech task's, read by the job when it runs.
     const res = await run(store, 'area-1', { ttsModel: 'gemini-3.1-flash-tts-preview' });
     expect(res.status).toBe(202);
     const body = parse(res);
@@ -649,9 +651,10 @@ describe('regenerateChapter — one chapter, the right job', () => {
       type: LISTEN_AND_LEARN_JOB_TYPE,
       chapterId: 'area-1',
     });
+    // No router wired here, so the estimate prices the switch's own default.
     expect(body.speech).toMatchObject({
       provider: 'gemini',
-      model: 'gemini-3.1-flash-tts-preview',
+      model: 'gemini-2.5-flash-preview-tts',
     });
     expect(body.speech.estimatedCostUsd).toBeGreaterThan(0);
     expect(store.docs[JOBS_CONTAINER]['job-1'].payload).toEqual({
@@ -661,7 +664,6 @@ describe('regenerateChapter — one chapter, the right job', () => {
       areas: ['area-1'],
       certTitle: 'Azure Administrator',
       certSlug: 'az-104',
-      ttsModel: 'gemini-3.1-flash-tts-preview',
     });
   });
 
@@ -709,7 +711,9 @@ describe('regenerateChapter — one chapter, the right job', () => {
     });
     expect(parse(await run(store, 'manual_empty')).error).toMatch(/no text to speak/);
     expect(parse(await run(store, 'area-1')).error).toMatch(/study guide/);
-    expect((await run(store, 'area-1', { ttsModel: 'nope' })).status).toBe(400);
+    // A model in the body is ignored rather than refused (slice 5): the
+    // refusal here is the missing study guide, never the model.
+    expect(parse(await run(store, 'area-1', { ttsModel: 'nope' })).error).not.toMatch(/ttsModel/);
     expect((await run(store, 'missing')).status).toBe(404);
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
@@ -720,16 +724,57 @@ describe('speech options and the estimate', () => {
     const store = makeStore();
     const res = parse(await handlers(store).speechOptions(makeRequest(), context));
     expect(res.defaultModel).toBe('gemini-2.5-flash-preview-tts');
-    expect(res.effectiveModel).toBe('gemini-2.5-flash-preview-tts');
-    expect(res.models.find((m) => m.isDefault).id).toBe('gemini-2.5-flash-preview-tts');
+    // No router wired: the task's model is unknown here, and nothing is editable.
+    expect(res.model).toBeNull();
+    expect(res).not.toHaveProperty('models');
+    expect(res).not.toHaveProperty('storedModel');
     expect(res.voices.gemini).toHaveLength(30);
     expect(res.speech.wouldRun).toBe('gemini');
     expect(res.speech.providers.find((p) => p.id === 'elevenlabs').allowed).toBe(false);
   });
 
-  it('prices text or bytes, by the book’s voice when one is named', async () => {
+  it('reports the listenAndLearnSpeech task’s effective model through the router (ADR 0034 slice 5)', async () => {
+    const store = makeStore();
+    const ai = {
+      modelForTask: vi.fn(async () => ({
+        provider: 'gemini',
+        model: 'gemini-3.1-flash-tts-preview',
+        selection: 'custom',
+        why: 'custom chain, step 1 · model gemini-3.1-flash-tts-preview',
+      })),
+    };
+    const res = parse(await handlers(store, editor, { ai }).speechOptions(makeRequest(), context));
+    expect(ai.modelForTask).toHaveBeenCalledWith({ task: 'listenAndLearnSpeech' });
+    expect(res.model).toMatchObject({
+      task: 'listenAndLearnSpeech',
+      provider: 'gemini',
+      model: 'gemini-3.1-flash-tts-preview',
+      why: expect.stringContaining('custom chain'),
+    });
+    expect(res.model.perEpisodeUsd).toBeGreaterThan(0);
+
+    const off = new Error("The 'listenAndLearnSpeech' AI feature is turned off in the admin portal.");
+    off.code = 'AI_FEATURE_DISABLED';
+    const refused = { modelForTask: vi.fn(async () => Promise.reject(off)) };
+    const said = parse(
+      await handlers(store, editor, { ai: refused }).speechOptions(makeRequest(), context)
+    );
+    expect(said.model).toEqual({
+      task: 'listenAndLearnSpeech',
+      provider: null,
+      model: null,
+      error: off.message,
+    });
+  });
+
+  it('prices text or bytes with the task’s model, by the book’s voice when one is named', async () => {
+    // A book's voice.model is dropped on read (slice 5); the provider stays.
     const store = makeStore({
-      sets: { 'azure_az-104': set({ voice: { model: 'gemini-3.1-flash-tts-preview' } }) },
+      sets: {
+        'azure_az-104': set({
+          voice: { provider: 'gemini', model: 'gemini-3.1-flash-tts-preview' },
+        }),
+      },
     });
     const plain = parse(
       await handlers(store).estimateSpeech(makeRequest({ body: { text: 'Hello' } }), context)
@@ -745,8 +790,22 @@ describe('speech options and the estimate', () => {
         context
       )
     );
-    expect(forBook.model).toBe('gemini-3.1-flash-tts-preview');
-    expect(forBook.estimatedCostUsd).toBeCloseTo(plain.estimatedCostUsd * (9000 / 5) * 2, 1);
+    expect(forBook.model).toBe('gemini-2.5-flash-preview-tts');
+    expect(forBook.estimatedCostUsd).toBeCloseTo(plain.estimatedCostUsd * (9000 / 5), 1);
+
+    // With the router wired, the task's model prices the estimate; a
+    // ttsModel in the body is ignored.
+    const ai = {
+      modelForTask: vi.fn(async () => ({ provider: 'gemini', model: 'gemini-3.1-flash-tts-preview' })),
+    };
+    const best = parse(
+      await handlers(store, editor, { ai }).estimateSpeech(
+        makeRequest({ body: { bytes: 9000, ttsModel: 'gemini-2.5-flash-preview-tts' } }),
+        context
+      )
+    );
+    expect(best.model).toBe('gemini-3.1-flash-tts-preview');
+    expect(best.estimatedCostUsd).toBeCloseTo(forBook.estimatedCostUsd * 2, 6);
     expect((await handlers(store).estimateSpeech(makeRequest({ body: {} }), context)).status).toBe(
       400
     );

@@ -144,6 +144,11 @@ const modelLabel = (model) =>
 function voiceLabel(speech) {
   const name = PROVIDER_LABEL[speech.provider] || speech.provider;
   if (speech.model) return `${name} ${modelLabel(speech.model)}`;
+  // A 202 cannot know the model: since ADR 0034 slice 5 it is the task's
+  // (`task`); an older server said the stored default applied (`stored`).
+  if (speech.modelSource === 'task') {
+    return `${name} (${speech.modelNote || 'the model is chosen under AI Engine → Tasks'})`;
+  }
   if (speech.modelSource === 'stored') {
     return `${name} (${speech.modelNote || 'the stored default model applies'})`;
   }

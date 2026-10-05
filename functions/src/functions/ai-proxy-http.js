@@ -37,6 +37,7 @@ const routingHandlers = () =>
     store: { queryDocs, readDoc, upsertDoc, patchDoc, deleteDoc },
     onAiConfigChanged: ai.invalidateConfig,
     availableProviders: ai.availableProviders,
+    availableMediaProviders: ai.availableMediaProviders,
     effectiveSelection: ai.resolveEffectiveSelection,
     ai: { callProvider: ai.callProvider, getCostEstimate },
   });

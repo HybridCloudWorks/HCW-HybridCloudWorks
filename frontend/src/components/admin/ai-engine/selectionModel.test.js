@@ -7,7 +7,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   MAX_CHAIN,
+  MEDIA_PROVIDER_LABELS,
   addToPriority,
+  chainProvidersFor,
   describeEffective,
   describePriorityRow,
   draftEntry,
@@ -322,5 +324,43 @@ describe('what the resolver’s answer says', () => {
       { provider: 'gemini', model: 'gemini-2.5-pro', where: ['the Priority list'] },
     ]);
     expect(retiredInUse(null)).toEqual([]);
+  });
+});
+
+describe('the media providers on the page (ADR 0034 slice 5, #860)', () => {
+  const availability = {
+    keyed: ['gemini', 'elevenlabs'],
+    enabled: ['gemini', 'elevenlabs'],
+    media: ['elevenlabs', 'replicate'],
+    capabilities: {
+      gemini: ['text', 'json', 'vision', 'grounding', 'tts'],
+      anthropic: ['text', 'json', 'vision'],
+      elevenlabs: ['tts'],
+      replicate: ['image'],
+    },
+  };
+
+  it('names a media provider without a card, never a model id', () => {
+    expect(providerLabel('elevenlabs', PROVIDERS)).toBe('ElevenLabs');
+    expect(providerLabel('replicate')).toBe('Replicate');
+    expect(MEDIA_PROVIDER_LABELS).toEqual({ elevenlabs: 'ElevenLabs', replicate: 'Replicate' });
+  });
+
+  it('offers a task only the providers that carry its needs, the media ones included, under its product rule', () => {
+    const ids = (resolved) => chainProvidersFor(resolved, PROVIDERS, availability).map((p) => p.id);
+    expect(ids({ needs: ['tts'], only: null })).toEqual(['gemini', 'elevenlabs']);
+    expect(ids({ needs: ['tts'], only: ['elevenlabs'] })).toEqual(['elevenlabs']);
+    expect(ids({ needs: ['tts'], only: ['gemini'] })).toEqual(['gemini']);
+    expect(ids({ needs: ['image'], only: ['replicate'] })).toEqual(['replicate']);
+    expect(ids({ needs: ['text'] })).toEqual(['gemini', 'anthropic']);
+    expect(ids({ needs: ['embedding'] })).toEqual([]);
+    // No capabilities on the answer (an older API): every card, as before.
+    expect(chainProvidersFor({ needs: ['tts'] }, PROVIDERS, {}).map((p) => p.id)).toEqual(
+      PROVIDERS.map((p) => p.id)
+    );
+    expect(chainProvidersFor({ needs: ['tts'] }, PROVIDERS, availability)[1]).toEqual({
+      id: 'elevenlabs',
+      name: 'ElevenLabs',
+    });
   });
 });

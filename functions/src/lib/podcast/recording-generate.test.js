@@ -286,7 +286,7 @@ describe('a full run from the Plaud library', () => {
     });
 
     expect(Object.values(store.docs.ai_usage).map((r) => r.source).sort()).toEqual(
-      [USAGE_SOURCES.podcastAudio, USAGE_SOURCES.podcastScript].sort()
+      ['ai:podcastVoice', USAGE_SOURCES.podcastScript].sort()
     );
     expect(report).toMatchObject({
       id: 'plaud_rec-1',

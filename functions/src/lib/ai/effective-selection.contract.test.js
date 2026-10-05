@@ -14,7 +14,8 @@ import { resolveProviderOrder, selectionFrom } from './ai-config.js';
 import { readModelCatalog } from './model-catalog-doc.js';
 import { recommendedModelFor } from './provider-recommendations.js';
 import { DEFAULT_MODEL_TABLE } from './model-tables.js';
-import { AI_TASKS, TASK_NAMES } from './tasks.js';
+import { AI_TASKS, TASK_NAMES, defaultModeFor } from './tasks.js';
+import { MEDIA_PROVIDERS, PROVIDER_CAPABILITIES } from './provider-order.js';
 import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
 import {
   FEATURES,
@@ -104,7 +105,14 @@ describe('the effective read equals selectChain on the same documents, for every
         });
         const catalog = await readModelCatalog({ store, now: () => new Date() });
 
-        expect(effective.availability).toEqual({ keyed, enabled, disabled });
+        // The media providers are keyed-is-enabled (slice 5): none keyed here.
+        expect(effective.availability).toEqual({
+          keyed,
+          enabled,
+          disabled,
+          media: MEDIA_PROVIDERS,
+          capabilities: PROVIDER_CAPABILITIES,
+        });
         expect(Object.keys(effective.tasks)).toEqual([...TASK_NAMES]);
         for (const task of TASK_NAMES) {
           const expected = selectChain({ task, selection, catalog, availability: { keyed, enabled } });
@@ -118,7 +126,8 @@ describe('the effective read equals selectChain on the same documents, for every
             needs: [...AI_TASKS[task].needs],
             public: AI_TASKS[task].public,
             recommended: AI_TASKS[task].recommended,
-            entry: selection.tasks[task] || { mode: 'global' },
+            // A media task defaults to Recommended (slice 5, tasks.js defaultMode).
+            entry: selection.tasks[task] || { mode: defaultModeFor(AI_TASKS[task]) },
           });
         }
         expect(effective.priority.map((p) => [p.provider, p.model])).toEqual(

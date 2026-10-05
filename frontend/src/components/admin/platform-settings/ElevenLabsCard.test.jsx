@@ -17,7 +17,11 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
-import ElevenLabsCard, { ELEVENLABS_SAMPLE_ROUTE, ELEVENLABS_STATUS_ROUTE } from './ElevenLabsCard';
+import ElevenLabsCard, {
+  ELEVENLABS_SAMPLE_ROUTE,
+  ELEVENLABS_STATUS_ROUTE,
+  renderSourceOf,
+} from './ElevenLabsCard';
 import { ELEVENLABS_VOICES_ROUTE } from './PodcastVoices';
 import { settingRoute } from './settingShared';
 
@@ -213,6 +217,44 @@ describe('ElevenLabsCard', () => {
     expect(screen.getByText('8,912 used of 10,000, 1,088 left')).toBeTruthy();
     expect(screen.getByText('2026-10-26 (UTC)')).toBeTruthy();
     expect(screen.getByText('Last render billed 8,912 characters, an episode')).toBeTruthy();
+  });
+
+  it('reads the last render by its product first and its source as the fallback (ADR 0034 slice 5)', async () => {
+    // An episode row written since slice 5: the task as source, the slug as product.
+    answers.status = {
+      ...FREE_MONTH,
+      lastRender: { ...FREE_MONTH.lastRender, source: 'ai:podcastVoice', product: 'podcast:audio' },
+    };
+    const { unmount } = render(<ElevenLabsCard authReady />);
+    expect(await screen.findByText('Last render billed 8,912 characters, an episode')).toBeTruthy();
+    unmount();
+
+    // A row written before slice 5: source alone, no product.
+    answers.status = {
+      ...FREE_MONTH,
+      lastRender: { ...FREE_MONTH.lastRender, source: 'podcast:audio', product: null },
+    };
+    const old = render(<ElevenLabsCard authReady />);
+    expect(await screen.findByText('Last render billed 8,912 characters, an episode')).toBeTruthy();
+    old.unmount();
+
+    // The live check keeps its own source either way.
+    answers.status = {
+      ...FREE_MONTH,
+      lastRender: { ...FREE_MONTH.lastRender, source: 'podcast:sample', product: null },
+    };
+    render(<ElevenLabsCard authReady />);
+    expect(
+      await screen.findByText('Last render billed 8,912 characters, a live check')
+    ).toBeTruthy();
+
+    expect(renderSourceOf({ source: 'ai:podcastVoice', product: 'podcast:audio' })).toBe(
+      'an episode'
+    );
+    expect(renderSourceOf({ source: 'podcast:audio' })).toBe('an episode');
+    expect(renderSourceOf({ source: 'podcast:sample', product: null })).toBe('a live check');
+    expect(renderSourceOf({ source: 'ai:podcastVoice' })).toBeUndefined();
+    expect(renderSourceOf(null)).toBeUndefined();
   });
 
   it('says a free-plan episode is not published, and why', async () => {

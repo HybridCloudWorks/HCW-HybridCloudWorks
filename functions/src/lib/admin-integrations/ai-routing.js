@@ -109,11 +109,21 @@ async function getAiRouting(ctx, request, context) {
   }
 }
 
-/** What holds a key and is switched on, for the "would have no model" rule (§6). */
+/**
+ * What holds a key and is switched on, for the "would have no model" rule
+ * (§6): the chat providers with a key and a switch, joined by the media
+ * providers with a key, which have no switch (ADR 0034 slice 5, #860) —
+ * the same union the router resolves with.
+ */
 function availabilityFor(ctx, cards) {
   const keyed = typeof ctx.availableProviders === 'function' ? ctx.availableProviders() : null;
   if (!Array.isArray(keyed)) return undefined;
-  return { keyed, enabled: resolveProviderOrder(cards, keyed).order };
+  const media =
+    typeof ctx.availableMediaProviders === 'function' ? ctx.availableMediaProviders() : [];
+  return {
+    keyed: [...keyed, ...media],
+    enabled: [...resolveProviderOrder(cards, keyed).order, ...media],
+  };
 }
 
 /**

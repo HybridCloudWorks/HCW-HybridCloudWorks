@@ -19,7 +19,7 @@
  */
 import { readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
 import { deleteBlob, readBlobForDelivery, uploadBlob } from '../lib/blob-storage.js';
-import { generateJsonResponse, getCostEstimate } from '../lib/ai/router.js';
+import { generateJsonResponse, getCostEstimate, modelForTask } from '../lib/ai/router.js';
 import { publicUrlOf } from '../lib/cms/publish.js';
 import { registerJobType } from '../lib/jobs.js';
 import {
@@ -68,7 +68,8 @@ export async function runTranscriptGeneration(payload, { context } = {}) {
     articleId: parsed.value.articleId,
     store: { readDoc, upsertDoc, patchDoc },
     storage: { uploadBlob },
-    ai: { generateJsonResponse, getCostEstimate },
+    // modelForTask: the podcastVoice task's model (ADR 0034 slice 5).
+    ai: { generateJsonResponse, getCostEstimate, modelForTask },
   });
 
   context?.log?.(
@@ -200,7 +201,8 @@ export async function runRecordingGeneration(payload, { context } = {}) {
     ...parsed.value,
     store: { readDoc, upsertDoc, patchDoc },
     storage: { uploadBlob },
-    ai: { generateJsonResponse, getCostEstimate },
+    // modelForTask: the podcastVoice task's model (ADR 0034 slice 5).
+    ai: { generateJsonResponse, getCostEstimate, modelForTask },
   });
 
   context?.log?.(

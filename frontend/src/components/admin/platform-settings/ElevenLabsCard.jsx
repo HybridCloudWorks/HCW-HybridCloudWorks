@@ -59,11 +59,21 @@ const day = (iso) =>
 const aboutCredits = (characters) =>
   typeof characters === 'number' ? `about ${count(characters)} credits` : 'credits';
 
-/** What wrote the last ElevenLabs usage row, as a person reads it. */
+/**
+ * What wrote the last ElevenLabs usage row, as a person reads it. An
+ * episode row written since ADR 0034 slice 5 (#860) carries the task as
+ * `source` (ai:podcastVoice) and this slug as `product`; one written before
+ * carries only `source: podcast:audio`. So the key is `product` first,
+ * `source` as the historical fallback (`renderSourceOf`).
+ */
 const RENDER_SOURCES = Object.freeze({
   'podcast:audio': 'an episode',
   'podcast:sample': 'a live check',
 });
+
+/** The sentence for a last-render row, by its product, else its source; undefined for neither. */
+export const renderSourceOf = (lastRender) =>
+  RENDER_SOURCES[lastRender?.product] ?? RENDER_SOURCES[lastRender?.source];
 
 /**
  * The status read. Race-safe the way `useSetting` is: a load only writes
@@ -192,7 +202,7 @@ function LastRender({ lastRender, lastRenderError }) {
   if (!lastRender) {
     return <p className="text-xs text-muted-foreground">No ElevenLabs render recorded yet.</p>;
   }
-  const from = RENDER_SOURCES[lastRender.source];
+  const from = renderSourceOf(lastRender);
   const when = relativeTime(lastRender.at);
   return (
     <p className="text-sm">

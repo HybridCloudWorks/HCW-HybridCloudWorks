@@ -363,6 +363,9 @@ export function createAdminIntegrationHandlers({
   // selection document's "would have no model" rule (ADR 0034 §6, #858).
   // Omitted, that one rule is not checked on save.
   availableProviders = null,
+  // The media providers holding a key (router.availableMediaProviders),
+  // keyed-is-enabled, for the same rule (ADR 0034 slice 5, #860).
+  availableMediaProviders = null,
   // The resolver's answer over the loaded configuration
   // (router.resolveEffectiveSelection) and the router's call, for the Tasks
   // tab's effective read and per-task Test (ADR 0034 slice 4, #859).
@@ -386,6 +389,7 @@ export function createAdminIntegrationHandlers({
     clock,
     aiConfigChanged,
     availableProviders,
+    availableMediaProviders,
     effectiveSelection,
     ai,
   };

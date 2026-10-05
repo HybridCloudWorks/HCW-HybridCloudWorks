@@ -27,9 +27,23 @@
  *     paths and still resolve. Each row records its lineage (set, prompt,
  *     template version, final text), the provider and model, the blob path
  *     the delete route needs, and the measured bytes and dimensions.
+ *
+ * THE MODEL IS THE TASK'S (ADR 0034 slice 5, #860). A client built with
+ * `modelForTask` (production: change-feed.js and manual-images-http.js hand
+ * over the router's) resolves the `coverArt` or `manualImages` task before
+ * every generation and calls the model the Tasks tab chose; the feature
+ * switch, the key check and the resolver's locks apply, and a task with
+ * nothing eligible fails the generation with the resolver's sentence, which
+ * the cover trigger records as `altCoverImageError` and the manual routes
+ * answer with. Without `modelForTask` — unit tests, tooling — the model is
+ * the setting or the default, as before. `client.model` reads the model the
+ * last generation resolved (the default until one runs), which is what the
+ * gallery record and the manual routes' `modelInfo` report. Which task a
+ * generation belongs to is said by its usage `source`: the cover source is
+ * the cover task, every other one the manual images task.
  */
 import { readKey } from '../ai/router.js';
-import { USAGE_SOURCES, monthToDateUsage, recordAiUsage } from '../ai/usage.js';
+import { USAGE_SOURCES, featureSource, monthToDateUsage, recordAiUsage } from '../ai/usage.js';
 import { mediaUrlFor } from '../blob-paths.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import {
@@ -58,6 +72,13 @@ export const AI_COVER_CLAIM_FIELDS = Object.freeze({
 
 /** The one image provider this site generates with today. */
 export const IMAGE_PROVIDER = 'replicate';
+
+/** The registry tasks the two image paths resolve their model under (ai/tasks.js). */
+export const IMAGE_TASKS = Object.freeze({ cover: 'coverArt', manual: 'manualImages' });
+
+/** The task a generation belongs to, by the usage source its caller names (header). */
+const taskForSource = (source) =>
+  source === USAGE_SOURCES.imageCover ? IMAGE_TASKS.cover : IMAGE_TASKS.manual;
 
 /**
  * The monthly image budget (2026-10-05). Replicate bills on its own account,
@@ -365,9 +386,14 @@ async function assertImageBudget({
   throw err;
 }
 
-/** One row per output image. recordAiUsage swallows its own failures. */
+/**
+ * One row per output image, under the task's source with the image slug as
+ * `product` (ai/usage.js, ADR 0034 slice 5). recordAiUsage swallows its own
+ * failures.
+ */
 async function recordImageUsage({ store, now, uuid, model, costPerImageUsd }, source) {
   if (!store?.upsertDoc) return;
+  const product = source || USAGE_SOURCES.imageManual;
   await recordAiUsage(
     { store, ai: { getCostEstimate: () => costPerImageUsd ?? 0 }, uuid, now },
     {
@@ -375,9 +401,31 @@ async function recordImageUsage({ store, now, uuid, model, costPerImageUsd }, so
       model,
       costUsd: costPerImageUsd ?? undefined,
       unpriced: costPerImageUsd === null,
-      source: source || USAGE_SOURCES.imageManual,
+      source: featureSource(taskForSource(product)),
+      product,
     }
   );
+}
+
+/**
+ * The model the task resolves to for this generation (header), or the
+ * client's own when no resolver is wired. A task that resolves to a provider
+ * this client cannot call is a refusal, not a silent substitution.
+ */
+async function resolveImageModel(modelForTask, source, fallback) {
+  if (typeof modelForTask !== 'function') return fallback;
+  // Two literal sites, one per task: ai-call-sites.test.js reads the source.
+  const chosen =
+    source === USAGE_SOURCES.imageCover
+      ? await modelForTask({ task: 'coverArt' })
+      : await modelForTask({ task: 'manualImages' });
+  if (chosen.provider !== IMAGE_PROVIDER) {
+    throw new Error(
+      `The ${taskForSource(source)} task resolved to ${chosen.provider}, which this image client cannot call; name a ${IMAGE_PROVIDER} model under AI Engine → Tasks.`
+    );
+  }
+  if (!chosen.model) throw new Error(`The ${taskForSource(source)} task resolved to no model`);
+  return chosen.model;
 }
 
 /**
@@ -394,10 +442,14 @@ export function createReplicateClient({
   store = null,
   now = () => new Date(),
   uuid = () => crypto.randomUUID(),
+  // The router's task door (header). Null: the setting or the default below.
+  modelForTask = null,
 } = {}) {
   const apiKey = readKey(env, 'REPLICATE_API_KEY');
-  const model =
+  const defaultModel =
     env.CONTENTFORGE_IMAGE_MODEL_HERO || env.CONTENTFORGE_IMAGE_MODEL || 'google/imagen-4-fast';
+  // The model the last generation resolved; `client.model` reads it (header).
+  let model = defaultModel;
   // Per-image price for the usage rows and the display; Replicate bills per
   // output, so this is configuration, not a measurement. Absent = unknown:
   // the row is written unpriced and the month's ceiling is the image count.
@@ -409,10 +461,14 @@ export function createReplicateClient({
   );
   const monthlyMaxImages = positiveNumber(env.CONTENTFORGE_IMAGE_MONTHLY_MAX, IMAGE_COUNT_DEFAULT);
 
-  const bookkeeping = { store, now, uuid, model, costPerImageUsd, monthlyBudgetUsd, monthlyMaxImages };
+  const bookkeeping = { store, now, uuid, costPerImageUsd, monthlyBudgetUsd, monthlyMaxImages };
 
   async function generate(prompt, { aspectRatio, source } = {}) {
     if (!apiKey) throw new Error('REPLICATE_API_KEY is not configured');
+    // The task first (header): a task switched off or with nothing eligible
+    // refuses before the budget is read or a byte is sent.
+    model = await resolveImageModel(modelForTask, source, defaultModel);
+    bookkeeping.model = model;
     await assertImageBudget(bookkeeping);
     const input = {
       prompt,
@@ -439,7 +495,10 @@ export function createReplicateClient({
   return {
     configured: Boolean(apiKey),
     provider: IMAGE_PROVIDER,
-    model,
+    /** The model the last generation resolved, the default until one runs (header). */
+    get model() {
+      return model;
+    },
     costPerImageUsd,
     monthlyBudgetUsd,
     generate,

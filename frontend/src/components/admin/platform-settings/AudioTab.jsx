@@ -1,9 +1,12 @@
 /**
- * Audio — the shows the site ingests, the voice that reads study episodes,
- * and the voice that reads podcast episodes.
+ * Audio — the shows the site ingests, where the study episodes' voice is
+ * chosen, and the voice that reads podcast episodes.
  *
  *   Podcast feeds          admin_config/podcast_feeds           read by timers/podcasts.js
- *   Listen & Learn voice   admin_config/listen_and_learn_speech read by listen-and-learn-jobs.js
+ *   Listen & Learn voice   a line and a link: the model is the Listen & Learn speech
+ *                          task's, chosen under AI Engine → Tasks (ADR 0034 slice 5,
+ *                          #860); the stored document this card used to edit is read
+ *                          once by the router as the migration's input
  *   Podcast voice          GET cms/podcast/elevenlabs           ElevenLabs plan, credits and
  *                                                               the live check (ElevenLabsCard)
  *   Podcast voices         admin_config/podcast_voices          the two hosts' ElevenLabs voices,
@@ -20,6 +23,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Headphones, Podcast } from 'lucide-react';
+import { tabHref } from '@/components/admin/ai-engine/tabs';
 import {
   PODCAST_PROVIDERS,
   SETTING_LABELS,
@@ -125,17 +129,13 @@ export function PodcastFeedsCard({ value, onChange, onSave, saving, meta }) {
   );
 }
 
-/** Sub-cent figures are not what these are; two decimals read right. */
-const formatUsd = (usd) => (typeof usd === 'number' ? `$${usd.toFixed(2)}` : null);
-
 /**
- * The owner's button: which Gemini TTS model reads a Listen & Learn episode
- * by default. Two choices, priced by the server from the same table the
- * generation 202 uses; the generation form can override per run. The rule of
- * thumb is guidance for the person choosing, not automation.
+ * Where the Listen & Learn voice is chosen (ADR 0034 slice 5, #860): under
+ * AI Engine → Tasks, on the Listen & Learn speech row. The card this
+ * replaced stored a Gemini model here; nothing is stored here now, so the
+ * card holds one line and a link, and loads nothing.
  */
-export function ListenAndLearnSpeechCard({ value, options, onChange, onSave, saving, meta }) {
-  const chosen = value?.geminiModel ?? '';
+export function ListenAndLearnVoiceCard() {
   return (
     <Card>
       <CardHeader>
@@ -143,59 +143,19 @@ export function ListenAndLearnSpeechCard({ value, options, onChange, onSave, sav
           <Headphones className="h-5 w-5" /> Listen &amp; Learn voice
         </CardTitle>
         <CardDescription>
-          The Gemini TTS model that reads a study episode unless a run chooses otherwise. Listen
-          &amp; Learn is always Gemini (Azure AI Speech as the fallback); ElevenLabs is the podcast
-          voice and is never used here. Each figure is the most one episode can cost at the script
-          ceiling.
+          Listen &amp; Learn is always Gemini TTS (Azure AI Speech as the fallback); ElevenLabs is
+          the podcast voice and is never used here.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-3 pt-0">
-        <StoredState meta={meta} />
-        <form
-          className="space-y-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            onSave();
-          }}
-        >
-          <fieldset className="space-y-2" disabled={saving}>
-            <legend className="text-sm font-medium">Voice model</legend>
-            {(options ?? []).map((option) => (
-              <label
-                key={option.id}
-                htmlFor={`tts-${option.tier}`}
-                className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 rounded-md border border-input px-3 py-2 text-sm"
-              >
-                <input
-                  id={`tts-${option.tier}`}
-                  type="radio"
-                  name="geminiModel"
-                  value={option.id}
-                  checked={chosen === option.id}
-                  onChange={() => onChange({ geminiModel: option.id })}
-                  className="row-span-2 mt-1"
-                />
-                <span className="font-medium">{option.label}</span>
-                <span className="text-xs text-muted-foreground">
-                  <code>{option.id}</code>
-                  {formatUsd(option.perEpisodeUsd)
-                    ? ` · up to ${formatUsd(option.perEpisodeUsd)} an episode`
-                    : ''}
-                </span>
-              </label>
-            ))}
-            {(options ?? []).length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                The server offered no choices; the stored value is <code>{chosen || 'unset'}</code>.
-              </p>
-            ) : null}
-          </fieldset>
-          <p className="text-xs text-muted-foreground">
-            Rule of thumb — newer certifications: Best; older ones: Economy. Applied by the person
-            generating, not by the certification&apos;s age.
-          </p>
-          <SaveRow saving={saving} />
-        </form>
+      <CardContent className="pt-0 text-sm">
+        <p data-testid="listen-and-learn-voice-note">
+          The model is chosen under{' '}
+          <a href={tabHref('routing')} className="text-primary underline underline-offset-4">
+            AI Engine → Tasks
+          </a>
+          , on the Listen &amp; Learn speech row. Recommended is the Economy voice; Best is one
+          Custom step away.
+        </p>
       </CardContent>
     </Card>
   );
@@ -204,7 +164,6 @@ export function ListenAndLearnSpeechCard({ value, options, onChange, onSave, sav
 export default function AudioTab() {
   const { authReady } = useAuthReady();
   const podcasts = useSetting('podcast-feeds', authReady);
-  const speech = useSetting('listen-and-learn-speech', authReady);
 
   return (
     <div className="space-y-6">
@@ -221,20 +180,7 @@ export default function AudioTab() {
           />
         )}
       />
-      <SettingSection
-        setting={speech}
-        label={SETTING_LABELS['listen-and-learn-speech']}
-        render={(s) => (
-          <ListenAndLearnSpeechCard
-            value={s.value}
-            options={s.options}
-            meta={s.meta}
-            saving={s.saving}
-            onChange={s.setValue}
-            onSave={() => s.save(s.value)}
-          />
-        )}
-      />
+      <ListenAndLearnVoiceCard />
       <ElevenLabsCard authReady={authReady} />
     </div>
   );

@@ -19,6 +19,61 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **AI Engine: audio and image tasks join the Tasks table (ADR 0034 slice 5,
+  #860).** The last slice of the ADR: the non-text paths are tasks of the
+  same registry and selection document as the text ones, and their settings
+  pages lost the model fields they carried. **Registry**: `listenAndLearnSpeech`
+  and `podcastVoice` (tts), `coverArt` and `manualImages` (image), each
+  recommending the model that was its default the day before (Gemini's
+  Economy voice, ElevenLabs's `eleven_v3`, Replicate's `google/imagen-4-fast`)
+  with the reason and `asOf: 2026-10-05`, and `recordingTranscript` (stt),
+  `pageOcr` (ocr) and `embeddings` (embedding) registered as planned — no
+  provider carries them yet, so the Tasks tab shows "no eligible model"
+  rather than omitting them, and they have no feature switch and no call
+  site. `MODALITIES` and `CAPABILITIES` gain the five media kinds. **Media
+  providers in the catalogue**: ElevenLabs (`GET /v1/models`, ids from
+  `model_id`) and Replicate (a static list of the image models the
+  repository calls) are catalogue providers keyed by `ELEVENLABS_API_KEY`
+  and `REPLICATE_API_KEY` — no card, a key is what switches them on, and the
+  drawer says so; `*-tts` and `eleven_*` ids carry `tts`, Replicate's and
+  `imagen-*` carry `image`; a price in another unit says so (`unit`:
+  ElevenLabs per 1M characters, Replicate per image at the figure
+  `CONTENTFORGE_IMAGE_COST_USD` is set to). The selectable-models rule takes
+  the task's `needs` on both sides (`selectableModelsFor`). **Resolver and
+  selection**: a media task defaults to mode Recommended, because the
+  Priority list is a chat list a media provider never joins; a custom chain
+  may name only providers that can carry the task's needs (a 400 on save,
+  dropped on read); each media task carries `only`, a product rule in code no
+  document lifts — the podcast voice is ElevenLabs-only, Listen & Learn
+  speech Gemini-only, the images Replicate-only (ADR 0029 §2b) — and its
+  recommendation stands while the catalogue has not yet confirmed it, so
+  the week between a deploy and the next refresh is not a week of silence.
+  **Migration**: a stored Listen & Learn model (Platform settings) or a
+  `LISTEN_AND_LEARN_ELEVENLABS_MODEL` setting that differs from the
+  recommendation becomes that task's custom chain (`thenGlobal: false`), on
+  a v1 document and on a v2 document saved before the task existed, so
+  nothing changes for the owner on merge. **Call sites**: the Listen & Learn
+  jobs, the podcast pipeline and its live check, and the Replicate client
+  read their model through one router door, `modelForTask({ task })` — the
+  feature switch, the key check, the pin and the locks all apply — and the
+  per-run `ttsModel`, the per-book `voice.model` and the stored default are
+  ignored on write and dropped on read; Azure AI Speech stays the Listen &
+  Learn adapter's own fallback. **Settings pages**: the Platform settings
+  Listen & Learn voice card, the Generate tab's voice model field, the book
+  dialog's Gemini model select and the Settings tab's model list are gone;
+  each says "The model is chosen under AI Engine → Tasks" with the link, and
+  `cms/platform-settings/listen-and-learn-speech` left the allowlist.
+  **Usage by task**: the audio and image rows carry `ai:<task>` as their
+  source, their old slug (`listen-and-learn:audio`, `podcast:audio`,
+  `images:cover`, `images:manual`) as `product`, so Usage & Cost groups by
+  task ("Breakdown by Task"). **Tasks tab**: the new rows render with their
+  modality badge, the chain editor and the exclusions offer a media task the
+  providers that carry its needs under its product rule (ElevenLabs and
+  Replicate among them, named without a card), and a media task's Test is a
+  dry run — the candidate it would use and the resolver's reason, no audio or
+  image made, said on the line. Both suites, `ai-call-sites.test.js` reading
+  `modelForTask({ task })` beside `feature:`, and a new
+  `lib/ai/media-tasks.test.js` hold it; the ADR records the slice.
 - **AI Engine: the Priority list and the Tasks tab (ADR 0034 slice 4,
   #859).** The three overlapping controls the ADR's context describes are
   gone from the page and one list and one table stand in their place, both

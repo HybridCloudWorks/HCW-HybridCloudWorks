@@ -159,12 +159,13 @@ const REGENERATION_PLANS = Object.freeze({
   },
 });
 
-export function regenerationPlan({ chapter, chapterId, set, ref, ttsModel }) {
+export function regenerationPlan({ chapter, chapterId, set, ref }) {
   const cert = {
     ...(set?.certTitle ? { certTitle: set.certTitle } : {}),
     ...(set?.certSlug ? { certSlug: set.certSlug } : {}),
   };
-  const modelFields = ttsModel ? { ttsModel } : {};
+  // No model travels in the payload: the job reads the task's (ADR 0034 slice 5).
+  const modelFields = {};
   const plan = REGENERATION_PLANS[episodeKindOf(chapter)];
   return plan({ chapter, chapterId, set, ref, cert, modelFields });
 }

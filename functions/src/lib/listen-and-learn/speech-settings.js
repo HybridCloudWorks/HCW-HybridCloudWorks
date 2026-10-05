@@ -1,33 +1,33 @@
 /**
- * Which Gemini TTS model reads a Listen & Learn episode — the owner's button —
- * and, since ADR 0033 §4 (Audio Library), the voice a BOOK is read in.
+ * The Gemini TTS models a Listen & Learn episode may be read with, and,
+ * since ADR 0033 §4 (Audio Library), the voice a BOOK is read in.
  *
- * Owner instruction 2026-09-09: "have a button to go from gemini 2.5 to 3.1
- * and back — for newer technologies, better is best, for older, cheaper is
- * best." Two models are offered, and the choice is made twice:
+ * THE MODEL IS CHOSEN ON THE TASKS TAB (ADR 0034 slice 5, #860). Until then
+ * the choice was made in three places — a stored default in
+ * `admin_config/listen_and_learn_speech` on Platform settings, a per-run
+ * `ttsModel` on the generation form, and a per-book `voice.model` — with a
+ * precedence rule here. All three are gone: the job reads the model for the
+ * `listenAndLearnSpeech` task through the router's `modelForTask`, the
+ * selection document carries the choice, and the migration
+ * (ai/migrate-selection.js) turned a stored default that differed from the
+ * recommendation into that task's custom chain, so nothing changed for the
+ * owner on merge. A `ttsModel` in a payload and a `model` in a book's voice
+ * are IGNORED on write and dropped on read: a client written before this
+ * slice still gets its 202, in the task's voice. The stored document's id
+ * stays named here because the config loader reads it once as the
+ * migration's input (ai/containers.js restates it).
  *
- *   - once as a STORED DEFAULT in `admin_config/listen_and_learn_speech`,
- *     edited on the Platform settings page (lib/platform-settings.js writes
- *     it through `normalizeListenAndLearnSpeech`, so only these two ids are
- *     ever stored), and
- *   - once PER RUN on the generation form, carried in the job payload as
- *     `ttsModel`, which defaults to the stored value.
- *
- * Precedence, highest first, is `resolveListenAndLearnModel` below and then
- * speech/index.js: the run's choice → the book's choice → the stored default →
- * `LISTEN_AND_LEARN_TTS_MODEL` → gemini.js's own default. ADR 0033 §4 makes
- * that module default ECONOMY: when nothing is stored, the cheapest sensible
- * voice reads, and the admin page says so beside the per-episode estimate.
- * "Newer certifications: Best; older ones: Economy" stays as guidance for the
- * person choosing, not automation.
- *
- * Both models are priced in `COST_TABLE`; `listenAndLearnModelOptions` states
- * each one's per-episode ceiling with the same arithmetic the 202 uses, so the
- * page and the queued toast cannot disagree about what a choice costs.
+ * The two models stay listed: Best (3.1) and Economy (2.5, the module
+ * default, ADR 0033 §4), both priced in `COST_TABLE` with Best at about
+ * twice the cost. The 202's estimate, which cannot know the task's choice
+ * synchronously, prices every episode at the dearer of the two so it stays
+ * a ceiling (listen-and-learn-jobs.js). "Newer certifications: Best; older
+ * ones: Economy" stays as guidance for the person choosing, on the Tasks
+ * tab now.
  *
  * PER-BOOK VOICE (ADR 0033 §4). A book or course document may carry a `voice`
- * object — which provider reads it, which Gemini model, which voice per host
- * and for a narrator, the language and the speaking rate — normalised here by
+ * object — which provider reads it, which voice per host and for a
+ * narrator, the language and the speaking rate — normalised here by
  * `normalizeVoiceSettings` so a document never holds a voice id the providers
  * would not accept. Gemini voices are the thirty the speech-generation guide
  * lists; Azure voices are free-form neural voice names because the catalogue
@@ -35,20 +35,20 @@
  * supports it (Azure SSML `<prosody rate>`); Gemini TTS has no rate parameter
  * and reads at its own pace, which the admin page says.
  */
-import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
-import { MAX_SCRIPT_BYTES } from './script.js';
-import { estimateGeminiCostUsd } from './speech/index.js';
 import { GEMINI_DEFAULT_MODEL } from './speech/gemini.js';
 
-/** The `admin_config` document the stored default lives in. */
+/**
+ * The `admin_config` document the stored default lived in until slice 5
+ * (header): read by the config loader as the migration's input, written by
+ * nothing any more.
+ */
 export const LISTEN_AND_LEARN_SPEECH_CONFIG_ID = 'listen_and_learn_speech';
 
 /**
- * The two choices, in the order the control shows them. `label` is the
- * owner's wording; `tier` is the stable key the frontend and tests use. The
- * DEFAULT is Economy (ADR 0033 §4), marked by `isDefault` on the options
- * rather than by position, so the control's order and the refusal sentence
- * every client already knows stay as they were.
+ * The two Gemini TTS models this product has offered, in the order the
+ * control showed them. `label` is the owner's wording; `tier` is the stable
+ * key the tests use. Economy is the module default (gemini.js) and the
+ * task's recommendation (ai/tasks.js); Best is one Custom step away.
  */
 export const LISTEN_AND_LEARN_GEMINI_MODELS = Object.freeze([
   Object.freeze({
@@ -68,74 +68,11 @@ export const LISTEN_AND_LEARN_GEMINI_MODEL_IDS = Object.freeze(
 );
 
 /**
- * The model that reads when nothing is stored and no run or book chooses:
+ * The model that reads when the task resolves to Gemini and names no model:
  * gemini.js's own default, which is Economy. One source, read rather than
  * restated, so the two cannot disagree.
  */
 export const LISTEN_AND_LEARN_DEFAULT_MODEL = GEMINI_DEFAULT_MODEL;
-
-/** The sentence every refusal of a model id uses, at the route and in the job. */
-export const MODEL_CHOICE_RULE = `ttsModel must be one of ${LISTEN_AND_LEARN_GEMINI_MODEL_IDS.join(', ')}`;
-
-export function isListenAndLearnGeminiModel(id) {
-  return typeof id === 'string' && LISTEN_AND_LEARN_GEMINI_MODEL_IDS.includes(id);
-}
-
-/**
- * A model id from an untrusted field: `{ value }` (null when absent) or
- * `{ error }`. Absent means "the stored default"; anything present must be
- * one of the two ids exactly — no trimming to a match, because a request
- * that almost names a model is a request to read before spending on it.
- */
-export function parseTtsModel(raw) {
-  if (raw === undefined || raw === null || raw === '') return { value: null };
-  if (isListenAndLearnGeminiModel(raw)) return { value: raw };
-  return { error: MODEL_CHOICE_RULE };
-}
-
-/**
- * The choices with their per-episode ceiling, for the settings card and the
- * generation form. A ceiling — every episode priced at `MAX_SCRIPT_BYTES`,
- * the most UTF-8 bytes a script may hold — so it reads "up to". `isDefault`
- * marks the one that reads when nothing is stored, so the page can say so.
- *
- * @returns {{id: string, tier: string, label: string, perEpisodeUsd: number|null, isDefault: boolean}[]}
- */
-export function listenAndLearnModelOptions() {
-  return LISTEN_AND_LEARN_GEMINI_MODELS.map((m) => ({
-    ...m,
-    perEpisodeUsd: estimateGeminiCostUsd(m.id, MAX_SCRIPT_BYTES),
-    isDefault: m.id === LISTEN_AND_LEARN_DEFAULT_MODEL,
-  }));
-}
-
-/**
- * The stored default, or null when there is none or it is not one of the two
- * ids (a hand-seeded document is shown as invalid on the page, and here it
- * is simply not a choice). A read FAILURE is not caught: a run that cannot
- * read its settings must not quietly proceed in a voice nobody chose, and it
- * is about to need Cosmos for everything else anyway.
- *
- * @param {(container: string, id: string, partition: string) => Promise<object|null>} readDoc
- */
-export async function readStoredListenAndLearnModel(readDoc) {
-  const doc = await readDoc(
-    'admin_config',
-    LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
-    ADMIN_CONFIG_PARTITION
-  );
-  return isListenAndLearnGeminiModel(doc?.geminiModel) ? doc.geminiModel : null;
-}
-
-/**
- * The run's choice, else the book's, else the stored default, else null —
- * which speech/index.js and gemini.js then resolve to
- * `LISTEN_AND_LEARN_TTS_MODEL` and the module default (Economy). Every input
- * is a validated id or null by the time it gets here.
- */
-export function resolveListenAndLearnModel({ requested = null, book = null, stored = null } = {}) {
-  return requested || book || stored || null;
-}
 
 // ── voices ──────────────────────────────────────────────────────────────────
 
@@ -217,7 +154,6 @@ export const SPEAKING_RATE = Object.freeze({ min: 0.5, max: 2, default: 1 });
 /** Gemini's own defaults for the two hosts and a narrator (gemini.js). */
 export const DEFAULT_VOICE_SETTINGS = Object.freeze({
   provider: 'auto',
-  model: null,
   speakers: Object.freeze({ Maya: 'Kore', Elena: 'Leda' }),
   narrator: 'Kore',
   language: 'en-US',
@@ -253,11 +189,6 @@ function checkProvider(raw) {
   return VOICE_PROVIDERS.includes(provider)
     ? { value: provider }
     : { error: `voice.provider must be one of ${VOICE_PROVIDERS.join(', ')}` };
-}
-
-function checkModel(raw) {
-  const model = parseTtsModel(raw);
-  return model.error ? { error: `voice.model: ${model.error}` } : { value: model.value };
 }
 
 /** The two hosts' voices, each defaulting to Gemini's when not named. */
@@ -299,6 +230,8 @@ function checkSpeakingRate(raw) {
  * Absent fields take the defaults; a present field must be well formed, and
  * a voice named for Gemini must be one of its thirty — Gemini refuses an
  * unknown voice with an opaque 400, so the refusal happens here, by sentence.
+ * A `model` field is ignored, whatever it holds (header): the model is the
+ * task's, and a client written before slice 5 still saves its book.
  *
  * @param {unknown} raw
  */
@@ -311,7 +244,6 @@ export function normalizeVoiceSettings(raw) {
   const geminiBound = provider.value !== 'azure';
   const checks = [
     ['provider', provider],
-    ['model', checkModel(raw.model)],
     ['speakers', checkSpeakers(raw.speakers, geminiBound)],
     ['narrator', checkNarrator(raw.narrator, geminiBound)],
     ['language', checkLanguage(raw.language)],
@@ -335,7 +267,8 @@ export function voiceSettingsOf(doc) {
 /**
  * The arguments `synthesizeDialogue` takes for a book's voice settings and a
  * dialogue's speakers. Hosts get their per-book voices; a narrator chapter
- * gets the narrator voice; `provider: 'auto'` passes no override.
+ * gets the narrator voice; `provider: 'auto'` passes no override. The model
+ * is not here: it is the task's (header), handed to the switch by the job.
  *
  * @param {ReturnType<typeof voiceSettingsOf>} voice
  * @param {{ narrator?: boolean }} [options]
@@ -347,6 +280,5 @@ export function speechArgsFor(voice, { narrator = false } = {}) {
     lang: settings.language,
     speakingRate: settings.speakingRate,
     provider: settings.provider === 'auto' ? null : settings.provider,
-    model: settings.model || null,
   };
 }

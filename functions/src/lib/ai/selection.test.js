@@ -128,7 +128,7 @@ describe('validateSelection — names what a save must not store (§6)', () => {
     [{ ...ok, global: { priority: ['gemini'] } }, 'global.priority[0] must be { provider, model? }'],
     [
       { ...ok, global: { priority: [{ provider: 'vertex' }] } },
-      `global.priority[0].provider must be one of ${DEFAULT_PROVIDER_ORDER.join(', ')}`,
+      `global.priority[0].provider must be one of ${DEFAULT_PROVIDER_ORDER.join(', ')} (the Priority list is the chat list; a media provider is named in a task's chain)`,
     ],
     [
       { ...ok, global: { priority: [{ provider: 'gemini' }, { provider: 'Gemini' }] } },

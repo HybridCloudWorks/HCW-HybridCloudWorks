@@ -16,9 +16,44 @@ export const PROVIDER_DEFAULT = '__default__';
 
 export const MODES = Object.freeze(['recommended', 'global', 'custom']);
 
-/** A provider's display name: the card's, else the id. Never a label typed here. */
+/**
+ * The media providers' names (ADR 0034 slice 5, #860). They have no card —
+ * a key is what switches them on — so no document carries a name for them;
+ * these are provider names, not model ids, which never appear in UI code.
+ */
+export const MEDIA_PROVIDER_LABELS = Object.freeze({
+  elevenlabs: 'ElevenLabs',
+  replicate: 'Replicate',
+});
+
+/** A provider's display name: the card's, else a media provider's, else the id. */
 export function providerLabel(id, providers = []) {
-  return providers.find((p) => p.id === id)?.name || id;
+  return providers.find((p) => p.id === id)?.name || MEDIA_PROVIDER_LABELS[id] || id;
+}
+
+/**
+ * The providers a task's chain editor and exclusions offer (ADR 0034 slice
+ * 5): the cards, joined by the media providers the effective read names
+ * (`availability.media`), each kept only when it can carry every one of the
+ * task's `needs` (`availability.capabilities`) and, for a task with a
+ * product rule (`only`), when the rule allows it. With no capabilities on
+ * the answer, every card is offered, as before the media tasks.
+ */
+export function chainProvidersFor(resolved, providers = [], availability = {}) {
+  const media = (availability.media || []).map((id) => ({
+    id,
+    name: MEDIA_PROVIDER_LABELS[id] || id,
+  }));
+  const all = [...providers, ...media.filter((m) => !providers.some((p) => p.id === m.id))];
+  const needs = Array.isArray(resolved?.needs) ? resolved.needs : [];
+  const capabilities = availability.capabilities || null;
+  const only = Array.isArray(resolved?.only) ? resolved.only : null;
+  return all.filter((p) => {
+    if (only && !only.includes(p.id)) return false;
+    if (!capabilities) return true;
+    const carried = capabilities[p.id];
+    return Array.isArray(carried) && needs.every((need) => carried.includes(need));
+  });
 }
 
 /** `Provider default` in a select means a null model. */

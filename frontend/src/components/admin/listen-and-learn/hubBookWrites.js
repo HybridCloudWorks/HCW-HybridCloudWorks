@@ -36,7 +36,6 @@ export async function runGenerate(state, form) {
       examCode: form.examCode.trim(),
       studyGuideUrl: form.studyGuideUrl.trim(),
       certTitle: form.certTitle?.trim() || undefined,
-      ...(form.ttsModel ? { ttsModel: form.ttsModel } : {}),
       onAccepted: (accepted) => state.setProgress(queuedMessage(accepted?.speech)),
       onUpdate: (j) => state.setProgress(`Job ${j.status}…`),
     });

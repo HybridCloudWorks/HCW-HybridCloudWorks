@@ -89,7 +89,8 @@ function speechStatus(catalog) {
     <>
       <StatusBadge system="healthy" size="xs" />
       <span className="text-muted-foreground">
-        Speech by {speech.wouldRun} · default model {catalog.effectiveModel}
+        Speech by {speech.wouldRun} · model{' '}
+        {catalog.model?.model || 'chosen under AI Engine → Tasks'}
       </span>
     </>
   );

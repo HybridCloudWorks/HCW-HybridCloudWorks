@@ -161,10 +161,14 @@ const SAMPLE_INFO = Object.freeze({ characters: SAMPLE_CHARACTERS, turns: SAMPLE
  * The newest ElevenLabs usage row, whatever wrote it: an episode or a live
  * check. `ai_usage` is partitioned on `/id` with every path indexed
  * (infra/cosmos-containers.json), so a single-property ORDER BY needs no
- * composite index.
+ * composite index. `product` travels beside `source` (ADR 0034 slice 5,
+ * #860): an episode row written since then is `source: ai:podcastVoice,
+ * product: podcast:audio`, one written before carries only
+ * `source: podcast:audio`, and the card keys on `product` with `source` as
+ * the historical fallback so both read as "an episode".
  */
 const LAST_RENDER_QUERY =
-  'SELECT TOP 1 c.completionTokens, c.estimatedTokens, c.timestamp, c.source, c.model ' +
+  'SELECT TOP 1 c.completionTokens, c.estimatedTokens, c.timestamp, c.source, c.product, c.model ' +
   'FROM c WHERE c.provider = @provider ORDER BY c.timestamp DESC';
 
 /** The newest live check's usage row: what a sample stored before its record billed. */
@@ -190,16 +194,19 @@ const CONFLICT_CODES = new Set(['quota_exceeded', 'paid_plan_required', VOICES_N
 /** The HTTP status for a speech failure on the sample route. */
 function statusFor(error) {
   if (error?.name === 'SpeechNotConfiguredError') return 503;
+  // The podcastVoice task has nothing eligible, or is switched off (ADR 0034 slice 5).
+  if (error?.code === 'AI_NOT_CONFIGURED' || error?.code === 'AI_FEATURE_DISABLED') return 503;
   if (CONFLICT_CODES.has(error?.code)) return 409;
   return 502;
 }
 
-/** A usage row as the card shows it. */
+/** A usage row as the card shows it: `product` beside `source` (LAST_RENDER_QUERY). */
 const presentRender = (row) => ({
   characters: Number(row.completionTokens) || 0,
   estimated: row.estimatedTokens === true,
   at: row.timestamp || null,
   source: row.source || null,
+  product: row.product || null,
   model: row.model || null,
 });
 
@@ -557,12 +564,29 @@ async function renderSample(deps, request, context) {
   const { key, voices, refusal } = await samplePreconditions(deps, context);
   if (refusal) return refusal;
 
+  // The sample reads with the podcastVoice task's model (ADR 0034 slice 5),
+  // so a check hears the voice an episode will get; a task with nothing
+  // eligible or switched off is refused with the resolver's sentence.
+  let model = null;
+  if (typeof deps.ai?.modelForTask === 'function') {
+    try {
+      model = (await deps.ai.modelForTask({ task: 'podcastVoice' })).model;
+    } catch (error) {
+      context.log?.(`elevenLabsSample: refused (${error?.code || error?.name || 'error'})`);
+      return json(statusFor(error), {
+        error: error?.message || String(error),
+        code: error?.code || error?.name || null,
+      });
+    }
+  }
+
   let rendered;
   try {
     rendered = await deps.synthesize({
       product: 'podcast',
       dialogue: SAMPLE_DIALOGUE,
       voices,
+      model,
       env: deps.env,
       fetchImpl: deps.fetchImpl,
     });

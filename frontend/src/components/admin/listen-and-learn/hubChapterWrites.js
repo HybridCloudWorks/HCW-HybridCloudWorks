@@ -106,9 +106,9 @@ export function patchChapterFlow(state, chapterId, fields) {
   );
 }
 
-export function regenerateFlow(state, chapterId, ttsModel) {
+export function regenerateFlow(state, chapterId) {
   return followChapterJob(state, chapterId, (hooks) =>
-    apiRegenerateChapter({ ...state.selected.current, chapterId, ttsModel }, hooks)
+    apiRegenerateChapter({ ...state.selected.current, chapterId }, hooks)
   );
 }
 

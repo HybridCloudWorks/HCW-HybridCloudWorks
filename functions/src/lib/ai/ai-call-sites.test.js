@@ -23,12 +23,22 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { FEATURE_NAMES } from './ai-config.js';
+import { AI_TASKS, isMediaTask } from './tasks.js';
 
 const SRC = fileURLToPath(new URL('../..', import.meta.url));
 const ROUTER = join(SRC, 'lib', 'ai', 'router.js');
 
-/** The three entry points that actually reach a model. */
+/** The three entry points that actually reach a text model. */
 const CALLS = ['generateJsonResponse', 'generateTextResponse', 'generateGroundedJsonResponse'];
+
+/**
+ * The one door the audio and image call sites use (ADR 0034 slice 5, #860):
+ * `modelForTask({ task })` resolves the task's model through the same
+ * document and switches as a text call, and the task is named where a text
+ * site names its feature. Scanned with the same regex, on `task:` instead
+ * of `feature:`.
+ */
+const MEDIA_CALLS = ['modelForTask'];
 
 /**
  * Catalogue entries whose call site is a later slice of a named issue.
@@ -79,7 +89,7 @@ function collectCallSites() {
   for (const file of sourceFiles(SRC)) {
     if (file === ROUTER) continue;
     const text = readFileSync(file, 'utf8');
-    for (const name of CALLS) {
+    for (const name of [...CALLS, ...MEDIA_CALLS]) {
       // `ai.generateJsonResponse(` or a destructured `generateJsonResponse(`,
       // but not `generateJsonResponse,` in an import or a doc comment.
       const pattern = new RegExp(`(?:\\bai\\.)?\\b${name}\\s*\\(`, 'g');
@@ -89,6 +99,9 @@ function collectCallSites() {
           file: relative(SRC, file).replace(/\\/g, '/'),
           line: text.slice(0, match.index).split('\n').length,
           name,
+          // The word a site names its work by: `feature:` for a text call,
+          // `task:` for a media one. Both name an AI_FEATURES id.
+          key: MEDIA_CALLS.includes(name) ? 'task' : 'feature',
           args: argumentsAt(text, open),
         });
       }
@@ -99,15 +112,21 @@ function collectCallSites() {
 
 const SITES = collectCallSites();
 
+/** The feature a site declares, by its own key word, or undefined. */
+const declaredBy = (site) => site.args.match(new RegExp(`\\b${site.key}\\s*:\\s*'([^']+)'`))?.[1];
+
 describe('AI call sites', () => {
   it('finds the call sites at all — a scan that matches nothing proves nothing', () => {
     // Without this, a rename of the generate functions would make every
     // assertion below vacuously true and the guard would quietly stop working.
-    expect(SITES.length).toBeGreaterThanOrEqual(6);
+    expect(SITES.filter((s) => s.key === 'feature').length).toBeGreaterThanOrEqual(6);
+    // The four media call sites (slice 5): Listen & Learn speech, the
+    // podcast voice, the cover art and the manual images.
+    expect(SITES.filter((s) => s.key === 'task').length).toBeGreaterThanOrEqual(4);
   });
 
-  it('every call site declares a feature', () => {
-    const undeclared = SITES.filter((s) => !/\bfeature\s*[:,]/.test(s.args)).map(
+  it('every call site declares a feature (a media site names its task)', () => {
+    const undeclared = SITES.filter((s) => !new RegExp(`\\b${s.key}\\s*[:,]`).test(s.args)).map(
       (s) => `${s.file}:${s.line} ${s.name}()`
     );
     expect(
@@ -115,16 +134,16 @@ describe('AI call sites', () => {
       'These calls reach a model but are not covered by any portal toggle. Add `feature: ' +
         "'<one of " +
         FEATURE_NAMES.join(', ') +
-        ">'` to each, or add a new entry to AI_FEATURES if none fits."
+        ">'` (or `task:` on modelForTask) to each, or add a new entry to AI_TASKS if none fits."
     ).toEqual([]);
   });
 
   it('every declared feature exists in the catalogue', () => {
     const bad = [];
     for (const site of SITES) {
-      const declared = site.args.match(/\bfeature\s*:\s*'([^']+)'/);
-      if (declared && !FEATURE_NAMES.includes(declared[1])) {
-        bad.push(`${site.file}:${site.line} declares unknown feature '${declared[1]}'`);
+      const declared = declaredBy(site);
+      if (declared && !FEATURE_NAMES.includes(declared)) {
+        bad.push(`${site.file}:${site.line} declares unknown ${site.key} '${declared}'`);
       }
     }
     // A typo here fails open at runtime — the feature is simply never disabled
@@ -135,14 +154,25 @@ describe('AI call sites', () => {
   it('every catalogue entry has at least one call site', () => {
     // A toggle for something that cannot happen is worse than no toggle: it
     // reads as a working switch and does nothing.
-    const declared = new Set(
-      SITES.map((s) => s.args.match(/\bfeature\s*:\s*'([^']+)'/)?.[1]).filter(Boolean)
-    );
+    const declared = new Set(SITES.map(declaredBy).filter(Boolean));
     const pending = Object.keys(PENDING_CALL_SITES);
     const orphans = FEATURE_NAMES.filter((name) => !declared.has(name) && !pending.includes(name));
     expect(orphans, 'AI_FEATURES entries with no call site — the toggle would do nothing').toEqual(
       []
     );
+  });
+
+  it('a media task is named only through modelForTask, and a text feature never is', () => {
+    // The door matches the work: a voice resolved through generateTextResponse
+    // would reach a chat model, and a draft resolved through modelForTask
+    // would never be called.
+    for (const site of SITES) {
+      const declared = declaredBy(site);
+      if (!declared) continue;
+      expect(isMediaTask(AI_TASKS[declared]), `${site.file}:${site.line} ${site.name}() names ${declared}`).toBe(
+        site.key === 'task'
+      );
+    }
   });
 
   it('a pending exception names a real feature that really has no call site yet', () => {
@@ -151,7 +181,7 @@ describe('AI call sites', () => {
     // (the exception is now hiding nothing and must be deleted with the slice).
     for (const [name, why] of Object.entries(PENDING_CALL_SITES)) {
       expect(FEATURE_NAMES, `${name} is exempted but is not in AI_FEATURES`).toContain(name);
-      const declared = SITES.some((s) => s.args.match(/\bfeature\s*:\s*'([^']+)'/)?.[1] === name);
+      const declared = SITES.some((s) => declaredBy(s) === name);
       expect(
         declared,
         `${name} now has a call site (${why}); remove it from PENDING_CALL_SITES`

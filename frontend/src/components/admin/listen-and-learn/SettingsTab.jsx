@@ -1,13 +1,13 @@
 /**
  * Settings — the things set once, not per run (ADR 0033 §4).
  *
- * The voice default is stored on Platform settings (`admin_config/
- * listen_and_learn_speech`) and is edited there, so this tab links to it rather
- * than offering a second place to change the same document — two editors over
+ * The voice model is the Listen & Learn speech task's, chosen under AI
+ * Engine → Tasks (ADR 0034 slice 5, #860), so this tab links there rather
+ * than offering a second place to change the same choice — two editors over
  * one setting is how they drift. What belongs here is what the server says
- * about speech today: which model reads when nothing is chosen and what it
- * costs, which voices a book may pick, which providers are configured and
- * which would run, and the fallback rules — read from
+ * about speech today: which model the task resolves to and what it costs,
+ * which voices a book may pick, which providers are configured and which
+ * would run, and the fallback rules — read from
  * `GET cms/listen-and-learn/speech-options`, never described from memory.
  */
 import React, { useState } from 'react';
@@ -16,7 +16,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { GEMINI_TTS_MODEL_TIERS } from '@/lib/listenAndLearn';
+import { tabHref } from '@/components/admin/ai-engine/tabs';
 import { formatCost } from './episodeView';
 
 /** One line per provider: its state in the shared vocabulary, and why. */
@@ -45,42 +45,33 @@ function ProviderRow({ provider, wouldRun }) {
 }
 
 /**
- * The models to list: the catalogue's (which mark the default), else the
- * Platform settings route's, else the two ids by their short names.
+ * Which model the Listen & Learn speech task resolves to, why, and what it
+ * costs — the server's answer (`model` on the speech options), never a
+ * list kept here.
  */
-function pricedModels(catalog, speechOptions) {
-  if (catalog?.models?.length) return catalog.models;
-  if (speechOptions?.length) return speechOptions;
-  return Object.entries(GEMINI_TTS_MODEL_TIERS).map(([id, label]) => ({ id, label }));
-}
-
-/** Which model reads when nothing chooses one, where that comes from, and what it costs. */
-function DefaultModelLine({ catalog, effective, option }) {
+function TaskModelLine({ catalog }) {
   if (catalog?.error) return <>Speech options could not be read: {catalog.error}</>;
-  if (!effective) return <>Loading the speech options…</>;
-  const origin = catalog?.storedModel
-    ? ' (stored on Platform settings)'
-    : ' — the cheapest sensible voice, the default when nothing is stored';
+  if (!catalog) return <>Loading the speech options…</>;
+  const { model } = catalog;
+  if (!model) return <>The voice model is the Listen &amp; Learn speech task&apos;s.</>;
+  if (model.error) return <>No voice model is eligible right now: {model.error}</>;
   const price =
-    typeof option?.perEpisodeUsd === 'number'
-      ? `, at up to ${formatCost(option.perEpisodeUsd)} an episode`
+    typeof model.perEpisodeUsd === 'number'
+      ? `, at up to ${formatCost(model.perEpisodeUsd)} an episode`
       : '';
   return (
     <>
-      When nothing chooses a model, <code className="text-foreground">{effective}</code> reads
-      {origin}
-      {price}. A run can override it for itself on the Generate tab; a book can override it for
-      itself in its voice settings.
+      Episodes are read with <code className="text-foreground">{model.model}</code>
+      {model.provider ? ` via ${model.provider}` : ''}
+      {price}
+      {model.why ? ` — ${model.why}` : ''}.
     </>
   );
 }
 
 export default function SettingsTab({ hub }) {
-  const { speechOptions, storedModel, catalog } = hub;
+  const { catalog } = hub;
   const [advanced, setAdvanced] = useState(false);
-  const priced = pricedModels(catalog, speechOptions);
-  const effective = catalog?.effectiveModel || storedModel || null;
-  const effectiveOption = priced.find((m) => m.id === effective);
   const speech = catalog?.speech;
 
   return (
@@ -95,27 +86,16 @@ export default function SettingsTab({ hub }) {
             fallback — never ElevenLabs, which is the podcast voice (owner rule 2026-09-09, ADR 0029
             §2b). The server enforces that per product, so it cannot be changed here by accident.
           </p>
-          <p className="text-muted-foreground">
-            <DefaultModelLine catalog={catalog} effective={effective} option={effectiveOption} />
+          <p className="text-muted-foreground" data-testid="task-model-line">
+            <TaskModelLine catalog={catalog} />
           </p>
-          <ul className="space-y-1 text-muted-foreground">
-            {priced.map((choice) => (
-              <li key={choice.id}>
-                <span className="text-foreground">{choice.label}</span> — <code>{choice.id}</code>
-                {typeof choice.perEpisodeUsd === 'number'
-                  ? ` · up to ${formatCost(choice.perEpisodeUsd)} an episode`
-                  : ''}
-                {choice.isDefault ? ' · the default' : ''}
-              </li>
-            ))}
-          </ul>
           <p>
-            <Link
-              to="/admin/platform?tab=audio"
-              className="text-primary underline underline-offset-4"
-            >
-              Change the stored default on Platform settings
+            The model is chosen under{' '}
+            <Link to={tabHref('routing')} className="text-primary underline underline-offset-4">
+              AI Engine → Tasks
             </Link>
+            , on the Listen &amp; Learn speech row: Recommended is the Economy voice; Best is one
+            Custom step away.
           </p>
         </CardContent>
       </Card>

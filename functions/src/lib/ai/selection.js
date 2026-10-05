@@ -26,8 +26,18 @@
  *
  * The v1 document (`{ routes }`, ADR 0033 §4) is migrated to this shape in
  * memory on every read and on disk at the first save: migrate-selection.js.
+ *
+ * TWO PROVIDER LISTS (ADR 0034 slice 5, #860). `global.priority` names chat
+ * providers only (DEFAULT_PROVIDER_ORDER): it is the list the text router
+ * fails over along, and a media provider in it would be a step that answers
+ * no chat call. A task's `chain` and `exclude` may name any provider the
+ * resolver knows (KNOWN_PROVIDERS, the media providers included), and a
+ * chain step must name a provider that can carry the task's `needs`
+ * (PROVIDER_CAPABILITIES): ElevenLabs for a speech task, never for a
+ * drafting one. normalizeSelection drops a step that cannot; validateSelection
+ * names it.
  */
-import { DEFAULT_PROVIDER_ORDER } from './provider-order.js';
+import { DEFAULT_PROVIDER_ORDER, KNOWN_PROVIDERS, providerCarries } from './provider-order.js';
 import { AI_TASKS, TASK_NAMES } from './tasks.js';
 import { selectChain } from './select.js';
 
@@ -55,19 +65,24 @@ const cleanModel = (value) => {
   return model || null;
 };
 
-const isKnownProvider = (provider) => DEFAULT_PROVIDER_ORDER.includes(provider);
+/** Any provider the resolver knows, the media providers included (header). */
+const isKnownProvider = (provider) => KNOWN_PROVIDERS.includes(provider);
+
+/** A chat provider: what the Priority list may name (header). */
+const isChatProvider = (provider) => DEFAULT_PROVIDER_ORDER.includes(provider);
 
 /**
- * A list of `{ provider, model }` steps, normalised: known providers only,
+ * A list of `{ provider, model }` steps, normalised: providers `allowed`
+ * only (every known one by default; the chat ones for the Priority list),
  * the first occurrence of a provider kept (§6: duplicates collapse to the
  * first), models trimmed or null, at most `limit` entries.
  */
-export function normalizeSteps(raw, limit = Infinity) {
+export function normalizeSteps(raw, limit = Infinity, allowed = isKnownProvider) {
   const steps = [];
   const seen = new Set();
   for (const entry of Array.isArray(raw) ? raw : []) {
     const provider = cleanProvider(isPlainObject(entry) ? entry.provider : entry);
-    if (!isKnownProvider(provider) || seen.has(provider)) continue;
+    if (!allowed(provider) || seen.has(provider)) continue;
     seen.add(provider);
     steps.push({ provider, model: cleanModel(isPlainObject(entry) ? entry.model : null) });
     if (steps.length >= limit) break;
@@ -85,14 +100,18 @@ function normalizeProviders(raw) {
   return out;
 }
 
+/** A chain step for `task` may name a provider that can carry the task's needs (header). */
+const stepAllowedFor = (task) => (provider) =>
+  isKnownProvider(provider) && providerCarries(provider, AI_TASKS[task]?.needs);
+
 /** One task's entry, normalised; `chain` and `thenGlobal` only for `custom`. */
-function normalizeTask(raw) {
+function normalizeTask(task, raw) {
   const base = isPlainObject(raw) ? raw : {};
   const mode = SELECTION_MODES.includes(base.mode) ? base.mode : 'global';
   const exclude = normalizeProviders(base.exclude);
   const entry = { mode };
   if (mode === 'custom') {
-    entry.chain = normalizeSteps(base.chain, MAX_CHAIN_LENGTH);
+    entry.chain = normalizeSteps(base.chain, MAX_CHAIN_LENGTH, stepAllowedFor(task));
     entry.thenGlobal = base.thenGlobal !== false;
   }
   if (exclude.length) entry.exclude = exclude;
@@ -112,11 +131,17 @@ export function normalizeSelection(doc) {
   const tasks = {};
   for (const [task, raw] of Object.entries(isPlainObject(base.tasks) ? base.tasks : {})) {
     if (!TASK_NAMES.includes(task)) continue;
-    tasks[task] = normalizeTask(raw);
+    tasks[task] = normalizeTask(task, raw);
   }
   return {
     version: SELECTION_VERSION,
-    global: { priority: normalizeSteps(isPlainObject(base.global) ? base.global.priority : null) },
+    global: {
+      priority: normalizeSteps(
+        isPlainObject(base.global) ? base.global.priority : null,
+        Infinity,
+        isChatProvider
+      ),
+    },
     tasks,
     updatedAt: typeof base.updatedAt === 'string' ? base.updatedAt : null,
     updatedBy: typeof base.updatedBy === 'string' ? base.updatedBy : null,
@@ -126,10 +151,27 @@ export function normalizeSelection(doc) {
 /** True when the document carries this module's version. */
 export const isSelectionV2 = (doc) => isPlainObject(doc) && doc.version === SELECTION_VERSION;
 
-const PROVIDERS_SENTENCE = `one of ${DEFAULT_PROVIDER_ORDER.join(', ')}`;
+const PROVIDERS_SENTENCE = `one of ${KNOWN_PROVIDERS.join(', ')}`;
+const CHAT_PROVIDERS_SENTENCE = `one of ${DEFAULT_PROVIDER_ORDER.join(', ')} (the Priority list is the chat list; a media provider is named in a task's chain)`;
 
-/** Errors in a list of steps, each sentence prefixed with `where`. */
-function stepErrors(where, raw, limit) {
+/** The Priority list's provider rule: a chat provider (header). */
+const priorityProviderError = (at, provider) =>
+  isChatProvider(provider) ? null : `${at}.provider must be ${CHAT_PROVIDERS_SENTENCE}`;
+
+/** A chain step's provider rule for `task`: known, and able to carry the task's needs (header). */
+const chainProviderError = (task) => (at, provider) => {
+  if (!isKnownProvider(provider)) return `${at}.provider must be ${PROVIDERS_SENTENCE}`;
+  const needs = AI_TASKS[task]?.needs || [];
+  return providerCarries(provider, needs)
+    ? null
+    : `${at}.provider: ${provider} cannot carry ${needs.join(', ')} (${AI_TASKS[task].label} needs it)`;
+};
+
+/**
+ * Errors in a list of steps, each sentence prefixed with `where`;
+ * `providerError(at, provider)` is the list's own provider rule.
+ */
+function stepErrors(where, raw, limit, providerError) {
   if (!Array.isArray(raw)) return [`${where} must be an array of { provider, model? }`];
   const errors = [];
   if (raw.length > limit) errors.push(`${where}: at most ${limit} entries`);
@@ -141,8 +183,9 @@ function stepErrors(where, raw, limit) {
       return;
     }
     const provider = cleanProvider(entry.provider);
-    if (!isKnownProvider(provider)) {
-      errors.push(`${at}.provider must be ${PROVIDERS_SENTENCE}`);
+    const refused = providerError(at, provider);
+    if (refused) {
+      errors.push(refused);
       return;
     }
     if (seen.has(provider)) errors.push(`${at}: ${provider} is listed twice`);
@@ -161,12 +204,12 @@ const modeError = (where, raw) =>
     : `${where}.mode must be one of ${SELECTION_MODES.join(', ')}`;
 
 /** The chain rule: present only for `custom`, required for it, and well-formed. */
-function chainErrors(where, raw) {
+function chainErrors(where, raw, task) {
   if (raw.chain === undefined) {
     return raw.mode === 'custom' ? [`${where}.chain is required for mode custom`] : [];
   }
   if (raw.mode !== 'custom') return [`${where}.chain is only for mode custom`];
-  return stepErrors(`${where}.chain`, raw.chain, MAX_CHAIN_LENGTH);
+  return stepErrors(`${where}.chain`, raw.chain, MAX_CHAIN_LENGTH, chainProviderError(task));
 }
 
 /** The thenGlobal rule: absent or a boolean. */
@@ -190,7 +233,7 @@ function taskErrors(task, raw) {
   if (!isPlainObject(raw)) return [`${where} must be { mode, chain?, thenGlobal?, exclude? }`];
   return [
     modeError(where, raw),
-    ...chainErrors(where, raw),
+    ...chainErrors(where, raw, task),
     thenGlobalError(where, raw),
     ...excludeErrors(where, raw),
   ].filter(Boolean);
@@ -203,7 +246,7 @@ const versionError = (doc) =>
 /** The Priority list's rules: an object, well-formed steps, at least one. */
 function globalErrors(doc) {
   if (!isPlainObject(doc.global)) return ['global must be { priority: [{ provider, model? }] }'];
-  const priority = stepErrors('global.priority', doc.global.priority, Infinity);
+  const priority = stepErrors('global.priority', doc.global.priority, Infinity, priorityProviderError);
   if (!priority.length && doc.global.priority.length === 0) {
     return ['global.priority needs at least one provider'];
   }
