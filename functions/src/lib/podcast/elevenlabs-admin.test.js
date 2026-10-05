@@ -214,6 +214,25 @@ describe('getStatus', () => {
     expect(SEED_KEY_PAGE).toBe('https://hybridcloudworks.com/admin/integrations?tab=keys');
   });
 
+  it('projects the row’s product beside its source, so an episode written since ADR 0034 slice 5 still reads as one', async () => {
+    // The new shape: the task as source, the old slug as product.
+    const store = makeStore({
+      queryDocs: vi.fn(async () => [{ ...USAGE_ROW, source: 'ai:podcastVoice', product: 'podcast:audio' }]),
+    });
+    const res = await handlers({ store }).getStatus(request(), context);
+    expect(res.status).toBe(200);
+    expect(body(res).lastRender).toEqual({
+      characters: 8912,
+      estimated: false,
+      at: '2026-09-26T10:00:00.000Z',
+      source: 'ai:podcastVoice',
+      product: 'podcast:audio',
+      model: 'eleven_v3',
+    });
+    const [, query] = store.queryDocs.mock.calls[0];
+    expect(query).toContain('c.product');
+  });
+
   it('reports the plan, the credits and the reset date, and what the last render billed', async () => {
     const store = makeStore();
     const readAccount = vi.fn(async () => ({ ...FREE, creditsUsed: 8912, creditsLeft: 1088 }));
@@ -240,6 +259,8 @@ describe('getStatus', () => {
         estimated: false,
         at: '2026-09-26T10:00:00.000Z',
         source: 'podcast:audio',
+        // A row from before ADR 0034 slice 5: no product; the card falls back to source.
+        product: null,
         model: 'eleven_v3',
       },
       lastRenderError: null,

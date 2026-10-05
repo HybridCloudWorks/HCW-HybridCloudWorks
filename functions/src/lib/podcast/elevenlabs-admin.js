@@ -161,10 +161,14 @@ const SAMPLE_INFO = Object.freeze({ characters: SAMPLE_CHARACTERS, turns: SAMPLE
  * The newest ElevenLabs usage row, whatever wrote it: an episode or a live
  * check. `ai_usage` is partitioned on `/id` with every path indexed
  * (infra/cosmos-containers.json), so a single-property ORDER BY needs no
- * composite index.
+ * composite index. `product` travels beside `source` (ADR 0034 slice 5,
+ * #860): an episode row written since then is `source: ai:podcastVoice,
+ * product: podcast:audio`, one written before carries only
+ * `source: podcast:audio`, and the card keys on `product` with `source` as
+ * the historical fallback so both read as "an episode".
  */
 const LAST_RENDER_QUERY =
-  'SELECT TOP 1 c.completionTokens, c.estimatedTokens, c.timestamp, c.source, c.model ' +
+  'SELECT TOP 1 c.completionTokens, c.estimatedTokens, c.timestamp, c.source, c.product, c.model ' +
   'FROM c WHERE c.provider = @provider ORDER BY c.timestamp DESC';
 
 /** The newest live check's usage row: what a sample stored before its record billed. */
@@ -196,12 +200,13 @@ function statusFor(error) {
   return 502;
 }
 
-/** A usage row as the card shows it. */
+/** A usage row as the card shows it: `product` beside `source` (LAST_RENDER_QUERY). */
 const presentRender = (row) => ({
   characters: Number(row.completionTokens) || 0,
   estimated: row.estimatedTokens === true,
   at: row.timestamp || null,
   source: row.source || null,
+  product: row.product || null,
   model: row.model || null,
 });
 
