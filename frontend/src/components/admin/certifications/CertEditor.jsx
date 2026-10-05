@@ -4,7 +4,9 @@
  * from Radix rather than a hand-built overlay). Saving POSTs a new cert or
  * PATCHes an existing one through `cms/certifications` and hands the saved
  * row back with `onSaved`; the badge image uploads through
- * `cms/uploads/certifications`.
+ * `cms/uploads/certifications`, which stores it as a 512 × 512 PNG whatever
+ * was picked (SVG included) and answers the stored `url`, which is what is
+ * kept here — never the path this side guessed from the file name.
  *
  * The form validates before it sends — the same rules the API enforces —
  * and says which field is wrong beside it. Save and upload each have an

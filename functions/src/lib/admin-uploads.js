@@ -40,6 +40,17 @@ import {
   PUBLIC_MEDIA_CONTAINERS,
   UPLOAD_CONTAINERS,
 } from './blob-paths.js';
+import { normalizeBadgeImage, withExtension } from './badge-image.js';
+
+/**
+ * Containers whose uploads are decoded and re-encoded before they are stored
+ * (badge-image.js): every object written here is a BADGE_SIZE-square PNG,
+ * whatever the browser sent. For these the public-container SVG refusal
+ * below does not apply, because the SVG is rasterised and never stored; the
+ * declared type still has to be an image type and agree with the extension,
+ * and the stored path takes the PNG extension.
+ */
+export const NORMALIZED_UPLOAD_CONTAINERS = new Set(['certifications']);
 
 // Re-exported: these moved to blob-paths.js so the delivery route could share
 // them without a cycle, and call sites and tests still import them from here.
@@ -134,7 +145,12 @@ export function checkUploadMediaType({ container, path, contentType }) {
   if (!extensions) {
     return { ok: false, message: 'Unsupported content type' };
   }
-  if (PUBLIC_DENIED_MEDIA_TYPES.has(contentType) && PUBLIC_MEDIA_CONTAINERS.has(container)) {
+  const storedAsIs = !NORMALIZED_UPLOAD_CONTAINERS.has(container);
+  if (
+    storedAsIs &&
+    PUBLIC_DENIED_MEDIA_TYPES.has(contentType) &&
+    PUBLIC_MEDIA_CONTAINERS.has(container)
+  ) {
     return {
       ok: false,
       message: 'This content type is not accepted in a publicly served container',
@@ -164,8 +180,9 @@ function readContentLength(request) {
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ uploadBlob: Function }} deps.storage - uploadBlob(container, blobName, content, contentType, metadata, options) → public URL
+ * @param {Function} [deps.normalizeImage] - badge-image.js normalizeBadgeImage, injectable for tests
  */
-export function createAdminUploadHandlers({ guard, storage }) {
+export function createAdminUploadHandlers({ guard, storage, normalizeImage = normalizeBadgeImage }) {
   return {
     /** POST /api/cms/uploads/{container} — {path, contentType, dataBase64} → {url} */
     async uploadFile(request, context) {
@@ -209,12 +226,27 @@ export function createAdminUploadHandlers({ guard, storage }) {
           return json(413, { error: 'File exceeds the 15MB upload limit' });
         }
 
-        const buffer = Buffer.from(dataBase64, 'base64');
+        let buffer = Buffer.from(dataBase64, 'base64');
         if (buffer.length === 0) {
           return json(400, { error: 'dataBase64 is not valid base64' });
         }
         if (buffer.length > MAX_UPLOAD_BYTES) {
           return json(413, { error: 'File exceeds the 15MB upload limit' });
+        }
+
+        // After the size checks, so an oversized body is refused before it is
+        // decoded, and before the write, so nothing but the normalised PNG
+        // ever reaches a normalised container (badge-image.js).
+        let storedPath = path;
+        let storedType = contentType;
+        if (NORMALIZED_UPLOAD_CONTAINERS.has(container)) {
+          const normalized = await normalizeImage(buffer, { contentType });
+          if (normalized.error) {
+            return json(415, { error: normalized.error });
+          }
+          buffer = normalized.buffer;
+          storedType = normalized.contentType;
+          storedPath = withExtension(path, normalized.extension);
         }
 
         // `overwrite: false`. The path is caller-chosen, so without the
@@ -224,9 +256,9 @@ export function createAdminUploadHandlers({ guard, storage }) {
         // so a 409 here means something unintended.
         const blobUrl = await storage.uploadBlob(
           container,
-          path,
+          storedPath,
           buffer,
-          contentType,
+          storedType,
           {},
           { overwrite: false }
         );
@@ -237,9 +269,9 @@ export function createAdminUploadHandlers({ guard, storage }) {
         // the containers' public access (T-105). Public containers get
         // the delivery route; private ones get no URL at all rather than a
         // plausible-looking dead one.
-        const url = PUBLIC_MEDIA_CONTAINERS.has(container) ? mediaUrlFor(container, path) : '';
+        const url = PUBLIC_MEDIA_CONTAINERS.has(container) ? mediaUrlFor(container, storedPath) : '';
 
-        return json(200, { success: true, url, blobUrl, container, path });
+        return json(200, { success: true, url, blobUrl, container, path: storedPath });
       } catch (error) {
         if (error?.statusCode === 409 || error?.code === 'BlobAlreadyExists') {
           return json(409, { error: 'A file already exists at that path' });

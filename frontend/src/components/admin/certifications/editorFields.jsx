@@ -13,12 +13,18 @@ import { detectIssuer, getVendorForIssuer, VENDOR_LABELS, getIssuerColor } from 
 import { resolveMediaUrl } from '@/lib/functionsBase';
 import { issuerOf } from './certView';
 
-/** Image upload limits; the Settings tab shows the same numbers. */
+/**
+ * Image upload limits; the Settings tab shows the same numbers. Whatever is
+ * picked is stored as one shape — the API decodes it and re-encodes a
+ * 512 × 512 transparent PNG (functions/src/lib/badge-image.js) — so an SVG
+ * and a 2,000 px export land on the page the same size.
+ */
 export const IMAGE_RULES = Object.freeze({
   maxBytes: 5 * 1024 * 1024,
   maxLabel: '5 MB',
   accept: 'image/*',
   formats: 'PNG / JPG / SVG',
+  stored: 'stored as a 512 × 512 PNG',
 });
 
 /**
