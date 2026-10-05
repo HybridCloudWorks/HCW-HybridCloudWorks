@@ -94,6 +94,12 @@ describe('saving', () => {
     render(<CertEditor cert={{}} allCerts={[]} onClose={vi.fn()} onSaved={vi.fn()} />);
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Add Certification/ })).toBeInTheDocument();
+    // The issuer list offers the registry even when no cert carries it yet
+    // (owner request 2026-10-05: Anthropic), so it is picked, not typed.
+    fireEvent.click(screen.getByRole('button', { name: 'Show all issuers' }));
+    expect(screen.getByRole('button', { name: 'Anthropic' })).toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Anthropic' }));
+    expect(screen.getByPlaceholderText('Pick or type…')).toHaveValue('Anthropic');
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     });
@@ -224,7 +230,15 @@ describe('order and issuer helpers', () => {
     expect(ladderWindow(siblings, 2, 1).map((s) => s._docId)).toEqual(['a', 'b', 'c']);
   });
 
-  it('builds the issuer list from the collection, deduped case-insensitively', () => {
-    expect(issuerOptionsFrom(all)).toEqual(['AWS', 'Microsoft']);
+  it('builds the issuer list from the collection, deduped case-insensitively, plus the registry', () => {
+    // With no curated list: the collection alone, the first spelling kept.
+    expect(issuerOptionsFrom(all, [])).toEqual(['AWS', 'Microsoft']);
+    // With the registry (the default): its names join, the collection's
+    // spelling wins a tie, and an issuer no cert carries yet is offered.
+    const options = issuerOptionsFrom(all);
+    expect(options).toEqual([...options].sort((a, b) => a.localeCompare(b)));
+    expect(options).toContain('Anthropic');
+    expect(options.filter((o) => o.toLowerCase() === 'microsoft')).toEqual(['Microsoft']);
+    expect(options).toContain('AWS');
   });
 });
