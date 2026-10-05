@@ -679,15 +679,17 @@ export function visibleModelsFor(catalog, provider) {
   if (!isPlainObject(models)) return [];
   const rank = (status) => (status === 'live' ? 0 : 1);
   return Object.values(models)
-    .filter(
-      (m) =>
-        (m.status === 'live' || m.status === 'unknown') &&
-        m.hidden !== true &&
-        Array.isArray(m.capabilities) &&
-        m.capabilities.includes('text')
-    )
+    .filter(isSelectable)
     .sort((a, b) => rank(a.status) - rank(b.status) || a.id.localeCompare(b.id))
     .map((m) => m.id);
+}
+
+/** Offered in a pin: confirmed or awaiting its first list, not hidden, and able to answer a text call. */
+function isSelectable(model) {
+  const confirmedOrPending = model.status === 'live' || model.status === 'unknown';
+  const shown = model.hidden !== true;
+  const answersText = Array.isArray(model.capabilities) && model.capabilities.includes('text');
+  return confirmedOrPending && shown && answersText;
 }
 
 /** The vocabularies the enrichment table must stay inside; pinned by model-catalog.test.js. */
