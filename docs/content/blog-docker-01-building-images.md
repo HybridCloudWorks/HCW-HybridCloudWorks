@@ -3,7 +3,7 @@ title: Building a lab image you can trust
 subtitle: One Dockerfile, two targets, every download checked against a pinned sum, and a provenance attestation you can verify yourself, with the image behind this site's labs as the worked example.
 date: 2026-09-29
 track: how-to
-part: 1 of 2
+part: 1 of 3
 tags: [docker, containers, supply-chain, provenance, github-actions]
 reading: 16
 ---
