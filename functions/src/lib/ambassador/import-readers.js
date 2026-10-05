@@ -19,7 +19,7 @@ const firstUrl = (doc, keys) => {
   return isHttpUrl(value) ? value : null;
 };
 
-const NO_METRICS = () => ({ reach: null, attendees: null, views: null });
+const NO_METRICS = () => ({ reach: null, attendees: null, views: null, credits: null });
 
 /** The live-content predicate public-reads.js uses, so an import offers only what visitors can see. */
 const LIVE_CONTENT_QUERY =
@@ -85,6 +85,143 @@ function curatedUrl(doc) {
   if (!doc.curatedSubpagePath) return null;
   return `https://hybridcloudworks.com/${String(doc.curatedSubpagePath).replace(/^\//, '')}`;
 }
+
+// ── CSV readers: a file the owner exports, pasted or uploaded ────────────────
+
+/** Rows of cells from CSV text (RFC 4180: quoted cells, doubled quotes, CRLF). */
+export function parseCsv(text) {
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  const source = String(text || '').replace(/^﻿/, '');
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
+    if (quoted) {
+      if (ch === '"' && source[i + 1] === '"') {
+        cell += '"';
+        i += 1;
+      } else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') {
+      row.push(cell);
+      cell = '';
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && source[i + 1] === '\n') i += 1;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = '';
+    } else cell += ch;
+  }
+  if (cell !== '' || row.length) {
+    row.push(cell);
+    rows.push(row);
+  }
+  return rows.filter((cells) => cells.some((value) => value.trim() !== ''));
+}
+
+/** "MTM Class ID" → "mtmclassid", so a header matches however the export spells it. */
+const headerKey = (header) =>
+  String(header || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+/** The Metrics That Matter columns the reader uses, by the header keys each may carry. */
+const MTM_COLUMNS = {
+  classId: ['mtmclassid', 'classid', 'id'],
+  course: ['coursename', 'course', 'coursetitle', 'title'],
+  method: ['learningmethod', 'deliverymethod', 'method'],
+  instructor: ['instructor', 'instructorname', 'trainer'],
+  start: ['startdate', 'classstartdate', 'start'],
+  end: ['enddate', 'classenddate', 'end'],
+  location: ['location', 'city', 'country'],
+  attendees: ['attendees', 'students', 'studentcount', 'numberofstudents', 'enrolled', 'learners'],
+};
+
+/** Each column's index in the header row, by the first matching key. */
+function mtmColumnIndexes(header) {
+  const keys = header.map(headerKey);
+  return Object.fromEntries(
+    Object.entries(MTM_COLUMNS).map(([column, names]) => [
+      column,
+      names.map((name) => keys.indexOf(name)).find((index) => index >= 0) ?? -1,
+    ])
+  );
+}
+
+/** An ISO day, or a slash date (M/D/YYYY, or D/M/YYYY when the first part cannot be a month). */
+export function csvDate(value) {
+  const text = String(value || '').trim();
+  const iso = toCalendarDate(text);
+  if (iso) return iso;
+  const match = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/);
+  if (!match) return null;
+  const [, a, b, year] = match;
+  const [month, day] = Number(a) > 12 ? [b, a] : [a, b];
+  return toCalendarDate(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+}
+
+/**
+ * The Metrics That Matter classes-delivered export as evidence seeds: one
+ * row per class, titled by the course, dated by the start date, the method,
+ * instructor, dates and location in the description, attendees when the
+ * export carries a count. Rows with no course name or start date are
+ * skipped. `sourceId` is the MTM class id so the import stays idempotent.
+ */
+export function mctClassesToEvidence(text) {
+  const [header, ...lines] = parseCsv(text);
+  if (!header) return { items: [], skipped: 0 };
+  const at = mtmColumnIndexes(header);
+  const cell = (cells, column) => (at[column] >= 0 ? String(cells[at[column]] ?? '').trim() : '');
+  const items = [];
+  let skipped = 0;
+  for (const cells of lines) {
+    const title = cell(cells, 'course').slice(0, 300);
+    const date = csvDate(cell(cells, 'start'));
+    if (!title || !date) {
+      skipped += 1;
+      continue;
+    }
+    const end = csvDate(cell(cells, 'end'));
+    const classId = cell(cells, 'classId');
+    const attendees = Number(cell(cells, 'attendees'));
+    const facts = [
+      cell(cells, 'method'),
+      cell(cells, 'instructor') && `Instructor ${cell(cells, 'instructor')}`,
+      end && end !== date ? `${date} to ${end}` : date,
+      cell(cells, 'location'),
+    ].filter(Boolean);
+    items.push({
+      sourceId: classId ? `mct-class:${classId}` : `mct-class:${title}|${date}`,
+      title,
+      date,
+      url: null,
+      snapshot: { title, date, url: null },
+      metrics: {
+        ...NO_METRICS(),
+        attendees: Number.isFinite(attendees) && attendees > 0 ? attendees : null,
+      },
+      technology: [],
+      description: `MCT class delivered: ${facts.join(' · ')}`.slice(0, 8000),
+    });
+  }
+  return { items, skipped };
+}
+
+/**
+ * Readers for a file the owner exports and pastes into the import dialog;
+ * each names the evidence source its rows are stored under and turns the
+ * text into seeds with a `sourceId` the import can stay idempotent on.
+ */
+export const CSV_READERS = Object.freeze({
+  'mct-classes': {
+    label: 'MCT classes (Metrics That Matter CSV)',
+    sourceModule: 'manual',
+    toEvidence: mctClassesToEvidence,
+  },
+});
 
 export const IMPORT_READERS = Object.freeze({
   speaking: {

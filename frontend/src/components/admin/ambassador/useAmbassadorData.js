@@ -149,6 +149,17 @@ export default function useAmbassadorData(authReady, { toast } = {}) {
             pick: (body) => body,
           }
         ),
+      /** The rows of a pasted file through one of the API's CSV readers; resolves to `{ created, existing, skipped }`. */
+      importEvidenceCsv: (reader, text, programIds = []) =>
+        write(
+          `import:${reader}`,
+          () => postJSON(`${BASE}/evidence/import`, { reader, text, programIds }),
+          {
+            refresh: evidence.refresh,
+            failure: 'Import failed',
+            pick: (body) => body,
+          }
+        ),
     }),
     [write, programs.refresh, applications.refresh, evidence.refresh]
   );

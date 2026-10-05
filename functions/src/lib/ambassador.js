@@ -37,6 +37,8 @@ export {
   CONTAINER,
   EVIDENCE_SOURCES,
   NOT_PROVISIONED,
+  QUESTION_KINDS,
+  SCORING_UNITS,
   VERIFICATION_STATUSES,
   canTransition,
   isHttpUrl,
@@ -44,6 +46,18 @@ export {
 } from './ambassador/model.js';
 export { DEFAULT_PROGRAMS } from './ambassador/programs.js';
 export { validateApplication, validateEvidence, validateProgram } from './ambassador/validate.js';
-export { computeReadiness, evidenceRelevant, parsePeriod } from './ambassador/readiness.js';
-export { IMPORT_READERS } from './ambassador/import-readers.js';
+export {
+  computeReadiness,
+  evidenceRelevant,
+  parsePeriod,
+  readinessUnit,
+} from './ambassador/readiness.js';
+export {
+  CSV_READERS,
+  IMPORT_READERS,
+  csvDate,
+  mctClassesToEvidence,
+  parseCsv,
+} from './ambassador/import-readers.js';
+export { ensureSeededPrograms } from './ambassador/steps.js';
 export { createAmbassadorHandlers, isNotProvisioned } from './ambassador/handlers.js';

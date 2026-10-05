@@ -68,27 +68,50 @@ async function writeAudit(ctx, action, auth, request, details) {
   }
 }
 
-async function seedPrograms(ctx) {
+/** One seed as the stored document: enabled, ordered, stamped. */
+function seededDoc(ctx, program, order) {
   const stamp = ctx.nowIso();
-  const docs = DEFAULT_PROGRAMS.map((program, index) => ({
+  return {
     ...program,
     docType: 'program',
     enabled: true,
-    order: index + 1,
+    order,
     seeded: true,
     reminders: { daysBeforeDeadline: 14, daysBeforeRenewal: 30 },
     customFields: [],
     createdAt: stamp,
     updatedAt: stamp,
-  }));
-  for (const doc of docs) await ctx.store.upsertDoc(CONTAINER, doc);
-  return docs;
+  };
 }
 
-/** Every program, seeded on the first read of an empty container, in display order. */
+/**
+ * The stored programs plus any DEFAULT_PROGRAMS entry the container does not
+ * hold yet, inserted after the current highest `order`. An empty container
+ * gets every seed in order (the first read); an existing one gets only the
+ * seeds added since, so a program edited, disabled or soft-deleted by the
+ * owner is never overwritten or brought back — a soft-deleted seed is absent
+ * from `rows` but still stored, and the read of its id is what keeps it out.
+ */
+export async function ensureSeededPrograms(ctx, rows) {
+  const present = new Set(rows.map((row) => row.id));
+  const missing = DEFAULT_PROGRAMS.filter((program) => !present.has(program.id));
+  if (missing.length === 0) return rows;
+  let order = rows.reduce((max, row) => Math.max(max, Number(row.order) || 0), 0);
+  const added = [];
+  for (const program of missing) {
+    const stored = await ctx.store.readDoc(CONTAINER, program.id, program.id);
+    if (stored) continue;
+    order += 1;
+    const doc = seededDoc(ctx, program, order);
+    await ctx.store.upsertDoc(CONTAINER, doc);
+    added.push(doc);
+  }
+  return [...rows, ...added];
+}
+
+/** Every program, the seeds filled in on every read, in display order. */
 async function listOrSeedPrograms(ctx) {
-  const rows = await ctx.listKind('program');
-  const programs = rows.length ? rows : await seedPrograms(ctx);
+  const programs = await ensureSeededPrograms(ctx, await ctx.listKind('program'));
   return programs.sort(
     (a, b) => (a.order ?? 999) - (b.order ?? 999) || String(a.name).localeCompare(String(b.name))
   );

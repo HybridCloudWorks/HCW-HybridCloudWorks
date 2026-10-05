@@ -20,6 +20,14 @@ import { Field, LinkList, SelectField, TextAreaField, TextField } from './Parts'
 
 const isHttpUrl = (value) => /^https?:\/\/\S+$/i.test(String(value || '').trim());
 
+/** The reach numbers as the form holds them: each as typed, or empty when unset. */
+const metricsForm = (metrics) => ({
+  reach: metrics?.reach ?? '',
+  attendees: metrics?.attendees ?? '',
+  views: metrics?.views ?? '',
+  credits: metrics?.credits ?? '',
+});
+
 export function evidenceForm(item) {
   const e = item || {};
   return {
@@ -32,11 +40,7 @@ export function evidenceForm(item) {
     tags: (e.tags || []).join(', '),
     programIds: e.programIds || [],
     verificationStatus: e.verificationStatus || 'unverified',
-    metrics: {
-      reach: e.metrics?.reach ?? '',
-      attendees: e.metrics?.attendees ?? '',
-      views: e.metrics?.views ?? '',
-    },
+    metrics: metricsForm(e.metrics),
     links: (e.files || []).map((f) => ({ label: f.name || '', url: f.url || '' })),
     notes: e.notes || '',
   };
@@ -77,6 +81,7 @@ export function evidencePayload(form) {
       reach: num(form.metrics.reach),
       attendees: num(form.metrics.attendees),
       views: num(form.metrics.views),
+      credits: num(form.metrics.credits),
     },
     files: form.links
       .filter((l) => isHttpUrl(l.url))
@@ -90,8 +95,14 @@ export function evidencePayload(form) {
   };
 }
 
-export default function EvidenceEditor({ item, programs, onClose, onSave, saving }) {
-  const [form, setForm] = useState(() => evidenceForm(item));
+/**
+ * @param {object} props
+ * @param {object|null} props.item the evidence to edit, or null for a new one
+ * @param {object} [props.prefill] for a new item, the fields to start from (the guide's Add
+ *   opens the editor on the source and program that would count)
+ */
+export default function EvidenceEditor({ item, prefill, programs, onClose, onSave, saving }) {
+  const [form, setForm] = useState(() => evidenceForm(item || prefill));
   const [errors, setErrors] = useState({});
   const set = (key) => (value) => {
     setForm((f) => ({ ...f, [key]: value }));
@@ -213,6 +224,15 @@ export default function EvidenceEditor({ item, programs, onClose, onSave, saving
               min="0"
               value={form.metrics.views}
               onChange={(v) => setForm((f) => ({ ...f, metrics: { ...f.metrics, views: v } }))}
+            />
+            <TextField
+              id="evidence-credits"
+              label="Credits"
+              type="number"
+              min="0"
+              value={form.metrics.credits}
+              onChange={(v) => setForm((f) => ({ ...f, metrics: { ...f.metrics, credits: v } }))}
+              hint="For a program scored in credits; readiness sums them."
             />
             <SelectField
               id="evidence-verification"

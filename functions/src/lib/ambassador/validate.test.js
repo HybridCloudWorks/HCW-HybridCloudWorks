@@ -74,6 +74,79 @@ describe('field rules', () => {
     ).toMatchObject({ order: 3, reminders: { daysBeforeDeadline: 0, daysBeforeRenewal: 0 } });
   });
 
+  it('program: application questions need an id, a prompt and a known kind, once each, at most 200', () => {
+    const q = (patch) => validateProgram({ name: 'P', applicationQuestions: [patch] });
+    expect(q({}).error).toBe('applicationQuestions[0].id is required');
+    expect(q({ id: 'a' }).error).toBe('applicationQuestions[0].prompt is required');
+    expect(q({ id: 'a', prompt: 'Why?', kind: 'essay' }).error).toMatch(
+      /applicationQuestions\[0\].kind must be one of profile, text/
+    );
+    expect(
+      validateProgram({
+        name: 'P',
+        applicationQuestions: [
+          { id: 'a', prompt: 'Why?', kind: 'text' },
+          { id: 'a', prompt: 'Again?', kind: 'text' },
+        ],
+      }).error
+    ).toBe('applicationQuestions[1].id "a" repeats an earlier one');
+    expect(validateProgram({ name: 'P', applicationQuestions: 'no' }).error).toBe(
+      'applicationQuestions must be an array'
+    );
+    const many = Array.from({ length: 201 }, (_, i) => ({
+      id: `q${i}`,
+      prompt: 'x',
+      kind: 'text',
+    }));
+    expect(validateProgram({ name: 'P', applicationQuestions: many }).error).toMatch(/at most 200/);
+    expect(
+      q({
+        id: ' grid ',
+        section: 'Tools',
+        prompt: 'How often?',
+        kind: 'scale',
+        rows: ['Teams', '', 7],
+        options: ['Daily', 'Never'],
+        maxChars: '0',
+        maxItems: '24.9',
+        required: 'yes',
+      }).value.applicationQuestions[0]
+    ).toEqual({
+      id: 'grid',
+      section: 'Tools',
+      prompt: 'How often?',
+      kind: 'scale',
+      maxChars: null,
+      options: ['Daily', 'Never'],
+      rows: ['Teams'],
+      maxItems: 24,
+      hint: '',
+      required: false,
+    });
+  });
+
+  it('program: scoring is null or a credits unit with labelled tiers; evidence metrics carry credits', () => {
+    expect(validateProgram({ name: 'P', scoring: null }).value.scoring).toBeNull();
+    expect(validateProgram({ name: 'P', scoring: 'points' }).error).toBe(
+      'scoring must be an object or null'
+    );
+    expect(validateProgram({ name: 'P', scoring: { unit: 'points' } }).error).toBe(
+      'scoring.unit must be one of credits'
+    );
+    expect(
+      validateProgram({
+        name: 'P',
+        scoring: {
+          unit: 'credits',
+          tiers: [{ label: 'Contributor', credits: '10' }, { credits: 5 }],
+        },
+      }).value.scoring
+    ).toEqual({ unit: 'credits', tiers: [{ label: 'Contributor', credits: 10 }] });
+    expect(
+      validateEvidence({ title: 'T', date: '2026-01-02', metrics: { credits: '3' } }).value.metrics
+    ).toEqual({ reach: null, attendees: null, views: null, credits: 3 });
+  });
+
   it('application: a badge may be a site path, custom values are trimmed strings, flags default on', () => {
     const ok = validateApplication({
       programId: 'p',

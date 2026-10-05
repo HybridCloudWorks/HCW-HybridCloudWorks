@@ -3,7 +3,7 @@
  * from a source module with a snapshot of what the source said at link time.
  * Import is idempotent on (sourceModule, sourceId).
  */
-import { IMPORT_READERS } from './import-readers.js';
+import { CSV_READERS, IMPORT_READERS } from './import-readers.js';
 import { CONTAINER } from './model.js';
 import { evidenceRelevant, inPeriod, parsePeriod } from './readiness.js';
 import { KINDS, byDateDesc, json, loadCreate, stamped } from './steps.js';
@@ -42,7 +42,7 @@ const evidenceDefaults = () => ({
   url: null,
   files: [],
   images: [],
-  metrics: { reach: null, attendees: null, views: null },
+  metrics: { reach: null, attendees: null, views: null, credits: null },
   technology: [],
   programIds: [],
   qualificationPeriod: null,
@@ -121,15 +121,65 @@ async function importFromSource(ctx, { reader, sourceModule, ids, programIds }, 
 const unknownSource = () =>
   json(400, { error: `sourceModule must be one of ${Object.keys(IMPORT_READERS).join(', ')}` });
 
+const MAX_CSV_TEXT = 150_000;
+
 /**
- * POST cms/ambassador/evidence/import { sourceModule, ids[] } — one evidence
- * row per source document, with a snapshot of what the source said now.
- * Idempotent on (sourceModule, sourceId): a row already imported is
- * reported as `existing`, never duplicated.
+ * Import the rows of a pasted file: every seed the reader produces becomes
+ * one evidence row under the reader's source, idempotent on the seed's
+ * `sourceId`; rows the reader could not read are counted as `skipped`.
+ */
+async function importFromCsv(ctx, request, { reader, readerId, text, programIds }, auth) {
+  const { sourceModule } = reader;
+  const { items, skipped } = reader.toEvidence(text);
+  if (items.length === 0 && skipped === 0)
+    return json(400, { error: 'text holds no rows under a header line' });
+  const current = (await ctx.listKind('evidence')).filter((e) => e.sourceModule === sourceModule);
+  const bySource = new Set(current.map((e) => String(e.sourceId)));
+  const created = [];
+  const existing = [];
+  const stamp = ctx.nowIso();
+  for (const { sourceId, ...rest } of items) {
+    if (bySource.has(sourceId)) {
+      existing.push(sourceId);
+      continue;
+    }
+    const seed = { ...rest, tags: [readerId] };
+    const doc = importedEvidence(ctx, { seed, programIds, sourceModule, sourceId, stamp }, auth);
+    await ctx.store.upsertDoc(CONTAINER, doc);
+    bySource.add(sourceId);
+    created.push(doc);
+  }
+  await ctx.audit('ambassador_evidence_imported', auth, request, {
+    reader: readerId,
+    created: created.length,
+    existing: existing.length,
+    skipped,
+  });
+  return json(200, { success: true, created, existing, missing: [], skipped });
+}
+
+/**
+ * POST cms/ambassador/evidence/import — two shapes on one route:
+ * `{ sourceModule, ids[] }` imports documents from a source module, one
+ * evidence row each with a snapshot of what the source said now;
+ * `{ reader, text }` imports the rows of a pasted CSV through a CSV_READERS
+ * entry. Both take `programIds[]` and are idempotent on
+ * (sourceModule, sourceId): a row already imported is reported as
+ * `existing`, never duplicated.
  */
 export async function importEvidence(ctx, request, auth) {
   const body = await ctx.readBody(request);
   if (!body) return json(400, { error: 'Body must be a JSON object' });
+  const readerId = str(body.reader, 40);
+  if (readerId) {
+    const reader = CSV_READERS[readerId];
+    if (!reader)
+      return json(400, { error: `reader must be one of ${Object.keys(CSV_READERS).join(', ')}` });
+    const text = str(body.text, MAX_CSV_TEXT);
+    if (!text) return json(400, { error: 'text is required' });
+    const programIds = stringList(body.programIds);
+    return importFromCsv(ctx, request, { reader, readerId, text, programIds }, auth);
+  }
   const sourceModule = str(body.sourceModule, 40);
   const reader = IMPORT_READERS[sourceModule];
   if (!reader) return unknownSource();

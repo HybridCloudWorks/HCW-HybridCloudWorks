@@ -25,6 +25,8 @@ import {
   APPLICATION_STATUSES,
   MEMBERSHIP_STATUSES,
   EVIDENCE_SOURCES,
+  QUESTION_KINDS,
+  SCORING_UNITS,
   VERIFICATION_STATUSES,
   isHttpUrl,
   toCalendarDate,
@@ -134,6 +136,60 @@ function cleanCustomFields(value) {
     .slice(0, 50);
 }
 
+const QUESTION_MAX = 200;
+
+/** A whole number or null when unset; never zero, which would read as "no limit" anyway. */
+const limitOrNull = (value) => (isBlank(value) ? null : wholeNumber(value) || null);
+
+/**
+ * The program's official application questions, in the form's order. Each
+ * needs an id (unique within the program), a prompt and one of the kinds the
+ * guided workspace renders; `options` serve choice, scale and links, `rows`
+ * the scale grid, `maxChars` a text, `maxItems` links and activities.
+ */
+function cleanApplicationQuestions(value) {
+  if (!Array.isArray(value)) refuse('applicationQuestions must be an array');
+  if (value.length > QUESTION_MAX)
+    refuse(`applicationQuestions must hold at most ${QUESTION_MAX} questions`);
+  const seen = new Set();
+  return value.map((item, index) => {
+    if (!isRecord(item)) refuse(`applicationQuestions[${index}] must be an object`);
+    const id = str(item.id, 80) || refuse(`applicationQuestions[${index}].id is required`);
+    if (seen.has(id)) refuse(`applicationQuestions[${index}].id "${id}" repeats an earlier one`);
+    seen.add(id);
+    const prompt =
+      str(item.prompt, 1000) || refuse(`applicationQuestions[${index}].prompt is required`);
+    const kind = QUESTION_KINDS.includes(item.kind)
+      ? item.kind
+      : refuse(`applicationQuestions[${index}].kind must be one of ${QUESTION_KINDS.join(', ')}`);
+    return {
+      id,
+      section: str(item.section, 200),
+      prompt,
+      kind,
+      maxChars: limitOrNull(item.maxChars),
+      options: stringList(item.options, 100),
+      rows: stringList(item.rows, 100),
+      maxItems: limitOrNull(item.maxItems),
+      hint: str(item.hint, 2000),
+      required: item.required === true,
+    };
+  });
+}
+
+/** `{ unit: 'credits', tiers: [{ label, credits }] }`, or null for the usual item counts. */
+function cleanScoring(value) {
+  if (isBlank(value)) return null;
+  if (!isRecord(value)) refuse('scoring must be an object or null');
+  const unit = oneOf(SCORING_UNITS, 'scoring.unit')(value.unit);
+  const tiers = (Array.isArray(value.tiers) ? value.tiers : [])
+    .filter(isRecord)
+    .map((tier) => ({ label: str(tier.label, 200), credits: wholeNumber(tier.credits) }))
+    .filter((tier) => tier.label)
+    .slice(0, 50);
+  return { unit, tiers };
+}
+
 const PROGRAM = {
   name: 'program',
   fields: {
@@ -155,6 +211,8 @@ const PROGRAM = {
     reminders: field(cleanReminders),
     customFields: field(cleanCustomFields),
     membershipStatus: field(oneOf(MEMBERSHIP_STATUSES, 'membershipStatus')),
+    applicationQuestions: field(cleanApplicationQuestions),
+    scoring: field(cleanScoring),
   },
 };
 
@@ -235,7 +293,12 @@ export function validateApplication(body, options) {
 function cleanMetrics(value) {
   const m = isRecord(value) ? value : {};
   const num = (v) => (isBlank(v) || !Number.isFinite(Number(v)) ? null : Number(v));
-  return { reach: num(m.reach), attendees: num(m.attendees), views: num(m.views) };
+  return {
+    reach: num(m.reach),
+    attendees: num(m.attendees),
+    views: num(m.views),
+    credits: num(m.credits),
+  };
 }
 
 function cleanSnapshot(value) {

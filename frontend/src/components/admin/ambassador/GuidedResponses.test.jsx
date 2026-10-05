@@ -1,0 +1,157 @@
+/**
+ * The guided application (ADR 0033 §4). What must hold: the sections come in
+ * the form's order and each kind renders its own control; a text answer
+ * shows the live count against its limit; an answer is stored as one
+ * `{ questionId, text }` and a structured one JSON-encoded; Copy puts the
+ * worded answer on the clipboard and Copy all the whole packet; activities
+ * pick from the attached evidence and stop at the limit.
+ */
+import React, { useState } from 'react';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
+
+import GuidedResponses from './GuidedResponses';
+
+const questions = [
+  { id: 'name', section: 'Profile', prompt: 'First name', kind: 'profile' },
+  { id: 'why', section: 'Questions', prompt: 'Why?', kind: 'text', maxChars: 20 },
+  { id: 'mct', section: 'Questions', prompt: 'Are you an MCT?', kind: 'yesno' },
+  { id: 'cat', section: 'Questions', prompt: 'Category', kind: 'choice', options: ['A', 'B'] },
+  { id: 'site', section: 'Questions', prompt: 'Website', kind: 'url' },
+  {
+    id: 'grid',
+    section: 'Tools',
+    prompt: 'How often?',
+    kind: 'scale',
+    rows: ['Teams'],
+    options: ['Daily', 'Never'],
+  },
+  { id: 'links', section: 'Network', prompt: 'Networks', kind: 'links', options: ['GitHub'] },
+  { id: 'acts', section: 'Expertise', prompt: 'Activities', kind: 'activities', maxItems: 1 },
+];
+
+const evidence = [
+  { id: 'e1', title: 'KCDC talk', date: '2026-08-14', url: 'https://kcdc.info' },
+  { id: 'e2', title: 'Meetup', date: '2026-09-01' },
+];
+
+function Harness({ initial = [], onChange = () => {} }) {
+  const [responses, setResponses] = useState(initial);
+  return (
+    <GuidedResponses
+      questions={questions}
+      responses={responses}
+      evidence={evidence}
+      title="MVP 2026"
+      onChange={(next) => {
+        setResponses(next);
+        onChange(next);
+      }}
+    />
+  );
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete navigator.clipboard;
+});
+
+describe('GuidedResponses', () => {
+  it('renders the sections in order with a control per kind and counts the answered', () => {
+    render(<Harness />);
+    const legends = screen.getAllByRole('group').map((g) => g.querySelector('legend').textContent);
+    expect(legends).toEqual(['Profile', 'Questions', 'Tools', 'Network', 'Expertise']);
+    expect(screen.getByText('0 of 8 answered', { exact: false })).toBeInTheDocument();
+    expect(screen.getByLabelText('First name')).toHaveAttribute('type', 'text');
+    expect(screen.getByLabelText('Why?').tagName).toBe('TEXTAREA');
+    expect(within(screen.getByRole('radiogroup')).getAllByRole('radio')).toHaveLength(2);
+    expect(screen.getByLabelText('Category').tagName).toBe('SELECT');
+    expect(screen.getByLabelText('Website')).toHaveAttribute('type', 'url');
+    expect(screen.getByLabelText('Teams').tagName).toBe('SELECT');
+    expect(screen.getByRole('button', { name: 'Add link' })).toBeInTheDocument();
+    expect(screen.getByText(/Tag up to 1 activities/)).toBeInTheDocument();
+  });
+
+  it('stores a text answer with its live count, a yes/no, a choice and a structured grid', () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Why?'), { target: { value: 'Because' } });
+    expect(onChange).toHaveBeenLastCalledWith([{ questionId: 'why', text: 'Because' }]);
+    expect(screen.getByText('7 / 20 characters')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Yes' }));
+    expect(onChange).toHaveBeenLastCalledWith([
+      { questionId: 'why', text: 'Because' },
+      { questionId: 'mct', text: 'Yes' },
+    ]);
+
+    fireEvent.change(screen.getByLabelText('Teams'), { target: { value: 'Daily' } });
+    expect(onChange.mock.calls.at(-1)[0].find((r) => r.questionId === 'grid').text).toBe(
+      JSON.stringify({ Teams: 'Daily' })
+    );
+    // Clearing an answer removes its entry rather than leaving an empty one.
+    fireEvent.change(screen.getByLabelText('Why?'), { target: { value: '' } });
+    expect(onChange.mock.calls.at(-1)[0].map((r) => r.questionId)).toEqual(['mct', 'grid']);
+    expect(screen.getByText('2 of 8 answered', { exact: false })).toBeInTheDocument();
+  });
+
+  it('names a bad URL and keeps the link rows as network + URL', () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Website'), { target: { value: 'ftp://x' } });
+    expect(screen.getByRole('alert')).toHaveTextContent('Must start with http:// or https://.');
+    fireEvent.click(screen.getByRole('button', { name: 'Add link' }));
+    fireEvent.change(screen.getByLabelText('Network 1'), { target: { value: 'GitHub' } });
+    fireEvent.change(screen.getByLabelText('URL 1'), { target: { value: 'https://github.com/x' } });
+    expect(onChange.mock.calls.at(-1)[0].find((r) => r.questionId === 'links').text).toBe(
+      JSON.stringify([{ network: 'GitHub', url: 'https://github.com/x' }])
+    );
+  });
+
+  it('tags activities from the attached evidence and stops at the limit', () => {
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText(/KCDC talk/));
+    expect(onChange).toHaveBeenLastCalledWith([{ questionId: 'acts', text: '["e1"]' }]);
+    expect(screen.getByLabelText(/Meetup/)).toBeDisabled();
+    expect(screen.getByText(/1 \/ 1/)).toBeInTheDocument();
+  });
+
+  it('copies one worded answer, and Copy all the packet in the form’s order', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    navigator.clipboard = { writeText };
+    render(
+      <Harness
+        initial={[
+          { questionId: 'name', text: 'Sam' },
+          { questionId: 'acts', text: '["e1"]' },
+        ]}
+      />
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy answer: Activities' }));
+    });
+    expect(writeText).toHaveBeenLastCalledWith('KCDC talk — 2026-08-14 · https://kcdc.info');
+    expect(screen.getByRole('button', { name: 'Copy answer: Why?' })).toBeDisabled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy all answers' }));
+    });
+    const [packet] = writeText.mock.calls.at(-1);
+    expect(packet.startsWith('MVP 2026\n\n## Profile\n\nFirst name\nSam\n\n## Questions\n')).toBe(
+      true
+    );
+    expect(packet).toContain('Why?\n(not answered)');
+    expect(screen.getByRole('button', { name: 'Copy all answers' })).toHaveTextContent('Copied');
+  });
+
+  it('says so when the clipboard is unavailable', async () => {
+    render(<Harness initial={[{ questionId: 'name', text: 'Sam' }]} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Copy answer: First name' }));
+    });
+    expect(screen.getByRole('button', { name: 'Copy answer: First name' })).toHaveTextContent(
+      'Copy failed'
+    );
+  });
+});

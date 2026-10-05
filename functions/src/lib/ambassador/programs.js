@@ -1,8 +1,13 @@
 /**
- * The seed programs (ADR 0033 §4): seven community programs materialised on
- * the first read of an empty container. Every field is editable afterwards;
- * the requirements are sensible starting points and say so, because each
- * program publishes its own rules and changes them.
+ * The seed programs (ADR 0033 §4): the community programs materialised on
+ * the first read of an empty container, and added to an existing one by
+ * `ensureSeededPrograms` (steps.js) whenever a new entry appears here. Every
+ * field is editable afterwards; the requirements are starting points and say
+ * so, because each program publishes its own rules and changes them.
+ *
+ * The facts below are the program rules as published in 2026, read from the
+ * program pages and the official application question lists (owner request
+ * 2026-10-05). The questions are the programs' own; no answer is seeded.
  */
 
 const EDIT_NOTE = 'Edit to match the current program rules.';
@@ -17,6 +22,302 @@ const requirement = (id, label, description, { evidenceTypes, minCount, weight }
   weight,
 });
 
+/** One official application question, in the section the form puts it. */
+const question = (id, section, prompt, kind, extra = {}) => ({
+  id,
+  section,
+  prompt,
+  kind,
+  maxChars: null,
+  options: [],
+  rows: [],
+  maxItems: null,
+  hint: '',
+  required: false,
+  ...extra,
+});
+
+const YES_NO_HINT = 'If yes, add one or more supporting activities or events below.';
+
+// ── Microsoft MVP: the official application's sections ──────────────────────
+
+const MVP_PROFILE = 'Profile Information';
+const MVP_NETWORK = 'Online Influence & Network';
+const MVP_QUESTIONS = 'Application Questions';
+const MVP_TECHNOLOGY = 'Technology Area';
+const MVP_EXPERTISE = 'Technical Expertise';
+
+const MVP_AWARD_CATEGORIES = [
+  'Azure AI Foundry',
+  'Business Applications',
+  'Cloud and Datacenter Management',
+  'Data Platform',
+  'Developer Technologies',
+  'Internet of Things',
+  'M365',
+  'Microsoft Azure',
+  'Security',
+  'Windows Development',
+  'Windows and Devices',
+];
+
+const MVP_AZURE_AREAS = [
+  'Azure Application PaaS',
+  'Azure Compute Infrastructure',
+  'Azure Cost Resource & Configuration Management',
+  'Azure HPC & AI Infrastructure',
+  'Azure Hybrid & Migration',
+  'Azure Infrastructure as Code',
+  'Azure Innovation Hub',
+  'Azure Integration PaaS',
+  'Azure Kubernetes and Open Source',
+  'Azure Networking',
+  'Azure Solutions & Ecosystem',
+  'Azure Storage',
+  'Azure Well-Architected Resiliency & Observability',
+  'PowerShell',
+].map((area) => `Microsoft Azure: ${area}`);
+
+const MVP_CDM_AREAS = [
+  'Datacenter Management (Group Policy, System Center)',
+  'Enterprise and Platform Security',
+  'High Availability',
+  'Hyper-V',
+  'Linux on Hyper-V',
+  'On-premises and Hybrid AKS Container Management',
+  'On-Premises Networking',
+  'On-Premises Storage',
+  'Windows Server',
+].map((area) => `Cloud and Datacenter Management: ${area}`);
+
+const MVP_ACTIVITY_TYPES =
+  'Activity types and the fields the form asks for: Speaker/Presenter (title, audience, description, private description, primary and additional technology areas, date, in-person attendees, livestream views, on-demand views, URL); Book/E-Book; Open Source/Project/Sample code/Tools; Product Feedback; Blog; Article; Online Support; Mentorship/Coaching; Webinar/Online Training/Video/Livestream; Podcast.';
+
+const MVP_GATES = [
+  ['feedback', 'Have you provided product feedback to Microsoft?'],
+  ['speaker', 'Have you been a speaker or expert at technical events?'],
+  ['events', 'Have you organised or executed technical community events?'],
+  ['groups', 'Do you run or own user groups or meetups?'],
+  ['content', 'Have you created technical content?'],
+  ['support', 'Have you provided online support or moderation via forums?'],
+  ['open-source', 'Have you contributed to open source projects in the last 12 months?'],
+  ['mentorship', 'Have you provided technical mentorship?'],
+];
+
+const MVP_APPLICATION_QUESTIONS = [
+  question('mvp-first-name', MVP_PROFILE, 'First name', 'profile'),
+  question('mvp-last-name', MVP_PROFILE, 'Last name', 'profile'),
+  question('mvp-email', MVP_PROFILE, 'Email', 'profile'),
+  question('mvp-country', MVP_PROFILE, 'Country or region', 'profile'),
+  question('mvp-city', MVP_PROFILE, 'City', 'profile'),
+  question('mvp-networks', MVP_NETWORK, 'Social networks and websites', 'links', {
+    options: [
+      'LinkedIn',
+      'Personal Website',
+      'YouTube',
+      'GitHub',
+      'X',
+      'Facebook',
+      'Instagram',
+      'Bluesky',
+      'Mastodon',
+      'Other',
+    ],
+    maxItems: 10,
+    hint: 'One row per network: the network and its URL.',
+  }),
+  question(
+    'mvp-influence',
+    MVP_NETWORK,
+    'How do you leverage your network and influence, both on and offline, to drive positive change?',
+    'text',
+    { maxChars: 1000 }
+  ),
+  question('mvp-company-type', MVP_QUESTIONS, 'What type of company do you work for?', 'choice', {
+    options: [
+      'Microsoft Partner',
+      'Independent or self-employed',
+      'Enterprise',
+      'Small or medium business',
+      'Public sector or education',
+      'Non-profit',
+      'Other',
+    ],
+  }),
+  question('mvp-employer', MVP_QUESTIONS, 'Current Employer/Organization', 'text', {
+    maxChars: 200,
+  }),
+  question('mvp-job-title', MVP_QUESTIONS, 'Job Title', 'text', { maxChars: 200 }),
+  question(
+    'mvp-mct',
+    MVP_QUESTIONS,
+    'Do you currently hold membership as a Microsoft Certified Trainer (MCT)?',
+    'yesno'
+  ),
+  question(
+    'mvp-previous',
+    MVP_QUESTIONS,
+    'Have you previously been awarded Microsoft MVP?',
+    'yesno'
+  ),
+  question('mvp-why', MVP_QUESTIONS, 'Describe why you want to be an MVP', 'text', {
+    maxChars: 1000,
+  }),
+  question(
+    'mvp-student-ambassador',
+    MVP_QUESTIONS,
+    'Are you a current or former Microsoft Learn Student Ambassador or Microsoft Student Partner?',
+    'yesno'
+  ),
+  question('mvp-award-category', MVP_TECHNOLOGY, 'Award Category', 'choice', {
+    options: MVP_AWARD_CATEGORIES,
+  }),
+  question('mvp-technology-area', MVP_TECHNOLOGY, 'Primary Technology Area', 'choice', {
+    options: [...MVP_AZURE_AREAS, ...MVP_CDM_AREAS],
+    hint: 'The areas listed are those of Microsoft Azure and Cloud and Datacenter Management; other categories list their own on the form.',
+  }),
+  question('mvp-technology-areas-more', MVP_TECHNOLOGY, 'Additional Technology Areas', 'text', {
+    maxChars: 500,
+    hint: 'Comma separated, from the same list as the primary area.',
+  }),
+  ...MVP_GATES.map(([id, prompt]) =>
+    question(`mvp-gate-${id}`, MVP_EXPERTISE, prompt, 'yesno', { hint: YES_NO_HINT })
+  ),
+  question(
+    'mvp-activities',
+    MVP_EXPERTISE,
+    'Supporting activities and events from the past 12 months',
+    'activities',
+    { maxItems: 24, hint: MVP_ACTIVITY_TYPES }
+  ),
+  question(
+    'mvp-help-others',
+    MVP_EXPERTISE,
+    'How do you use your knowledge and skills to help others?',
+    'text',
+    { maxChars: 1000 }
+  ),
+  question(
+    'mvp-moving-forward',
+    MVP_EXPERTISE,
+    'How would you support the community with your technical knowledge and skills moving forward?',
+    'text',
+    { maxChars: 1000 }
+  ),
+];
+
+// ── Microsoft Elevate Educator – Expert: the 2026-2027 question list ────────
+
+const MIEE_ABOUT = 'About You';
+const MIEE_LEARNING = 'Learning Paths';
+const MIEE_TOOLS = 'How You Use Microsoft Tools';
+const MIEE_AI = 'AI in Your Practice';
+
+const MIEE_FREQUENCIES = ['Daily', 'Weekly', 'Monthly', 'Rarely', 'Never'];
+
+const MIEE_TOOL_ROWS = [
+  'Microsoft Teams in an instructional environment',
+  'Copilot Chat',
+  'Microsoft 365 Copilot',
+  'Copilot Agents',
+  'Reading Coach / Reading Progress',
+  'Math Coach / Math Progress',
+  'Speaker Coach / Speaker Progress',
+  'Immersive Reader',
+  'Reflect',
+  'Microsoft Forms',
+  'Teach Module in the Microsoft 365 Copilot App',
+  'Microsoft Study & Learn in the Microsoft 365 Copilot App',
+  'OneNote',
+  'Minecraft Education',
+  'Sharing teaching and learning knowledge with colleagues',
+];
+
+const MIEE_PROFILE_FIELDS = [
+  ['first-name', 'First name'],
+  ['last-name', 'Last name'],
+  ['personal-email', 'Personal email'],
+  ['org-email', 'Organisation email'],
+  ['org-name', 'Organisation name'],
+  ['org-type', 'Organisation type'],
+  ['address', 'Address'],
+  ['city', 'City'],
+  ['state', 'State or province'],
+  ['country', 'Country or region'],
+  ['website', 'Organisation website'],
+  ['age-range', 'Age range taught'],
+  ['role', 'Current role'],
+  ['subjects', 'Subjects taught'],
+];
+
+const MIEE_APPLICATION_QUESTIONS = [
+  ...MIEE_PROFILE_FIELDS.map(([id, prompt]) =>
+    question(`miee-${id}`, MIEE_ABOUT, prompt, 'profile')
+  ),
+  question(
+    'miee-school-program',
+    MIEE_ABOUT,
+    'Is your organisation a Showcase School, a Pathfinder School, or neither?',
+    'choice',
+    { options: ['Showcase School', 'Pathfinder School', 'Neither'] }
+  ),
+  question(
+    'miee-path-general',
+    MIEE_LEARNING,
+    'Have you completed the Elevate Educator – Expert (General) learning path?',
+    'yesno'
+  ),
+  question(
+    'miee-path-ai',
+    MIEE_LEARNING,
+    'Have you completed the Elevate Educator – Expert (AI) learning path?',
+    'yesno'
+  ),
+  question('miee-learn-url', MIEE_LEARNING, 'Share the URL to your achievements in Learn', 'url'),
+  question('miee-frequency', MIEE_TOOLS, 'How often do you use each of the following?', 'scale', {
+    rows: MIEE_TOOL_ROWS,
+    options: MIEE_FREQUENCIES,
+  }),
+  question('miee-ai-tool', MIEE_AI, 'Select an AI tool that you use', 'choice', {
+    options: [
+      'Copilot Chat',
+      'Microsoft 365 Copilot',
+      'Microsoft Teach/Study/Learn in the Microsoft 365 Copilot App',
+      'Minecraft Education + AI Worlds',
+      'Microsoft Designer',
+      'Copilot Agents',
+    ],
+  }),
+  question(
+    'miee-ai-example',
+    MIEE_AI,
+    'Share one example of how you used this AI tool in your role as an educator. What was created or improved, how did you adapt it for your context, and how did it support learners or colleagues?',
+    'text',
+    { maxChars: 2000 }
+  ),
+  question(
+    'miee-ai-support',
+    MIEE_AI,
+    'How do you see Microsoft and this community supporting you in navigating AI in your role?',
+    'text',
+    { maxChars: 2000 }
+  ),
+];
+
+// ── Microsoft Management Community: recognition by credits ──────────────────
+
+const MANAGEMENT_TIERS = [
+  ['Community Contributor', 10],
+  ['Community Advocate', 20],
+  ['Management Community Champion', 25],
+  ['Management Community Influencer', 50],
+  ['Management Community Leader', 75],
+  ['Community Rockstar', 100],
+];
+
+const CREDIT_NOTE =
+  'Credits as published for 2025: Survey 1, Focus Group or Design Exercise 3, Private Preview 3 to 6. Record each as manual evidence with its credits; readiness sums them.';
+
 export const DEFAULT_PROGRAMS = Object.freeze([
   {
     id: 'program-microsoft-mvp',
@@ -24,7 +325,7 @@ export const DEFAULT_PROGRAMS = Object.freeze([
     provider: 'Microsoft',
     category: 'community-expert',
     description:
-      'Microsoft Most Valuable Professional: recognises exceptional technical community leadership over the previous twelve months. Nomination by a Microsoft employee or an existing MVP.',
+      'Microsoft Most Valuable Professional: recognises exceptional technical community leadership over the previous twelve months. Nomination by a Microsoft employee or an existing MVP. The application questions below mirror the official form (program rules as published 2026); up to 24 activities or events from the past 12 months may be tagged.',
     applicationUrl: 'https://mvp.microsoft.com/',
     eligibility: [
       'Nominated by a Microsoft full-time employee or a current MVP',
@@ -70,6 +371,7 @@ export const DEFAULT_PROGRAMS = Object.freeze([
       'Publish one article a month on the award technology',
       'Keep every contribution dated and linked',
     ],
+    applicationQuestions: MVP_APPLICATION_QUESTIONS,
   },
   {
     id: 'program-microsoft-mct',
@@ -77,14 +379,15 @@ export const DEFAULT_PROGRAMS = Object.freeze([
     provider: 'Microsoft',
     category: 'training',
     description:
-      'MCT: the premier technical and instructional experts on Microsoft technologies. Requires a qualifying certification and instructional experience.',
+      'MCT: the premier technical and instructional experts on Microsoft technologies. Requires a qualifying certification and instructional experience; renewed annually. The MCT Lounge on the Microsoft Tech Community is the community platform. A classes-delivered export (the Metrics That Matter CSV: class id, course, learning method, instructor, start and end date, location) is the evidence of delivery — import it on the Evidence tab as "MCT classes (Metrics That Matter CSV)". Program rules as published 2026.',
     applicationUrl: 'https://learn.microsoft.com/credentials/certifications/mct-certification',
     eligibility: [
       'Hold at least one qualifying Microsoft certification',
       'Demonstrate instructional skills (certification or verified experience)',
       'Pay the annual program fee',
+      'Renew every year before the membership anniversary',
     ],
-    criteria: ['Qualifying certification', 'Instructional competence'],
+    criteria: ['Qualifying certification', 'Instructional competence', 'Classes delivered'],
     applicationWindow: { opens: null, closes: null, note: 'Apply any time; renew annually.' },
     renewalCadence: 'annual',
     expirationRule: 'Expires one year from enrolment unless renewed.',
@@ -98,13 +401,14 @@ export const DEFAULT_PROGRAMS = Object.freeze([
       requirement(
         'teaching',
         'Instructional evidence',
-        `Delivered training, workshops or sessions. ${EDIT_NOTE}`,
-        { evidenceTypes: ['speaking', 'listen-and-learn'], minCount: 2, weight: 2 }
+        `Delivered training, workshops or sessions, including classes imported from the Metrics That Matter CSV. ${EDIT_NOTE}`,
+        { evidenceTypes: ['speaking', 'listen-and-learn', 'manual'], minCount: 2, weight: 2 }
       ),
     ],
     recommendedActivities: [
       'Renew the qualifying certification before it lapses',
-      'Record delivered workshops as evidence',
+      'Export the classes-delivered report from Metrics That Matter and import it as evidence',
+      'Stay active in the MCT Lounge on the Microsoft Tech Community',
     ],
   },
   {
@@ -152,43 +456,61 @@ export const DEFAULT_PROGRAMS = Object.freeze([
     provider: 'AWS',
     category: 'partner',
     description:
-      'AWS Ambassador Program: for technical experts at AWS Partner Network organisations who share AWS knowledge publicly.',
+      'AWS Ambassador Program: for technical experts at AWS Partner Network organisations who share AWS knowledge publicly. Two levels for the Services Partner, Technical Leader persona (program rules as published 2026): Charter (Associate) — 2 Professional or Specialty certifications, 8 contributions a year, at least 4 of them thought leadership; Established — Solutions Architect Professional plus a Specialty, 12 contributions a year, 4 thought leadership (at least 2 blog or article) and 4 Capability Building or Customer Engagement contributions.',
     applicationUrl: 'https://aws.amazon.com/partners/ambassadors/',
     eligibility: [
-      'Employed by an AWS Partner Network organisation',
-      'Hold AWS Professional or Specialty certifications',
-      'Public AWS content and speaking',
+      'Employed by an AWS Partner Network organisation (Services Partner)',
+      'Charter level: 2 AWS Professional or Specialty certifications',
+      'Established level: AWS Solutions Architect Professional plus a Specialty certification',
+      'Public AWS contributions in the three categories below',
     ],
-    criteria: ['Certifications', 'Public contributions', 'Partner standing'],
+    criteria: [
+      'Customer Engagement contributions',
+      'Capability Building contributions',
+      'Thought Leadership: Article, Blog, Podcast, Presentation, Vlog, Webinar, Whitepaper',
+      'A blog post counts with its URL, at least 1,000 words of core content, level 200+ depth, original work, at most 2 authors and a clear company affiliation',
+    ],
     applicationWindow: {
       opens: null,
       closes: null,
       note: 'Rolling, through the partner organisation.',
     },
     renewalCadence: 'annual',
-    expirationRule: 'Annual requalification against the published point thresholds.',
+    expirationRule: 'Annual requalification against the contribution counts of the level held.',
     requirements: [
       requirement(
         'certs',
         'Professional or Specialty certifications',
-        `Active AWS Professional or Specialty certifications. ${EDIT_NOTE}`,
+        `Charter level: 2 Professional or Specialty certifications; Established level: Solutions Architect Professional plus a Specialty. ${EDIT_NOTE}`,
         { evidenceTypes: ['certifications'], minCount: 2, weight: 3 }
       ),
-      requirement('talks', 'Public speaking', `Sessions on AWS. ${EDIT_NOTE}`, {
-        evidenceTypes: ['speaking'],
-        minCount: 2,
-        weight: 2,
-      }),
       requirement(
-        'content',
-        'Public content',
-        `Articles, blogs, open source or videos. ${EDIT_NOTE}`,
-        { evidenceTypes: ['content', 'newsletter', 'listen-and-learn'], minCount: 4, weight: 2 }
+        'contributions',
+        'Contributions per year',
+        `Every contribution in the three categories: Charter level 8 a year, Established level 12. ${EDIT_NOTE}`,
+        {
+          evidenceTypes: ['content', 'speaking', 'listen-and-learn', 'manual'],
+          minCount: 8,
+          weight: 3,
+        }
+      ),
+      requirement(
+        'thought-leadership',
+        'Thought leadership',
+        `Article, Blog, Podcast, Presentation, Vlog, Webinar or Whitepaper; at least 4 a year at either level, at least 2 of them blog or article at Established level. A blog post needs its URL, 1,000+ words of core content, level 200+ depth, original work, at most 2 authors and a clear company affiliation. ${EDIT_NOTE}`,
+        { evidenceTypes: ['content', 'speaking', 'listen-and-learn'], minCount: 4, weight: 2 }
+      ),
+      requirement(
+        'capability-customer',
+        'Capability Building and Customer Engagement',
+        `Established level only: 4 Capability Building or Customer Engagement contributions a year (workshops, enablement, customer sessions). Set the minimum to 0 while applying at Charter level. ${EDIT_NOTE}`,
+        { evidenceTypes: ['manual', 'speaking', 'labs'], minCount: 4, weight: 1 }
       ),
     ],
     recommendedActivities: [
-      'Track the annual point total against the current thresholds',
+      'Track contributions by category against the level applied for',
       'Renew certifications ahead of the requalification date',
+      'Keep each blog post over 1,000 words of core content with the company affiliation stated',
     ],
   },
   {
@@ -318,6 +640,192 @@ export const DEFAULT_PROGRAMS = Object.freeze([
     recommendedActivities: [
       'Apply in the annual window',
       'Keep a dated log of VMUG sessions and posts',
+    ],
+  },
+  {
+    id: 'program-microsoft-elevate-educator-expert',
+    name: 'Microsoft Elevate Educator – Expert (MIEE)',
+    provider: 'Microsoft',
+    category: 'education',
+    description:
+      'Microsoft Elevate Educator – Expert, the programme formerly called Microsoft Innovative Educator Expert (MIEE): educators who use Microsoft tools and AI to change learning, selected each year through an application. The 2026-2027 application opens in May 2026 and closes 31 July 2026, with announcements in September 2026 (FAQ: aka.ms/EducatorFAQ). The questions below are the official 2026-2027 list; program rules as published 2026.',
+    applicationUrl: 'https://aka.ms/EducatorFAQ',
+    eligibility: [
+      'A Microsoft Elevate Educator – Explorer, or a returning Expert',
+      'The Elevate Educator – Expert (General) learning path on Microsoft Learn',
+      'The Elevate Educator – Expert (AI) learning path on Microsoft Learn',
+      'The application asks for the URL of your Learn achievements',
+    ],
+    criteria: [
+      'Regular use of Microsoft tools in teaching',
+      'One worked example of an AI tool in practice',
+      'Sharing teaching and learning knowledge with colleagues',
+    ],
+    applicationWindow: {
+      opens: '2026-05-01',
+      closes: '2026-07-31',
+      note: 'Applications May to 31 July 2026; announcements September 2026.',
+    },
+    renewalCadence: 'annual',
+    expirationRule: 'One school year; returning Experts apply again each cycle.',
+    requirements: [
+      requirement(
+        'content',
+        'Teaching and learning content',
+        `Lessons, guides or posts on teaching with Microsoft tools. ${EDIT_NOTE}`,
+        { evidenceTypes: ['content'], minCount: 2, weight: 2 }
+      ),
+      requirement(
+        'sharing',
+        'Sharing with colleagues',
+        `Sessions, workshops or training delivered to other educators. ${EDIT_NOTE}`,
+        { evidenceTypes: ['speaking'], minCount: 1, weight: 2 }
+      ),
+      requirement(
+        'labs',
+        'Hands-on examples',
+        `Classroom examples, labs or worked activities with an AI tool. ${EDIT_NOTE}`,
+        { evidenceTypes: ['labs'], minCount: 1, weight: 1 }
+      ),
+    ],
+    recommendedActivities: [
+      'Finish both Expert learning paths before the window opens',
+      'Keep one worked AI example with what was created or improved',
+      'Apply before 31 July 2026',
+    ],
+    applicationQuestions: MIEE_APPLICATION_QUESTIONS,
+  },
+  {
+    id: 'program-gitkraken-ambassador',
+    name: 'GitKraken Ambassador',
+    provider: 'GitKraken',
+    category: 'developer-advocacy',
+    description:
+      'GitKraken Ambassadors: community advocates for GitKraken’s tools who create content, speak and support users around Git and developer tooling; benefits include licences and early access. Applications through the form on the programme page. As published 2026; edit to match.',
+    applicationUrl: 'https://www.gitkraken.com/ambassador',
+    eligibility: [
+      'Active content creation or community activity around Git and developer tooling',
+      'An application through the form on the programme page',
+    ],
+    criteria: ['Content', 'Speaking', 'Supporting users'],
+    applicationWindow: { opens: null, closes: null, note: 'Rolling applications.' },
+    renewalCadence: 'annual',
+    expirationRule: 'Reviewed annually. As published 2026; edit to match.',
+    requirements: [
+      requirement(
+        'content',
+        'Git and tooling content',
+        `Articles, videos or posts on Git and developer tooling. ${EDIT_NOTE}`,
+        { evidenceTypes: ['content'], minCount: 3, weight: 3 }
+      ),
+      requirement('talks', 'Speaking', `Sessions on Git workflows and tooling. ${EDIT_NOTE}`, {
+        evidenceTypes: ['speaking'],
+        minCount: 1,
+        weight: 2,
+      }),
+      requirement('tutorials', 'Tutorials and labs', `Hands-on tutorials and labs. ${EDIT_NOTE}`, {
+        evidenceTypes: ['labs', 'content'],
+        minCount: 1,
+        weight: 1,
+      }),
+    ],
+    recommendedActivities: [
+      'Publish Git workflow tutorials',
+      'Answer questions in the GitKraken community',
+    ],
+  },
+  {
+    id: 'program-microsoft-management-community',
+    name: 'Microsoft Management Community',
+    provider: 'Microsoft',
+    category: 'customer-connection',
+    description:
+      'The Microsoft Management Customer Connection Program: private communities for Intune, Windows and devices, the Windows Cloud Experience and Generative AI, where members take surveys, join focus groups and design exercises and test private previews. Recognition is by credits, with badges at each threshold across all private communities and a Top Monthly Partner/Customer Champion bonus (+5 credits, once, for 5 or more credits in a month). Program rules as published 2026.',
+    applicationUrl: null,
+    eligibility: [
+      'Membership of a Microsoft Management private community',
+      'Participation in surveys, focus groups, design exercises and private previews',
+    ],
+    criteria: [
+      'Survey: 1 credit',
+      'Focus Group or Design Exercise: 3 credits',
+      'Private Preview: 3 to 6 credits',
+      'Top Monthly Partner/Customer Champion: +5 credits once, for 5 or more credits in a month',
+    ],
+    applicationWindow: { opens: null, closes: null, note: 'Rolling; badges per calendar year.' },
+    renewalCadence: 'annual',
+    expirationRule: 'Badges are earned per calendar year; credits start again in January.',
+    scoring: {
+      unit: 'credits',
+      tiers: MANAGEMENT_TIERS.map(([label, credits]) => ({ label, credits })),
+    },
+    requirements: MANAGEMENT_TIERS.map(([label, credits]) =>
+      requirement(
+        `tier-${credits}`,
+        `${label} (${credits} credits)`,
+        `${CREDIT_NOTE} ${EDIT_NOTE}`,
+        {
+          evidenceTypes: ['manual'],
+          minCount: credits,
+          weight: 1,
+        }
+      )
+    ),
+    recommendedActivities: [
+      'Record each survey, focus group and preview as manual evidence with its credits',
+      'Reach 5 credits in one month for the Top Monthly bonus',
+    ],
+  },
+  {
+    id: 'program-microsoft-mct-regional-lead',
+    name: 'MCT Regional Lead',
+    provider: 'Microsoft',
+    category: 'training',
+    description:
+      'MCT Regional Lead: a one-year term role (1 January to 31 December) for around 100 MCTs a year who support their region’s MCT community. Nomination by a current Regional Lead in September, the application form in October, the team announced 1 December. Expectations: the weekly Regional Lead Teams channels, monthly meetings, MCT Lounge activity (Community Café, Program Announcements) and the Regional Hub (discussions, localised articles, local events). Program rules as published 2026.',
+    applicationUrl: 'https://learn.microsoft.com/credentials/certifications/mct-certification',
+    eligibility: [
+      'Two consecutive years of MCT status',
+      'Two or more MCT-eligible Microsoft certifications',
+      'Evidence of MCT community support and active involvement in the MCT Lounge',
+      'Nominated by a current Regional Lead',
+    ],
+    criteria: [
+      'MCT Lounge activity (Community Café, Program Announcements)',
+      'Regional Hub: discussions, localised articles, local events',
+      'Weekly Regional Lead Teams channels and monthly meetings',
+    ],
+    applicationWindow: {
+      opens: '2026-10-01',
+      closes: '2026-10-31',
+      note: 'Nominations in September; application form in October; team announced 1 December.',
+    },
+    renewalCadence: 'annual',
+    expirationRule: 'One-year term, 1 January to 31 December; apply again each year.',
+    requirements: [
+      requirement(
+        'lounge',
+        'MCT Lounge activity',
+        `Posts, answers and Community Café participation in the MCT Lounge, recorded by hand. ${EDIT_NOTE}`,
+        { evidenceTypes: ['manual'], minCount: 4, weight: 3 }
+      ),
+      requirement(
+        'local-events',
+        'Local events',
+        `Regional sessions, workshops or local events delivered. ${EDIT_NOTE}`,
+        { evidenceTypes: ['speaking', 'labs'], minCount: 1, weight: 2 }
+      ),
+      requirement(
+        'certs',
+        'MCT-eligible certifications',
+        `Two or more active MCT-eligible Microsoft certifications. ${EDIT_NOTE}`,
+        { evidenceTypes: ['certifications'], minCount: 2, weight: 2 }
+      ),
+    ],
+    recommendedActivities: [
+      'Ask a current Regional Lead for a nomination in September',
+      'Keep a dated log of MCT Lounge posts and Regional Hub articles',
+      'Hold two consecutive years of MCT status before the window',
     ],
   },
 ]);

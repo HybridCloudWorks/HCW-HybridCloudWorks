@@ -45,6 +45,47 @@ This project has not cut a tagged release; entries are grouped under
   the file reference and the download route's four refusals, the
   private-only document types, the membership vocabulary through the form,
   and `latestApplicationFor`.
+- **The Ambassador hub seeds the programs from the owner's documents, walks
+  the official application questions, and groups and guides the evidence
+  (owner request 2026-10-05).** `seedPrograms` ran only on an empty
+  container, so a program added to `DEFAULT_PROGRAMS` never reached the
+  live one; `ensureSeededPrograms` now runs on every programs read and
+  inserts any seed whose id is absent after the highest stored `order`,
+  never overwriting a stored program and never bringing back one the owner
+  disabled or soft-deleted. Four programs join the seeds from the program
+  rules as published in 2026 — Microsoft Elevate Educator – Expert (MIEE,
+  with the official 2026-2027 question list and its May to 31 July 2026
+  window), GitKraken Ambassador, the Microsoft Management Community (scored
+  in credits: a `scoring` field with the badge tiers, `metrics.credits` on
+  evidence, and readiness that sums credits against each threshold instead
+  of counting items) and MCT Regional Lead — and three are updated: AWS
+  Ambassador carries the Charter and Established levels with their
+  contribution counts and the thought-leadership rules, Microsoft MVP
+  carries `applicationQuestions` mirroring the official form's five
+  sections (profile, network links, the application questions, award
+  category and technology areas, the eight expertise gates with up to 24
+  tagged activities), and Microsoft Certified Trainer names the annual
+  renewal, the MCT Lounge and the Metrics That Matter classes export, which
+  the Evidence tab now imports as "MCT classes (Metrics That Matter CSV)"
+  through a CSV reader on the existing import route, one manual row per
+  class id. A program with questions turns the workspace's Responses into a
+  guided form, section by section, each question rendered by its kind (text
+  with the live count, choice, yes/no, URL, a frequency grid, network + URL
+  rows, activities picked from the attached evidence) with Copy on every
+  answer and Copy all for a plain-text packet in the form's order; answers
+  stay in `responses[]` as `{ questionId, text }` with structured kinds
+  JSON-encoded, and the print packet lists the sections. The Evidence tab
+  gains Group by (Source, Program, Year, Verification) with collapsible
+  groups remembered per browser, and a guide above the list, "What each
+  program still needs", with have / need per requirement from the readiness
+  arithmetic, a hint naming the evidence types that would count, and Add
+  opening the editor on that source and program. No answer of the owner's
+  is seeded; the questions are the programs' own. `ambassador.test.js` pins
+  the seeding on an existing container, the credits arithmetic and the CSV
+  import; `validate.test.js` the question and scoring rules;
+  `applicationQuestions.test.js`, `GuidedResponses.test.jsx` and
+  `evidenceView.test.js` the guided form, the grouping, the stored
+  collapsed state and the guide rows.
 - **Certification badges are normalised on upload: PNG or SVG in, a
   512 × 512 PNG out (owner request 2026-10-05).** The Settings tab promised
   "PNG / JPG / SVG" while the upload route refused SVG into `certifications`

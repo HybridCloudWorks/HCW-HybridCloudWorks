@@ -192,8 +192,9 @@ export default function ProgramsTab({ hub, nav }) {
   return (
     <div className="space-y-4 pt-4">
       <p className="text-sm text-muted-foreground">
-        The programs worth pursuing, seeded with seven and edited on Settings. Every requirement is
-        a starting point until you match it to the program&apos;s current published rules.
+        The programs worth pursuing, seeded from the published program rules and edited on Settings;
+        a seed added later joins the catalogue on the next read. Every requirement is a starting
+        point until you match it to the program&apos;s current published rules.
       </p>
       <ReadsStatus reads={reads} label="programs" />
       {allLanded(reads) &&
