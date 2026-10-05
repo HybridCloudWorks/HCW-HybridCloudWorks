@@ -27,11 +27,6 @@ import {
   presentSetting,
   resolveSetting,
 } from './platform-settings.js';
-import {
-  LISTEN_AND_LEARN_SPEECH_CONFIG_ID,
-  listenAndLearnModelOptions,
-  readStoredListenAndLearnModel,
-} from './listen-and-learn/speech-settings.js';
 import { pickDefaultHero, DEFAULT_HEROES_CONFIG_ID } from './triggers/ai-cover.js';
 import { AUTOPOST_CONFIG_ID } from './triggers/social-caption-trigger.js';
 import {
