@@ -19,7 +19,7 @@ const firstUrl = (doc, keys) => {
   return isHttpUrl(value) ? value : null;
 };
 
-const NO_METRICS = () => ({ reach: null, attendees: null, views: null });
+const NO_METRICS = () => ({ reach: null, attendees: null, views: null, credits: null });
 
 /** The live-content predicate public-reads.js uses, so an import offers only what visitors can see. */
 const LIVE_CONTENT_QUERY =
@@ -85,6 +85,208 @@ function curatedUrl(doc) {
   if (!doc.curatedSubpagePath) return null;
   return `https://hybridcloudworks.com/${String(doc.curatedSubpagePath).replace(/^\//, '')}`;
 }
+
+// ── CSV readers: a file the owner exports, pasted or uploaded ────────────────
+
+/**
+ * The most CSV text one import takes, in characters. The API answers 413
+ * past it and the import dialog refuses the file or paste before sending;
+ * frontend/src/components/admin/ambassador/ambassadorModel.js mirrors it.
+ */
+export const CSV_IMPORT_MAX_CHARS = 1_000_000;
+
+/** Why a CSV row was not imported, as the import summary counts them. */
+export const SKIP_REASONS = Object.freeze({
+  classId: 'missing-class-id',
+  courseOrDate: 'missing-course-or-date',
+});
+
+/**
+ * The text inside a quoted segment, from the character after the opening
+ * quote to the closing one (a doubled quote is one literal quote), and the
+ * index after the closing quote. An unterminated quote runs to the end.
+ */
+function readQuoted(source, start) {
+  let text = '';
+  let i = start;
+  while (i < source.length) {
+    if (source[i] !== '"') {
+      text += source[i];
+      i += 1;
+    } else if (source[i + 1] === '"') {
+      text += '"';
+      i += 2;
+    } else {
+      return { text, next: i + 1 };
+    }
+  }
+  return { text, next: i };
+}
+
+const isLineBreak = (ch) => ch === '\n' || ch === '\r';
+
+/** How many characters the line break at `i` takes: two for CRLF, one otherwise. */
+const lineBreakLength = (source, i) => (source[i] === '\r' && source[i + 1] === '\n' ? 2 : 1);
+
+/**
+ * One cell from `start`: its text, the index the next cell starts at, and
+ * whether a line break (or the end of the text) rather than a comma ended it.
+ */
+function readCell(source, start) {
+  let cell = '';
+  let i = start;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '"') {
+      const quoted = readQuoted(source, i + 1);
+      cell += quoted.text;
+      i = quoted.next;
+    } else if (ch === ',') {
+      return { cell, next: i + 1, endsLine: false };
+    } else if (isLineBreak(ch)) {
+      return { cell, next: i + lineBreakLength(source, i), endsLine: true };
+    } else {
+      cell += ch;
+      i += 1;
+    }
+  }
+  return { cell, next: i, endsLine: true };
+}
+
+const isFilledRow = (cells) => cells.some((value) => value.trim() !== '');
+
+/** Rows of cells from CSV text (RFC 4180: quoted cells, doubled quotes, CRLF); blank lines dropped. */
+export function parseCsv(text) {
+  const source = String(text || '').replace(/^﻿/, '');
+  const rows = [];
+  let row = [];
+  let i = 0;
+  while (i < source.length) {
+    const { cell, next, endsLine } = readCell(source, i);
+    row.push(cell);
+    i = next;
+    if (endsLine) {
+      rows.push(row);
+      row = [];
+    }
+  }
+  if (row.length) rows.push(row);
+  return rows.filter(isFilledRow);
+}
+
+/** "MTM Class ID" → "mtmclassid", so a header matches however the export spells it. */
+const headerKey = (header) =>
+  String(header || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+
+/** The Metrics That Matter columns the reader uses, by the header keys each may carry. */
+const MTM_COLUMNS = {
+  classId: ['mtmclassid', 'classid', 'id'],
+  course: ['coursename', 'course', 'coursetitle', 'title'],
+  method: ['learningmethod', 'deliverymethod', 'method'],
+  instructor: ['instructor', 'instructorname', 'trainer'],
+  start: ['startdate', 'classstartdate', 'start'],
+  end: ['enddate', 'classenddate', 'end'],
+  location: ['location', 'city', 'country'],
+  attendees: ['attendees', 'students', 'studentcount', 'numberofstudents', 'enrolled', 'learners'],
+};
+
+/** Each column's index in the header row, by the first matching key. */
+function mtmColumnIndexes(header) {
+  const keys = header.map(headerKey);
+  return Object.fromEntries(
+    Object.entries(MTM_COLUMNS).map(([column, names]) => [
+      column,
+      names.map((name) => keys.indexOf(name)).find((index) => index >= 0) ?? -1,
+    ])
+  );
+}
+
+/** An ISO day, or a slash date (M/D/YYYY, or D/M/YYYY when the first part cannot be a month). */
+export function csvDate(value) {
+  const text = String(value || '').trim();
+  const iso = toCalendarDate(text);
+  if (iso) return iso;
+  const match = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/);
+  if (!match) return null;
+  const [, a, b, year] = match;
+  const [month, day] = Number(a) > 12 ? [b, a] : [a, b];
+  return toCalendarDate(`${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`);
+}
+
+/**
+ * The Metrics That Matter classes-delivered export as evidence seeds: one
+ * row per class, titled by the course, dated by the start date, the method,
+ * instructor, dates and location in the description, attendees when the
+ * export carries a count. `sourceId` is the MTM class id, which keeps the
+ * import idempotent; a row without one is skipped (`missing-class-id`)
+ * rather than keyed on course and date, which would merge two classes of
+ * the same course on the same day. A row without a course name or start
+ * date is skipped too (`missing-course-or-date`). `skipped` counts them and
+ * `reasons` says why.
+ */
+export function mctClassesToEvidence(text) {
+  const [header, ...lines] = parseCsv(text);
+  if (!header) return { items: [], skipped: 0, reasons: {} };
+  const at = mtmColumnIndexes(header);
+  const cell = (cells, column) => (at[column] >= 0 ? String(cells[at[column]] ?? '').trim() : '');
+  const items = [];
+  const reasons = {};
+  let skipped = 0;
+  const skip = (reason) => {
+    skipped += 1;
+    reasons[reason] = (reasons[reason] || 0) + 1;
+  };
+  for (const cells of lines) {
+    const classId = cell(cells, 'classId');
+    const title = cell(cells, 'course').slice(0, 300);
+    const date = csvDate(cell(cells, 'start'));
+    if (!classId) {
+      skip(SKIP_REASONS.classId);
+      continue;
+    }
+    if (!title || !date) {
+      skip(SKIP_REASONS.courseOrDate);
+      continue;
+    }
+    const end = csvDate(cell(cells, 'end'));
+    const attendees = Number(cell(cells, 'attendees'));
+    const facts = [
+      cell(cells, 'method'),
+      cell(cells, 'instructor') && `Instructor ${cell(cells, 'instructor')}`,
+      end && end !== date ? `${date} to ${end}` : date,
+      cell(cells, 'location'),
+    ].filter(Boolean);
+    items.push({
+      sourceId: `mct-class:${classId}`,
+      title,
+      date,
+      url: null,
+      snapshot: { title, date, url: null },
+      metrics: {
+        ...NO_METRICS(),
+        attendees: Number.isFinite(attendees) && attendees > 0 ? attendees : null,
+      },
+      technology: [],
+      description: `MCT class delivered: ${facts.join(' · ')}`.slice(0, 8000),
+    });
+  }
+  return { items, skipped, reasons };
+}
+
+/**
+ * Readers for a file the owner exports and pastes into the import dialog;
+ * each names the evidence source its rows are stored under and turns the
+ * text into seeds with a `sourceId` the import can stay idempotent on.
+ */
+export const CSV_READERS = Object.freeze({
+  'mct-classes': {
+    label: 'MCT classes (Metrics That Matter CSV)',
+    sourceModule: 'manual',
+    toEvidence: mctClassesToEvidence,
+  },
+});
 
 export const IMPORT_READERS = Object.freeze({
   speaking: {

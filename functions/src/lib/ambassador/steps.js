@@ -45,10 +45,11 @@ export const KINDS = Object.freeze({
 
 // ── the context every handler reads ───────────────────────────────────────────
 
-async function readJsonObject(request) {
+/** The request body as a JSON object within `max` characters, or null; a route with a larger payload (the CSV import) names its own cap. */
+async function readJsonObject(request, max = MAX_DOC_JSON) {
   const body = await request.json().catch(() => null);
   const isObject = body && typeof body === 'object' && !Array.isArray(body);
-  return isObject && JSON.stringify(body).length <= MAX_DOC_JSON ? body : null;
+  return isObject && JSON.stringify(body).length <= max ? body : null;
 }
 
 async function writeAudit(ctx, action, auth, request, details) {
@@ -68,27 +69,128 @@ async function writeAudit(ctx, action, auth, request, details) {
   }
 }
 
-async function seedPrograms(ctx) {
+/** One seed as the stored document: enabled, ordered, stamped. */
+function seededDoc(ctx, program, order) {
   const stamp = ctx.nowIso();
-  const docs = DEFAULT_PROGRAMS.map((program, index) => ({
+  return {
     ...program,
     docType: 'program',
     enabled: true,
-    order: index + 1,
+    order,
     seeded: true,
     reminders: { daysBeforeDeadline: 14, daysBeforeRenewal: 30 },
     customFields: [],
     createdAt: stamp,
     updatedAt: stamp,
-  }));
-  for (const doc of docs) await ctx.store.upsertDoc(CONTAINER, doc);
-  return docs;
+  };
 }
 
-/** Every program, seeded on the first read of an empty container, in display order. */
+/**
+ * The stored programs plus any DEFAULT_PROGRAMS entry the container does not
+ * hold yet, inserted after the current highest `order`. An empty container
+ * gets every seed in order (the first read); an existing one gets only the
+ * seeds added since, so a program edited, disabled or soft-deleted by the
+ * owner is never overwritten or brought back — a soft-deleted seed is absent
+ * from `rows` but still stored, and the read of its id is what keeps it out.
+ */
+export async function ensureSeededPrograms(ctx, rows) {
+  const current = await backfillSeedFields(ctx, rows);
+  const present = new Set(current.map((row) => row.id));
+  const missing = DEFAULT_PROGRAMS.filter((program) => !present.has(program.id));
+  if (missing.length === 0) return current;
+  let order = current.reduce((max, row) => Math.max(max, Number(row.order) || 0), 0);
+  const added = [];
+  for (const program of missing) {
+    const stored = await ctx.store.readDoc(CONTAINER, program.id, program.id);
+    if (stored) continue;
+    order += 1;
+    const inserted = await insertSeed(ctx, seededDoc(ctx, program, order));
+    if (inserted) added.push(inserted);
+  }
+  return [...current, ...added];
+}
+
+/**
+ * Create the seed atomically. Two overlapping reads can both find it
+ * missing; the second's create answers 409, and the row the first inserted
+ * — with whatever the owner edited since — wins: it is re-read and used as
+ * stored, or left out when it was soft-deleted in the meantime. Nothing is
+ * ever overwritten.
+ */
+async function insertSeed(ctx, doc) {
+  try {
+    return (await ctx.store.createDoc(CONTAINER, doc)) || doc;
+  } catch (error) {
+    if (error?.code !== 409) throw error;
+    const stored = await ctx.store.readDoc(CONTAINER, doc.id, doc.id);
+    return stored && !stored.softDeletedAt ? stored : null;
+  }
+}
+
+const SEEDS_BY_ID = new Map(DEFAULT_PROGRAMS.map((program) => [program.id, program]));
+
+const hasQuestions = (doc) =>
+  Array.isArray(doc?.applicationQuestions) && doc.applicationQuestions.length > 0;
+
+/**
+ * The fields a seed gained after it was stored that a stored seed may take
+ * without losing an edit: the official `applicationQuestions` when the
+ * document has none, and `scoring` when it has none. Each is a whole value
+ * the owner has never set (missing or empty), so filling it in cannot
+ * overwrite anything; the field's own editor takes over from there.
+ */
+const BACKFILL_FIELDS = [
+  ['applicationQuestions', (stored, seed) => hasQuestions(seed) && !hasQuestions(stored)],
+  ['scoring', (stored, seed) => Boolean(seed.scoring) && !stored.scoring],
+];
+
+/**
+ * Give a stored seed (`seeded: true`, the id in DEFAULT_PROGRAMS, listed so
+ * not soft-deleted) the fields the seed gained since it was stored, when the
+ * document has none of its own: one patch per program that needs it, on the
+ * stored ETag where the store exposes one. Nothing else on the document is
+ * touched — requirements, description, enabled, order, membership and every
+ * other field stay as the owner left them. A program the owner created, or a
+ * seed already carrying its own value, is left alone.
+ */
+async function backfillSeedFields(ctx, rows) {
+  const out = [];
+  for (const stored of rows) {
+    const patch = seedBackfillFor(stored, SEEDS_BY_ID.get(stored.id));
+    if (!patch) {
+      out.push(stored);
+      continue;
+    }
+    const patched = await ctx.store.patchDoc(
+      CONTAINER,
+      stored.id,
+      { ...patch, updatedAt: ctx.nowIso() },
+      stored._etag ? { ifMatch: stored._etag } : {}
+    );
+    ctx.log.info?.(`[ambassador] seed backfill ${stored.id}: ${Object.keys(patch).join(', ')}`);
+    out.push(patched || { ...stored, ...patch });
+  }
+  return out;
+}
+
+/**
+ * What a stored program should take from its seed: the BACKFILL_FIELDS it
+ * has none of, as the patch to write, or null when there is nothing to do —
+ * no seed for the id, a program the owner made (not `seeded`), or a seed
+ * already carrying its own values. Pure, so the decision is testable alone.
+ */
+export function seedBackfillFor(stored, seed) {
+  if (!seed || stored?.seeded !== true) return null;
+  const patch = {};
+  for (const [field, wanted] of BACKFILL_FIELDS) {
+    if (wanted(stored, seed)) patch[field] = seed[field];
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/** Every program, the seeds filled in on every read, in display order. */
 async function listOrSeedPrograms(ctx) {
-  const rows = await ctx.listKind('program');
-  const programs = rows.length ? rows : await seedPrograms(ctx);
+  const programs = await ensureSeededPrograms(ctx, await ctx.listKind('program'));
   return programs.sort(
     (a, b) => (a.order ?? 999) - (b.order ?? 999) || String(a.name).localeCompare(String(b.name))
   );

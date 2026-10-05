@@ -11,6 +11,7 @@ import { CardHeader, CardTitle } from '@/components/ui/card';
 import { Download, FileText, Loader2, Save, Trash2, Upload } from 'lucide-react';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { ambassadorStatusInfo } from './ambassadorModel';
+import GuidedResponses from './GuidedResponses';
 import { Field, LinkList, TextAreaField, TextField, whenText } from './Parts';
 
 const DATE_FIELDS = [
@@ -123,8 +124,28 @@ export function DatesSection({ form, set, setForm }) {
   );
 }
 
-/** One entry per question the program asks, with a character count on each answer. */
-export function ResponsesSection({ responses, onChange }) {
+/**
+ * The written responses. A program with official `applicationQuestions`
+ * gets the guided form (GuidedResponses.jsx); any other keeps the free list,
+ * one entry per question with a character count on each answer.
+ */
+export function ResponsesSection({ responses, onChange, program, evidence, title }) {
+  const questions = program?.applicationQuestions;
+  if (Array.isArray(questions) && questions.length > 0) {
+    return (
+      <GuidedResponses
+        questions={questions}
+        responses={responses}
+        onChange={onChange}
+        evidence={evidence || []}
+        title={title}
+      />
+    );
+  }
+  return <FreeResponses responses={responses} onChange={onChange} />;
+}
+
+function FreeResponses({ responses, onChange }) {
   const update = (index, patch) =>
     onChange(responses.map((x, i) => (i === index ? { ...x, ...patch } : x)));
   return (

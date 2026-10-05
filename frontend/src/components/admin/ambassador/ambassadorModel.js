@@ -123,6 +123,36 @@ export const SOURCE_LABELS = Object.freeze({
 /** The three sources the import picker offers (the API reads these containers). */
 export const IMPORT_SOURCES = Object.freeze(['speaking', 'certifications', 'content']);
 
+/**
+ * The most CSV text one import takes, in characters — the API's
+ * CSV_IMPORT_MAX_CHARS (functions/src/lib/ambassador/import-readers.js),
+ * which answers 413 past it. The dialog refuses an oversized file or paste
+ * before sending, so nothing is ever clipped on the way.
+ */
+export const CSV_IMPORT_MAX_CHARS = 1_000_000;
+
+/** The files the import can read (the API's CSV_READERS): the reader id, its label, the source its rows land under. */
+export const CSV_IMPORTS = Object.freeze([
+  {
+    reader: 'mct-classes',
+    label: 'MCT classes (Metrics That Matter CSV)',
+    sourceModule: 'manual',
+    hint: 'The classes-delivered export: class id, course, learning method, instructor, start and end date, location. One evidence row per class, once per class id.',
+  },
+]);
+
+/** How a program's official application question is answered (mirrors the API's QUESTION_KINDS). */
+export const QUESTION_KINDS = Object.freeze([
+  'profile',
+  'text',
+  'choice',
+  'yesno',
+  'url',
+  'scale',
+  'links',
+  'activities',
+]);
+
 export const sourceLabel = (source) => SOURCE_LABELS[source] || source || 'Manual';
 
 const DAY_MS = 86_400_000;

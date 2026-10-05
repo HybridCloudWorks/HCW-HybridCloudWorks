@@ -9,10 +9,12 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   APPLICATION_STATUSES,
   APPLICATION_TRANSITIONS,
+  CSV_IMPORT_MAX_CHARS,
   DEFAULT_PROGRAMS,
   canTransition,
   computeReadiness,
   createAmbassadorHandlers,
+  importedEvidenceId,
   isNotProvisioned,
   parsePeriod,
   toCalendarDate,
@@ -64,6 +66,12 @@ function memStore(seed = {}) {
       return docType ? rows.filter((r) => r.docType === docType && !r.softDeletedAt) : rows;
     }),
     readDoc: vi.fn(async (name, id) => table(name).get(id) || null),
+    // The atomic insert: a second create of the same id is Cosmos's 409.
+    createDoc: vi.fn(async (name, doc) => {
+      if (table(name).has(doc.id)) throw Object.assign(new Error('Conflict'), { code: 409 });
+      table(name).set(doc.id, doc);
+      return doc;
+    }),
     upsertDoc: vi.fn(async (name, doc) => {
       table(name).set(doc.id, doc);
       return doc;
@@ -223,30 +231,279 @@ describe('not provisioned', () => {
 });
 
 describe('programs', () => {
-  it('seeds the seven defaults on the first read of an empty container, each editable and enabled', async () => {
+  const SEED_NAMES = [
+    'Microsoft MVP',
+    'Microsoft Certified Trainer',
+    'AWS Community Hero',
+    'AWS Ambassador',
+    'GitHub Star',
+    'Docker Captain',
+    'VMware vExpert',
+    'Microsoft Elevate Educator – Expert (MIEE)',
+    'GitKraken Ambassador',
+    'Microsoft Management Community',
+    'MCT Regional Lead',
+  ];
+
+  it('seeds every default on the first read of an empty container, each editable and enabled', async () => {
     const store = memStore();
     const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
     const body = parse(await h.listPrograms(makeRequest(), context));
-    expect(body.items.map((p) => p.name)).toEqual([
-      'Microsoft MVP',
-      'Microsoft Certified Trainer',
-      'AWS Community Hero',
-      'AWS Ambassador',
-      'GitHub Star',
-      'Docker Captain',
-      'VMware vExpert',
-    ]);
+    expect(body.items.map((p) => p.name)).toEqual(SEED_NAMES);
+    expect(body.items.map((p) => p.order)).toEqual(SEED_NAMES.map((_, i) => i + 1));
     expect(
       body.items.every((p) => p.enabled && p.docType === 'program' && p.requirements.length > 0)
     ).toBe(true);
-    expect(store.upsertDoc).toHaveBeenCalledTimes(DEFAULT_PROGRAMS.length);
+    // Each seed is created atomically, never upserted.
+    expect(store.createDoc).toHaveBeenCalledTimes(DEFAULT_PROGRAMS.length);
+    expect(store.upsertDoc).not.toHaveBeenCalledWith(
+      'ambassador',
+      expect.objectContaining({ docType: 'program' })
+    );
     // Every seeded requirement says it is a starting point.
     for (const program of DEFAULT_PROGRAMS) {
       for (const req of program.requirements) expect(req.description).toMatch(/Edit to match/);
     }
     // A second read seeds nothing.
     await h.listPrograms(makeRequest(), context);
-    expect(store.upsertDoc).toHaveBeenCalledTimes(DEFAULT_PROGRAMS.length);
+    expect(store.createDoc).toHaveBeenCalledTimes(DEFAULT_PROGRAMS.length);
+  });
+
+  it('every seed passes its own validator, questions included, and none carries an answer', () => {
+    for (const program of DEFAULT_PROGRAMS) {
+      const body = Object.fromEntries(Object.entries(program).filter(([key]) => key !== 'id'));
+      expect(validateProgram(body).error, program.id).toBeUndefined();
+      expect(program.responses).toBeUndefined();
+    }
+    const mvp = DEFAULT_PROGRAMS.find((p) => p.id === 'program-microsoft-mvp');
+    const sections = mvp.applicationQuestions.map((q) => q.section);
+    expect(sections.filter((s, i) => sections.indexOf(s) === i)).toEqual([
+      'Profile Information',
+      'Online Influence & Network',
+      'Application Questions',
+      'Technology Area',
+      'Technical Expertise',
+    ]);
+    expect(mvp.applicationQuestions.find((q) => q.id === 'mvp-activities')).toMatchObject({
+      kind: 'activities',
+      maxItems: 24,
+    });
+    const miee = DEFAULT_PROGRAMS.find((p) => p.id === 'program-microsoft-elevate-educator-expert');
+    const grid = miee.applicationQuestions.find((q) => q.kind === 'scale');
+    expect(grid.rows).toHaveLength(15);
+    expect(grid.options).toEqual(['Daily', 'Weekly', 'Monthly', 'Rarely', 'Never']);
+    expect(miee.applicationWindow).toEqual({
+      opens: '2026-05-01',
+      closes: '2026-07-31',
+      note: 'Applications May to 31 July 2026; announcements September 2026.',
+    });
+  });
+
+  it('adds the seeds an existing container is missing, after the highest order, never touching what is stored', async () => {
+    const stamp = NOW.toISOString();
+    const stored = DEFAULT_PROGRAMS.slice(0, 7).map((program, index) => ({
+      ...program,
+      docType: 'program',
+      enabled: index !== 4,
+      order: index + 1,
+      name: index === 0 ? 'MVP (my edit)' : program.name,
+      createdAt: stamp,
+      updatedAt: stamp,
+    }));
+    // The owner soft-deleted one seed; it must not come back.
+    const gone = {
+      ...DEFAULT_PROGRAMS[8],
+      docType: 'program',
+      enabled: false,
+      order: 20,
+      softDeletedAt: stamp,
+    };
+    const store = memStore({ ambassador: [...stored, gone] });
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const body = parse(await h.listPrograms(makeRequest(), context));
+    expect(body.items.map((p) => p.name)).toEqual([
+      'MVP (my edit)',
+      ...SEED_NAMES.slice(1, 7),
+      'Microsoft Elevate Educator – Expert (MIEE)',
+      'Microsoft Management Community',
+      'MCT Regional Lead',
+    ]);
+    // Appended after the highest stored order (7), in seed order.
+    expect(body.items.slice(7).map((p) => p.order)).toEqual([8, 9, 10]);
+    expect(body.items.find((p) => p.id === 'program-github-star').enabled).toBe(false);
+    expect(store.createDoc).toHaveBeenCalledTimes(3);
+    expect(store.data.get('ambassador').get(gone.id).softDeletedAt).toBe(stamp);
+    // Nothing more on the next read.
+    await h.listPrograms(makeRequest(), context);
+    expect(store.createDoc).toHaveBeenCalledTimes(3);
+  });
+
+  it('two overlapping reads that both miss a seed leave the first insert, edits included, and never surface a soft-deleted one', async () => {
+    const stamp = NOW.toISOString();
+    const base = { docType: 'program', enabled: true, createdAt: stamp, updatedAt: stamp };
+    const stored = DEFAULT_PROGRAMS.slice(0, 7).map((p, i) => ({ ...p, ...base, order: i + 1 }));
+    const miee = DEFAULT_PROGRAMS.find((p) => p.id === 'program-microsoft-elevate-educator-expert');
+    const gitkraken = DEFAULT_PROGRAMS.find((p) => p.id === 'program-gitkraken-ambassador');
+    // What the first read inserted and the owner then edited, and what it
+    // inserted and the owner then soft-deleted — both present in the store
+    // while this (second) read's list and first readDoc predate them.
+    const edited = { ...miee, ...base, seeded: true, order: 8, name: 'MIEE (my edit)' };
+    const deleted = { ...gitkraken, ...base, seeded: true, order: 9, softDeletedAt: stamp };
+    const store = memStore({ ambassador: [...stored, edited, deleted] });
+    const listRows = store.queryDocs.getMockImplementation();
+    store.queryDocs.mockImplementationOnce(async (name, query, params) =>
+      (await listRows(name, query, params)).filter((r) => ![miee.id, gitkraken.id].includes(r.id))
+    );
+    const readRows = store.readDoc.getMockImplementation();
+    const stale = new Set([miee.id, gitkraken.id]);
+    store.readDoc.mockImplementation(async (name, id) => {
+      if (stale.has(id)) {
+        stale.delete(id);
+        return null;
+      }
+      return readRows(name, id);
+    });
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const body = parse(await h.listPrograms(makeRequest(), context));
+    expect(body.items.find((p) => p.id === miee.id).name).toBe('MIEE (my edit)');
+    expect(body.items.find((p) => p.id === gitkraken.id)).toBeUndefined();
+    expect(store.data.get('ambassador').get(miee.id).name).toBe('MIEE (my edit)');
+    expect(store.data.get('ambassador').get(gitkraken.id).softDeletedAt).toBe(stamp);
+    expect(store.upsertDoc).not.toHaveBeenCalledWith(
+      'ambassador',
+      expect.objectContaining({ docType: 'program' })
+    );
+    // The two seeds the first read never inserted are created once each.
+    expect(store.createDoc.mock.calls.map(([, doc]) => doc.id)).toEqual([
+      miee.id,
+      gitkraken.id,
+      'program-microsoft-management-community',
+      'program-microsoft-mct-regional-lead',
+    ]);
+  });
+
+  it('backfills a stored seed with the questions and scoring it gained, and nothing else', async () => {
+    const stamp = NOW.toISOString();
+    const [mvpSeed, mctSeed] = DEFAULT_PROGRAMS;
+    const management = DEFAULT_PROGRAMS.find(
+      (p) => p.id === 'program-microsoft-management-community'
+    );
+    const without = (program, ...keys) =>
+      Object.fromEntries(Object.entries(program).filter(([key]) => !keys.includes(key)));
+    const base = { docType: 'program', enabled: true, createdAt: stamp, updatedAt: '2026-01-01' };
+    // A stored seeded MVP the owner edited, from before the questions existed.
+    const storedMvp = {
+      ...without(mvpSeed, 'applicationQuestions'),
+      ...base,
+      seeded: true,
+      order: 1,
+      name: 'MVP (my edit)',
+      description: 'My own words.',
+      requirements: [mvpSeed.requirements[0]],
+      enabled: false,
+      membershipStatus: 'working',
+      _etag: '"etag-mvp"',
+    };
+    // A stored seeded program carrying its own questions already.
+    const own = [{ id: 'mine', section: 'S', prompt: 'My question', kind: 'text' }];
+    const storedMct = { ...mctSeed, ...base, seeded: true, order: 2, applicationQuestions: own };
+    // The owner's own program under a seed's id: not seeded, left alone.
+    const ownManagement = {
+      ...without(management, 'scoring', 'applicationQuestions'),
+      ...base,
+      order: 3,
+      name: 'My community',
+    };
+    // A seeded program whose scoring was never stored.
+    const otherSeeds = DEFAULT_PROGRAMS.filter(
+      (p) => ![mvpSeed.id, mctSeed.id, management.id].includes(p.id)
+    ).map((p, i) => ({ ...p, ...base, seeded: true, order: 10 + i }));
+    const store = memStore({ ambassador: [storedMvp, storedMct, ownManagement, ...otherSeeds] });
+    const log = { error: vi.fn(), info: vi.fn() };
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed, log });
+    const body = parse(await h.listPrograms(makeRequest(), context));
+
+    const mvp = body.items.find((p) => p.id === mvpSeed.id);
+    expect(mvp.applicationQuestions).toEqual(mvpSeed.applicationQuestions);
+    expect(mvp).toMatchObject({
+      name: 'MVP (my edit)',
+      description: 'My own words.',
+      requirements: [mvpSeed.requirements[0]],
+      enabled: false,
+      membershipStatus: 'working',
+      order: 1,
+      updatedAt: stamp,
+    });
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+    expect(store.patchDoc).toHaveBeenCalledWith(
+      'ambassador',
+      mvpSeed.id,
+      { applicationQuestions: mvpSeed.applicationQuestions, updatedAt: stamp },
+      { ifMatch: '"etag-mvp"' }
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      '[ambassador] seed backfill program-microsoft-mvp: applicationQuestions'
+    );
+    // Its own questions stay; the owner's program is untouched; the management seed is absent, so added whole.
+    expect(body.items.find((p) => p.id === mctSeed.id).applicationQuestions).toEqual(own);
+    const mine = body.items.find((p) => p.id === management.id);
+    expect(mine.name).toBe('My community');
+    expect(mine.seeded).toBeUndefined();
+    expect(mine.scoring).toBeUndefined();
+    expect(mine.applicationQuestions).toBeUndefined();
+    expect(store.upsertDoc).not.toHaveBeenCalledWith(
+      'ambassador',
+      expect.objectContaining({ docType: 'program' })
+    );
+    // Nothing more on the next read.
+    await h.listPrograms(makeRequest(), context);
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('backfills scoring on a stored seed that has none, through a store without ETags', async () => {
+    const management = DEFAULT_PROGRAMS.find(
+      (p) => p.id === 'program-microsoft-management-community'
+    );
+    const stored = Object.fromEntries(Object.entries(management).filter(([k]) => k !== 'scoring'));
+    const store = memStore({
+      ambassador: [{ ...stored, docType: 'program', enabled: true, seeded: true, order: 1 }],
+    });
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const body = parse(await h.listPrograms(makeRequest(), context));
+    expect(body.items.find((p) => p.id === management.id).scoring).toEqual(management.scoring);
+    expect(store.patchDoc).toHaveBeenCalledWith(
+      'ambassador',
+      management.id,
+      { scoring: management.scoring, updatedAt: NOW.toISOString() },
+      {}
+    );
+  });
+
+  it('scores a credits program by summing metrics.credits against each tier', () => {
+    const program = DEFAULT_PROGRAMS.find((p) => p.id === 'program-microsoft-management-community');
+    expect(program.scoring).toMatchObject({ unit: 'credits' });
+    expect(program.requirements.map((r) => r.minCount)).toEqual([10, 20, 25, 50, 75, 100]);
+    const evidence = [
+      { id: 'a', date: '2026-02-01', sourceModule: 'manual', metrics: { credits: 6 } },
+      { id: 'b', date: '2026-03-01', sourceModule: 'manual', metrics: { credits: 3 } },
+      { id: 'c', date: '2026-03-02', sourceModule: 'manual', metrics: { credits: 3 } },
+      { id: 'd', date: '2026-03-03', sourceModule: 'speaking', metrics: { credits: 50 } },
+      { id: 'e', date: '2026-03-04', sourceModule: 'manual', metrics: {} },
+    ];
+    const r = computeReadiness(program, evidence, { today: '2026-10-03' });
+    expect(r.unit).toBe('credits');
+    expect(r.requirements[0]).toMatchObject({ unit: 'credits', count: 12, met: true });
+    expect(r.requirements[1]).toMatchObject({ count: 12, met: false });
+    expect(r.missing[0]).toEqual({
+      id: 'tier-20',
+      label: 'Community Advocate (20 credits)',
+      shortfall: 8,
+    });
+    expect(r.explanation).toMatch(/scored in credits/);
+    // An item-count program keeps counting items and says so.
+    const plain = computeReadiness(DEFAULT_PROGRAMS[0], evidence, { today: '2026-10-03' });
+    expect(plain.unit).toBe('items');
+    expect(plain.explanation).toMatch(/number of relevant evidence items/);
   });
 
   it('needs super_admin to change the catalogue, and disabling never deletes', async () => {
@@ -522,6 +779,14 @@ describe('evidence', () => {
       )
     );
     expect(first.created.map((e) => e.title)).toEqual(['KCDC', 'Meetup']);
+    // One id per (sourceModule, sourceId), created atomically rather than upserted.
+    expect(first.created[0].id).toBe(importedEvidenceId('speaking', 'event-1'));
+    expect(first.created[0].id).toMatch(/^evidence-import-[0-9a-f]{40}$/);
+    expect(store.createDoc).toHaveBeenCalledTimes(2);
+    expect(store.upsertDoc).not.toHaveBeenCalledWith(
+      'ambassador',
+      expect.objectContaining({ docType: 'evidence' })
+    );
     expect(first.created[0]).toMatchObject({
       sourceModule: 'speaking',
       sourceId: 'event-1',
@@ -554,6 +819,137 @@ describe('evidence', () => {
     ]);
     expect(
       (await h.importEvidence(makeRequest({ body: { sourceModule: 'labs', ids: ['x'] } }), context))
+        .status
+    ).toBe(400);
+  });
+
+  it('two imports racing for one source document leave one row, and a UUID-era row is still recognised', async () => {
+    const store = memStore({
+      speakerevents: [
+        { id: 'event-1', eventName: 'KCDC', date: '2026-08-14' },
+        { id: 'event-2', name: 'Meetup', date: '2026-09-01' },
+      ],
+      ambassador: [
+        {
+          id: 'evidence-legacy-uuid',
+          docType: 'evidence',
+          title: 'Meetup (imported last year)',
+          date: '2026-09-01',
+          sourceModule: 'speaking',
+          sourceId: 'event-2',
+        },
+      ],
+    });
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const first = parse(
+      await h.importEvidence(
+        makeRequest({ body: { sourceModule: 'speaking', ids: ['event-1', 'event-2'] } }),
+        context
+      )
+    );
+    const id = importedEvidenceId('speaking', 'event-1');
+    expect(first.created.map((e) => e.id)).toEqual([id]);
+    expect(first.existing).toEqual(['evidence-legacy-uuid']);
+
+    // The owner edits the imported row, then a second import whose pre-check
+    // read the list before the first landed (stale: no evidence) races in.
+    await h.patchEvidence(
+      makeRequest({ params: { id }, body: { title: 'KCDC (my title)' } }),
+      context
+    );
+    const listEvidence = store.queryDocs.getMockImplementation();
+    store.queryDocs.mockImplementationOnce(async (name, query, params) =>
+      params?.some((p) => p.value === 'evidence') ? [] : listEvidence(name, query, params)
+    );
+    const second = parse(
+      await h.importEvidence(
+        makeRequest({ body: { sourceModule: 'speaking', ids: ['event-1'] } }),
+        context
+      )
+    );
+    expect(second.created).toEqual([]);
+    expect(second.existing).toEqual([id]);
+    expect(store.createDoc).toHaveBeenCalledTimes(2);
+    expect(store.data.get('ambassador').get(id).title).toBe('KCDC (my title)');
+    expect([...store.data.get('ambassador').values()].filter((e) => e.sourceId === 'event-1'))
+      .toHaveLength(1);
+  });
+
+  it('refuses a CSV over the character limit with a 413 that names it, never a clipped import', async () => {
+    const store = memStore();
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const header = 'MTM Class ID,Course,Start Date\n';
+    const text = header + 'x'.repeat(CSV_IMPORT_MAX_CHARS + 1 - header.length);
+    const res = await h.importEvidence(
+      makeRequest({ body: { reader: 'mct-classes', text } }),
+      context
+    );
+    expect(res.status).toBe(413);
+    expect(parse(res)).toEqual({
+      error: 'text is 1,000,001 characters; the limit is 1,000,000. Split the export and import each part.',
+      limit: 1_000_000,
+    });
+    expect(store.createDoc).not.toHaveBeenCalled();
+    // Exactly at the limit is taken.
+    const atLimit = header + 'y'.repeat(CSV_IMPORT_MAX_CHARS - header.length);
+    expect(
+      (await h.importEvidence(makeRequest({ body: { reader: 'mct-classes', text: atLimit } }), context))
+        .status
+    ).toBe(200);
+  });
+
+  it('imports MCT classes from a pasted Metrics That Matter CSV, once per class id, skipping rows without one', async () => {
+    const store = memStore();
+    const h = createAmbassadorHandlers({ guard: guardAs('editor'), store, ...fixed });
+    const text = [
+      'MTM Class ID,Course,Learning Method,Instructor,Start Date,End Date,Location,Students',
+      '1001,"AZ-104: Microsoft Azure Administrator",Virtual ILT,J. Doe,3/2/2026,3/5/2026,Remote,14',
+      '1002,"SC-900, Security Fundamentals",ILT,J. Doe,2026-04-10,2026-04-10,Chicago,',
+      ',,ILT,J. Doe,2026-05-01,,,',
+      ',"AZ-900: Azure Fundamentals",ILT,J. Doe,2026-05-02,2026-05-02,Remote,9',
+      '1003,"AZ-900: Azure Fundamentals",ILT,J. Doe,,,,',
+    ].join('\r\n');
+    const first = parse(
+      await h.importEvidence(
+        makeRequest({
+          body: { reader: 'mct-classes', text, programIds: ['program-microsoft-mct'] },
+        }),
+        context
+      )
+    );
+    expect(first.created.map((e) => [e.title, e.date, e.sourceId])).toEqual([
+      ['AZ-104: Microsoft Azure Administrator', '2026-03-02', 'mct-class:1001'],
+      ['SC-900, Security Fundamentals', '2026-04-10', 'mct-class:1002'],
+    ]);
+    expect(first.created[0]).toMatchObject({
+      sourceModule: 'manual',
+      programIds: ['program-microsoft-mct'],
+      tags: ['mct-classes'],
+      metrics: { attendees: 14 },
+      description:
+        'MCT class delivered: Virtual ILT · Instructor J. Doe · 2026-03-02 to 2026-03-05 · Remote',
+      snapshot: { title: 'AZ-104: Microsoft Azure Administrator', date: '2026-03-02', url: null },
+    });
+    expect(first.created[1].metrics.attendees).toBeNull();
+    expect(first.created[0].id).toBe(importedEvidenceId('manual', 'mct-class:1001'));
+    // Two rows without a class id (one of them a full class) and one without a date.
+    expect(first.skipped).toBe(3);
+    expect(first.skippedReasons).toEqual({ 'missing-class-id': 2, 'missing-course-or-date': 1 });
+
+    const again = parse(
+      await h.importEvidence(makeRequest({ body: { reader: 'mct-classes', text } }), context)
+    );
+    expect(again.created).toEqual([]);
+    expect(again.existing).toEqual([
+      importedEvidenceId('manual', 'mct-class:1001'),
+      importedEvidenceId('manual', 'mct-class:1002'),
+    ]);
+
+    expect(
+      (await h.importEvidence(makeRequest({ body: { reader: 'nope', text } }), context)).status
+    ).toBe(400);
+    expect(
+      (await h.importEvidence(makeRequest({ body: { reader: 'mct-classes', text: '' } }), context))
         .status
     ).toBe(400);
   });

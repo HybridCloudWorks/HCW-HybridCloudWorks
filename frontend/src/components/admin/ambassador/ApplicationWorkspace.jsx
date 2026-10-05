@@ -27,10 +27,12 @@ import {
   ambassadorStatusInfo,
   applicationExport,
   downloadJson,
+  evidenceForApplication,
   evidenceRelevant,
   sourceLabel,
   todayIso,
 } from './ambassadorModel';
+import { answerText, questionSections, responsesMap } from './applicationQuestions';
 import { INPUT, ReadinessPanel, SelectField, TextField } from './Parts';
 import useReadiness from './useReadiness';
 import useApplicationUpload from './useApplicationUpload';
@@ -247,8 +249,67 @@ function ChecklistSection({ program, application, evidence, readiness, onToggle,
   );
 }
 
+/** Free-list responses as the packet prints them: the question id, then the answer. */
+function FreeResponseList({ responses }) {
+  return responses.map((r) => (
+    <div key={r.questionId} className="mt-2">
+      <p className="font-medium">{r.questionId}</p>
+      <p className="whitespace-pre-wrap">{r.text}</p>
+    </div>
+  ));
+}
+
+/**
+ * The packet's responses: the program's sections and questions when it has
+ * them, with any answer written before the program had its question list
+ * kept after them under "Other responses"; the free list otherwise.
+ */
+export function PacketResponses({ application, program, attached }) {
+  const responses = application.responses || [];
+  const questions = program?.applicationQuestions;
+  if (Array.isArray(questions) && questions.length > 0) {
+    const by = responsesMap(responses);
+    const known = new Set(questions.map((q) => q.id));
+    const leftovers = responses.filter((r) => !known.has(r.questionId));
+    const evidenceById = new Map(attached.map((e) => [e.id, e]));
+    return (
+      <>
+        {questionSections(questions).map(({ section, questions: list }) => (
+          <section key={section}>
+            <h3 className="font-semibold">{section}</h3>
+            {list.map((question) => {
+              const answer = answerText(question, by.get(question.id) || '', { evidenceById });
+              return (
+                <div key={question.id} className="mt-2">
+                  <p className="font-medium">{question.prompt}</p>
+                  <p className={`whitespace-pre-wrap${answer ? '' : ' text-muted-foreground'}`}>
+                    {answer || '(not answered)'}
+                  </p>
+                </div>
+              );
+            })}
+          </section>
+        ))}
+        {leftovers.length > 0 && (
+          <section>
+            <h3 className="font-semibold">Other responses</h3>
+            <FreeResponseList responses={leftovers} />
+          </section>
+        )}
+      </>
+    );
+  }
+  return (
+    <section>
+      <h3 className="font-semibold">Responses</h3>
+      {responses.length === 0 && <p className="text-muted-foreground">None written yet.</p>}
+      <FreeResponseList responses={responses} />
+    </section>
+  );
+}
+
 function Packet({ application, program, evidence, onClose }) {
-  const attached = evidence.filter((e) => (application.evidenceIds || []).includes(e.id));
+  const attached = evidenceForApplication(application, evidence);
   return (
     <Dialog
       open
@@ -267,18 +328,7 @@ function Packet({ application, program, evidence, onClose }) {
               ? ` · qualification period ${application.qualificationPeriod.start || '…'} to ${application.qualificationPeriod.end || '…'}`
               : ''}
           </p>
-          <section>
-            <h3 className="font-semibold">Responses</h3>
-            {(application.responses || []).length === 0 && (
-              <p className="text-muted-foreground">None written yet.</p>
-            )}
-            {(application.responses || []).map((r) => (
-              <div key={r.questionId} className="mt-2">
-                <p className="font-medium">{r.questionId}</p>
-                <p className="whitespace-pre-wrap">{r.text}</p>
-              </div>
-            ))}
-          </section>
+          <PacketResponses application={application} program={program} attached={attached} />
           <section>
             <h3 className="font-semibold">Evidence ({attached.length})</h3>
             <ul className="mt-1 list-disc space-y-0.5 pl-5">
@@ -344,6 +394,10 @@ export default function ApplicationWorkspace({ application, program, evidence, h
   }
 
   const set = (key) => (value) => setForm((f) => ({ ...f, [key]: value }));
+  const attached = useMemo(
+    () => evidenceForApplication(application, evidence),
+    [application, evidence]
+  );
   const dirty = useMemo(
     () =>
       JSON.stringify(workspacePayload(form)) !==
@@ -410,7 +464,13 @@ export default function ApplicationWorkspace({ application, program, evidence, h
 
         <form className="space-y-6" onSubmit={save} aria-label="Application details">
           <DatesSection form={form} set={set} setForm={setForm} />
-          <ResponsesSection responses={form.responses} onChange={set('responses')} />
+          <ResponsesSection
+            responses={form.responses}
+            onChange={set('responses')}
+            program={program}
+            evidence={attached}
+            title={program ? `${program.name} — ${form.title || application.title}` : form.title}
+          />
           <FilesSection application={application} files={files} form={form} set={set} busy={busy} />
           <NotesSection form={form} set={set} />
           <SaveRow busy={busy} dirty={dirty} />

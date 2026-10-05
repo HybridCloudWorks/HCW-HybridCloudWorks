@@ -3,12 +3,12 @@
  * inputs with inline errors, a label+URL list editor, the readiness panel,
  * the reads' loading and error lines, and a date in words.
  */
-import React from 'react';
+import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Plus, Trash2 } from 'lucide-react';
+import { Check, Copy, Plus, Trash2 } from 'lucide-react';
 import { TabError, TabLoading } from '@/components/admin/integrations/TabNotice';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { daysUntil, sourceLabel, todayIso } from './ambassadorModel';
@@ -171,6 +171,69 @@ export function LinkList({ idPrefix, title, hint, rows, onChange, errors = {} })
       >
         <Plus className="mr-1 h-3.5 w-3.5" /> Add {title.toLowerCase()}
       </Button>
+    </fieldset>
+  );
+}
+
+/**
+ * Puts `value` on the clipboard. Where the clipboard is unavailable (an
+ * insecure origin, a refused permission) the button says so, so the text can
+ * be selected by hand instead. `label` is the accessible name; the visible
+ * text is `children`, "Copy" by default.
+ */
+export function CopyButton({ value, label, disabled = false, children = 'Copy', className = '' }) {
+  const [state, setState] = useState('idle');
+  const copy = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('No clipboard');
+      await navigator.clipboard.writeText(String(value ?? ''));
+      setState('copied');
+    } catch {
+      setState('failed');
+    }
+  };
+  const text = { idle: children, copied: 'Copied', failed: 'Copy failed' }[state];
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="ghost"
+      className={`h-7 gap-1 px-2 text-xs ${className}`}
+      onClick={copy}
+      disabled={disabled}
+      aria-label={label}
+      title={
+        state === 'failed'
+          ? 'The clipboard is not available here; select the text instead.'
+          : undefined
+      }
+    >
+      {state === 'copied' ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+      {text}
+    </Button>
+  );
+}
+
+/**
+ * "Counts for": checkboxes over the programs an import's rows should name;
+ * none ticked means the rows count for every program. Shared by the import
+ * dialogs so the wording and the toggle are written once.
+ */
+export function ProgramsFieldset({ programs, value, onChange }) {
+  const toggle = (id) =>
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id]);
+  return (
+    <fieldset className="space-y-1">
+      <legend className="text-xs font-medium">Counts for</legend>
+      <p className="text-[11px] text-muted-foreground">Leave clear to count for every program.</p>
+      <div className="flex flex-wrap gap-2">
+        {programs.map((p) => (
+          <label key={p.id} className="flex items-center gap-1.5 text-xs">
+            <input type="checkbox" checked={value.includes(p.id)} onChange={() => toggle(p.id)} />
+            {p.name}
+          </label>
+        ))}
+      </div>
     </fieldset>
   );
 }

@@ -16,11 +16,12 @@ function countsFor(item, byId) {
   return ids.length === 0 ? 'every program' : ids.map((id) => byId.get(id)?.name || id).join(', ');
 }
 
-/** " · 120 attendees · 3,000 views", for the metrics an item carries. */
+/** " · 120 attendees · 3,000 views · 3 credits", for the metrics an item carries. */
 function metricsText(metrics) {
   const parts = [];
   if (metrics?.attendees) parts.push(`${metrics.attendees} attendees`);
   if (metrics?.views) parts.push(`${metrics.views} views`);
+  if (metrics?.credits) parts.push(`${metrics.credits} credit${metrics.credits === 1 ? '' : 's'}`);
   return parts.map((part) => ` · ${part}`).join('');
 }
 

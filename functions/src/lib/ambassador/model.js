@@ -72,6 +72,27 @@ export const EVIDENCE_SOURCES = Object.freeze([
 
 export const VERIFICATION_STATUSES = Object.freeze(['unverified', 'verified']);
 
+/**
+ * How a program's official application question is answered, so the guided
+ * workspace renders each the way the form asks it: a profile field (typed by
+ * hand, never prefilled), free text with a limit, one choice, yes or no, a
+ * URL, a frequency grid (one choice per row), repeatable network + URL rows,
+ * or activities tagged from the application's attached evidence.
+ */
+export const QUESTION_KINDS = Object.freeze([
+  'profile',
+  'text',
+  'choice',
+  'yesno',
+  'url',
+  'scale',
+  'links',
+  'activities',
+]);
+
+/** Readiness units: a requirement counts evidence items, or sums their `metrics.credits`. */
+export const SCORING_UNITS = Object.freeze(['credits']);
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /** `YYYY-MM-DD` naming a real day, or null. A full ISO timestamp keeps its day. */

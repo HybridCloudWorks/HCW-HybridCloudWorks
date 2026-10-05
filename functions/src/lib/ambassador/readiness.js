@@ -37,8 +37,19 @@ export function evidenceRelevant(item, programId) {
   return ids.length === 0 || ids.includes(programId);
 }
 
-/** One requirement scored against the relevant evidence. */
-function scoreRequirement(req, relevant) {
+/** The unit a program's requirements count in: evidence items, or their `metrics.credits` summed. */
+export const readinessUnit = (program) =>
+  program?.scoring?.unit === 'credits' ? 'credits' : 'items';
+
+const creditsOf = (item) => Math.max(0, Number(item.metrics?.credits) || 0);
+
+/**
+ * One requirement scored against the relevant evidence. `count` is the
+ * number of matching items, or — for a program scored in credits, where a
+ * minimum is a credit threshold rather than an item count — the sum of their
+ * `metrics.credits`.
+ */
+function scoreRequirement(req, relevant, unit) {
   const types = Array.isArray(req.evidenceTypes) ? req.evidenceTypes : [];
   const items = relevant
     .filter((item) => types.length === 0 || types.includes(item.sourceModule))
@@ -48,18 +59,29 @@ function scoreRequirement(req, relevant) {
       date: item.date,
       sourceModule: item.sourceModule,
       verificationStatus: item.verificationStatus || 'unverified',
+      ...(unit === 'credits' ? { credits: creditsOf(item) } : {}),
     }));
   const minCount = Math.max(0, Number(req.minCount) || 0);
+  const count =
+    unit === 'credits' ? items.reduce((sum, item) => sum + item.credits, 0) : items.length;
   return {
     id: req.id,
     label: req.label,
     minCount,
+    unit,
     weight: Number(req.weight) || 0,
-    count: items.length,
-    met: items.length >= minCount,
+    count,
+    met: count >= minCount,
     items,
   };
 }
+
+const MET_RULE = {
+  items:
+    'A requirement is met when the number of relevant evidence items of its types reaches its minimum count; evidence that names no program counts for every program.',
+  credits:
+    'This program is scored in credits: a requirement is met when the credits recorded on relevant evidence of its types add up to its threshold; evidence that names no program counts for every program.',
+};
 
 /**
  * Evidence that will leave a rolling twelve-month window within sixty days,
@@ -89,7 +111,8 @@ export function computeReadiness(program, evidence, { period = null, today = nul
     (item) =>
       !item.softDeletedAt && evidenceRelevant(item, program.id) && inPeriod(item.date, period)
   );
-  const rows = requirements.map((req) => scoreRequirement(req, relevant));
+  const unit = readinessUnit(program);
+  const rows = requirements.map((req) => scoreRequirement(req, relevant, unit));
   const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0);
   const metRows = rows.filter((row) => row.met);
   const metWeight = metRows.reduce((sum, row) => sum + row.weight, 0);
@@ -104,13 +127,14 @@ export function computeReadiness(program, evidence, { period = null, today = nul
   const explanation = [
     `${metRows.length} of ${rows.length} requirements met ${periodText}.`,
     `Score is the weight of met requirements (${metWeight}) over the total weight (${totalWeight}), as a percentage.`,
-    'A requirement is met when the number of relevant evidence items of its types reaches its minimum count; evidence that names no program counts for every program.',
+    MET_RULE[unit],
     'This is a readiness estimate from your own records. Acceptance is decided by the program against its current published criteria, which this page does not promise.',
   ].join(' ');
 
   return {
     programId: program.id,
     period,
+    unit,
     requirements: rows,
     score,
     explanation,
