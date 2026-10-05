@@ -311,6 +311,14 @@ try {
         try {
             [System.IO.File]::WriteAllText($tmp, $trimmed, [System.Text.UTF8Encoding]::new($false))
             az keyvault secret set --vault-name $VaultName --name $Name --file $tmp --output none
+            # az reports a refused write on stderr and exits non-zero; it does not
+            # throw. Until 2026-10-05 the next line printed "set" over a
+            # ForbiddenByRbac, and the operator read a seed that never happened
+            # as done (the role grant had been skipped). The firewall window
+            # closes in the finally block either way.
+            if ($LASTEXITCODE -ne 0) {
+                throw "az keyvault secret set failed (exit $LASTEXITCODE): NOTHING WAS WRITTEN. A ForbiddenByRbac above means the data-plane role is missing or not yet propagated: grant Key Vault Secrets Officer, wait two minutes, run again."
+            }
         }
         finally {
             Remove-Item $tmp -Force -ErrorAction SilentlyContinue
@@ -323,6 +331,9 @@ try {
     # passes a "does it exist" check and fails at runtime.
     if ($PSCmdlet.ShouldProcess($VaultName, "read back $Name")) {
         $back = az keyvault secret show --vault-name $VaultName --name $Name --query 'value' -o tsv
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($back)) {
+            throw "Could not read $Name back (exit $LASTEXITCODE), so the write is unverified. A ForbiddenByRbac here with a successful write above means the role was granted mid-run; wait and re-run to verify."
+        }
         $sha = { param($s) (Get-FileHash -InputStream ([System.IO.MemoryStream]::new(
                     [System.Text.Encoding]::UTF8.GetBytes($s))) -Algorithm SHA256).Hash }
         if ((& $sha $back) -eq (& $sha $trimmed)) {
