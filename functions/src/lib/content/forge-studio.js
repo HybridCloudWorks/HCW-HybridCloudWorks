@@ -73,6 +73,7 @@ export {
   QUEUE_BRIEF_FIELDS,
   QUEUE_STATUSES,
   normalizeQueueUrl,
+  entryIdFor,
   readEntries,
   readEntry,
   updateEntry,

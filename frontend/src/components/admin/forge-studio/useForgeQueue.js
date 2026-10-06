@@ -17,6 +17,14 @@ import { getJSON, postJSON } from '@/lib/api';
 
 export const REFRESH_MS = 20000;
 
+/** The queue after a mutation's delta: changed entries replace or join, removed ids leave; newest first. */
+export function mergeDelta(items, changed = [], removed = []) {
+  const gone = new Set(removed || []);
+  const byId = new Map((items || []).filter((e) => !gone.has(e.id)).map((e) => [e.id, e]));
+  for (const entry of changed || []) byId.set(entry.id, entry);
+  return [...byId.values()].sort((a, b) => String(b.addedAt).localeCompare(String(a.addedAt)));
+}
+
 const EMPTY = Object.freeze({
   status: 'idle',
   items: [],
@@ -36,17 +44,27 @@ export function useForgeQueue({ enabled = true } = {}) {
     };
   }, []);
 
-  /** The server's answer becomes the state; a refused answer is an error. */
+  /**
+   * The server's answer becomes the state: a list answer (`items`) replaces
+   * the queue; a mutation answer (`changed`, `removed`) is merged into it, so
+   * a Save on two entries never brings five thousand back. A refused answer
+   * is an error.
+   */
   const take = useCallback((answer) => {
     if (!answer?.ok) throw new Error(answer?.error || 'The queue did not answer.');
-    setState((current) => ({
-      ...current,
-      status: 'ready',
-      items: answer.items || [],
-      total: answer.total ?? (answer.items || []).length,
-      max: answer.max ?? current.max,
-      error: null,
-    }));
+    setState((current) => {
+      const items = Array.isArray(answer.items)
+        ? answer.items
+        : mergeDelta(current.items, answer.changed, answer.removed);
+      return {
+        ...current,
+        status: 'ready',
+        items,
+        total: items.length,
+        max: answer.max ?? current.max,
+        error: null,
+      };
+    });
     return answer;
   }, []);
 

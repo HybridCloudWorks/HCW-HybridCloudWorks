@@ -8,6 +8,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   LEGACY_QUEUE_DOC_ID,
+  entryIdFor,
   MAX_QUEUE_ITEMS,
   MAX_URLS_PER_ADD,
   QUEUE_DOC_TYPE,
@@ -72,6 +73,7 @@ function memStore(seed = []) {
       return written;
     }),
     deleteDoc: vi.fn(async (container, id) => {
+      if (!docs.has(`${container}/${id}`)) throw Object.assign(new Error('Not found'), { code: 404 });
       docs.delete(`${container}/${id}`);
     }),
     upsertDoc: vi.fn(async (container, doc) => {
@@ -98,7 +100,11 @@ function handlers(store, over = {}) {
     ...over,
   });
 }
-const idOf = (n) => `${QUEUE_ID_PREFIX}id-${n}`;
+const URLS = ['https://a.test/1', 'https://b.test/2', 'https://c.test/3'];
+/** The id of the nth seeded URL (1-based), as the hash gives it. */
+const idOf = (n) => entryIdFor(URLS[n - 1]);
+/** Every entry the store holds, as the list answers them. */
+const listed = async (h) => parse(await h.list(request(null, 'GET'), context)).items;
 
 describe('normalizeQueueUrl', () => {
   it('keeps http(s) only, drops the fragment, keeps the query, trims', () => {
@@ -114,7 +120,7 @@ describe('normalizeQueueUrl', () => {
 });
 
 describe('adding URLs', () => {
-  it('creates one entry document per distinct URL, with an empty URL-mode brief, and skips repeats', async () => {
+  it('creates one entry document per distinct URL, its id the URL hash, with an empty URL-mode brief; a repeat is a 409 read as skipped', async () => {
     const store = memStore();
     const h = handlers(store);
     const res = await h.add(
@@ -124,11 +130,11 @@ describe('adding URLs', () => {
     expect(res.status).toBe(200);
     const body = parse(res);
     expect(body.added).toEqual([idOf(1), idOf(2)]);
-    expect(body.total).toBe(2);
-    expect(body.max).toBe(MAX_QUEUE_ITEMS);
-    const entry = body.items.find((i) => i.url === 'https://a.test/1');
+    expect(body.changed.map((i) => i.url).sort()).toEqual(['https://a.test/1', 'https://b.test/2']);
+    expect(body.items).toBeUndefined(); // a delta, never the whole queue
+    const entry = body.changed.find((i) => i.url === 'https://a.test/1');
     expect(entry).toMatchObject({
-      id: idOf(1),
+      id: entryIdFor('https://a.test/1'),
       docType: QUEUE_DOC_TYPE,
       configScope: 'admin_config',
       status: 'queued',
@@ -138,6 +144,7 @@ describe('adding URLs', () => {
       jobId: null,
       contentId: null,
     });
+    expect(entry.id.startsWith(QUEUE_ID_PREFIX)).toBe(true);
     expect(entry.brief).toMatchObject({ mode: 'url', sourceUrl: 'https://a.test/1', objective: '' });
     expect(store.createDoc).toHaveBeenCalledTimes(2);
 
@@ -146,7 +153,8 @@ describe('adding URLs', () => {
     );
     expect(again.added).toEqual([idOf(3)]);
     expect(again.skipped).toEqual(['https://a.test/1']);
-    expect(again.total).toBe(3);
+    expect(store.createDoc).toHaveBeenCalledTimes(4); // the repeat was tried and met the 409
+    expect(await listed(h)).toHaveLength(3);
   });
 
   it('takes a favourites export of hundreds in one add', async () => {
@@ -154,8 +162,10 @@ describe('adding URLs', () => {
     const urls = Array.from({ length: 600 }, (_, i) => `https://fav.test/${i}`);
     const body = parse(await h.add(request({ urls }), context));
     expect(body.added).toHaveLength(600);
-    expect(body.total).toBe(600);
-    expect(body.items[0].url).toBe('https://fav.test/0'); // same stamp, stable order within it
+    expect(body.changed).toHaveLength(600);
+    const list = parse(await h.list(request(null, 'GET'), context));
+    expect(list.total).toBe(600);
+    expect(list.max).toBe(MAX_QUEUE_ITEMS);
   });
 
   it('refuses a body with no usable URL, and answers the per-call cap', async () => {
@@ -170,7 +180,7 @@ describe('adding URLs', () => {
 
   it('stops at MAX_QUEUE_ITEMS and says how many did not fit', async () => {
     const seed = Array.from({ length: MAX_QUEUE_ITEMS }, (_, i) => ({
-      id: `${QUEUE_ID_PREFIX}old-${i}`,
+      id: entryIdFor(`https://old.test/${i}`),
       configScope: 'admin_config',
       docType: QUEUE_DOC_TYPE,
       url: `https://old.test/${i}`,
@@ -181,7 +191,7 @@ describe('adding URLs', () => {
     const body = parse(await h.add(request({ urls: ['https://new.test/1'] }), context));
     expect(body.added).toEqual([]);
     expect(body.full).toBe(1);
-    expect(body.total).toBe(MAX_QUEUE_ITEMS);
+    expect(parse(await h.list(request(null, 'GET'), context)).total).toBe(MAX_QUEUE_ITEMS);
   });
 
   it('is editor-gated', async () => {
@@ -195,15 +205,13 @@ describe('fields on one or many entries', () => {
   const seeded = async () => {
     const store = memStore();
     const h = handlers(store);
-    await h.add(
-      request({ urls: ['https://a.test/1', 'https://b.test/2', 'https://c.test/3'] }),
-      context
-    );
+    await h.add(request({ urls: URLS }), context);
     return { store, h };
   };
 
-  it('applies the shared fields to every selected entry under its ETag, normalised, and leaves the rest alone', async () => {
+  it('applies the shared fields to every selected entry under its ETag, normalised, answers only those, and leaves the rest alone', async () => {
     const { h, store } = await seeded();
+    store.patchDoc.mockClear();
     const res = await h.update(
       request({
         ids: [idOf(1), idOf(2)],
@@ -220,7 +228,8 @@ describe('fields on one or many entries', () => {
     expect(res.status).toBe(200);
     const body = parse(res);
     expect(body.applied).toEqual([idOf(1), idOf(2)]);
-    const one = body.items.find((i) => i.id === idOf(1));
+    expect(body.changed.map((i) => i.id).sort()).toEqual([idOf(1), idOf(2)].sort());
+    const one = body.changed.find((i) => i.id === idOf(1));
     expect(one.kind).toBe('tutorial');
     expect(one.brief).toMatchObject({
       objective: 'Teach the thing',
@@ -230,8 +239,8 @@ describe('fields on one or many entries', () => {
       mode: 'url',
       sourceUrl: 'https://a.test/1',
     });
-    expect(body.items.find((i) => i.id === idOf(3)).brief.objective).toBe('');
-    // Each write carried the entry's own ETag.
+    const three = (await listed(h)).find((i) => i.id === idOf(3));
+    expect(three.brief.objective).toBe('');
     for (const call of store.patchDoc.mock.calls) expect(call[3].ifMatch).toMatch(/^e\d+$/);
   });
 
@@ -239,12 +248,10 @@ describe('fields on one or many entries', () => {
     const { h } = await seeded();
     await h.update(request({ ids: [idOf(1)], fields: { objective: 'First', audience: 'Ops' } }), context);
     const body = parse(await h.update(request({ ids: [idOf(1)], fields: { audience: '' } }), context));
-    const one = body.items.find((i) => i.id === idOf(1));
-    expect(one.brief.objective).toBe('First');
-    expect(one.brief.audience).toBe('');
+    expect(body.changed[0].brief).toMatchObject({ objective: 'First', audience: '' });
   });
 
-  it('refuses an update with no ids or no known field; removes entries, keeping forging ones', async () => {
+  it('refuses an update with no ids or no known field; removes entries, keeping forging ones, and a repeat remove is the same outcome', async () => {
     const { h, store } = await seeded();
     expect((await h.update(request({ fields: { objective: 'x' } }), context)).status).toBe(400);
     expect((await h.update(request({ ids: [idOf(1)], fields: { bogus: 1 } }), context)).status).toBe(400);
@@ -253,8 +260,12 @@ describe('fields on one or many entries', () => {
       await h.update(request({ ids: [idOf(1), idOf(2), idOf(3), 'nope:x'], remove: true }), context)
     );
     expect(body.removed).toEqual([idOf(2), idOf(3)]);
-    expect(body.items.map((i) => i.id)).toEqual([idOf(1)]);
+    expect(body.changed).toEqual([]);
+    expect((await listed(h)).map((i) => i.id)).toEqual([idOf(1)]);
     expect(store.deleteDoc).toHaveBeenCalledTimes(2);
+    // Gone already (a second tab removed it first): nothing to report, no error.
+    const again = parse(await h.update(request({ ids: [idOf(2)], remove: true }), context));
+    expect(again.removed).toEqual([]);
   });
 
   it('applyFields re-queues a failed entry, and the handler never touches one that is forging', async () => {
@@ -271,7 +282,7 @@ describe('fields on one or many entries', () => {
       await h.update(request({ ids: [idOf(1), idOf(2)], fields: { objective: 'o' } }), context)
     );
     expect(body.applied).toEqual([idOf(2)]);
-    expect(body.items.find((i) => i.id === idOf(1)).brief.objective).toBe('');
+    expect((await listed(h)).find((i) => i.id === idOf(1)).brief.objective).toBe('');
   });
 });
 
@@ -279,11 +290,11 @@ describe('Save: one forge-from-url job per entry, the brief on the payload', () 
   const seeded = async () => {
     const store = memStore();
     const h = handlers(store);
-    await h.add(request({ urls: ['https://a.test/1', 'https://b.test/2', 'https://c.test/3'] }), context);
+    await h.add(request({ urls: URLS }), context);
     return { store, h };
   };
 
-  it('writes a job document and emits a message per selected entry and marks them forging', async () => {
+  it('claims each entry, writes its job document and emits its message; answers the claimed entries', async () => {
     const { h, store } = await seeded();
     await h.update(request({ ids: [idOf(1), idOf(2)], fields: { objective: 'Explain', kind: 'guide' } }), context);
     const enqueue = vi.fn();
@@ -291,16 +302,20 @@ describe('Save: one forge-from-url job per entry, the brief on the payload', () 
     expect(res.status).toBe(200);
     const body = parse(res);
     expect(body.started).toEqual([
-      { id: idOf(1), jobId: 'id-4' },
-      { id: idOf(2), jobId: 'id-5' },
+      { id: idOf(1), jobId: 'id-1' },
+      { id: idOf(2), jobId: 'id-2' },
     ]);
-    expect(body.items.filter((i) => i.status === 'forging').map((i) => i.id).sort()).toEqual([idOf(1), idOf(2)]);
-    expect(body.items.find((i) => i.id === idOf(1)).jobId).toBe('id-4');
+    expect(body.changed.map((i) => [i.id, i.status, i.jobId]).sort()).toEqual(
+      [
+        [idOf(1), 'forging', 'id-1'],
+        [idOf(2), 'forging', 'id-2'],
+      ].sort()
+    );
 
     const jobs = store.upsertDoc.mock.calls.filter(([c]) => c === 'jobs').map(([, d]) => d);
     expect(jobs).toHaveLength(2);
     expect(jobs[0]).toMatchObject({
-      id: 'id-4',
+      id: 'id-1',
       type: 'forge-from-url',
       status: 'queued',
       requestedBy: { oid: 'u1', email: 'owner@hcw.test' },
@@ -313,8 +328,8 @@ describe('Save: one forge-from-url job per entry, the brief on the payload', () 
       },
     });
     expect(enqueue.mock.calls.map(([m]) => m)).toEqual([
-      { jobId: 'id-4', type: 'forge-from-url' },
-      { jobId: 'id-5', type: 'forge-from-url' },
+      { jobId: 'id-1', type: 'forge-from-url' },
+      { jobId: 'id-2', type: 'forge-from-url' },
     ]);
     expect(Buffer.byteLength(JSON.stringify(jobs[0].payload))).toBeLessThan(16384);
   });
@@ -324,34 +339,47 @@ describe('Save: one forge-from-url job per entry, the brief on the payload', () 
     Object.assign(store.docs.get(`admin_config/${idOf(1)}`), { status: 'forged', contentId: 'c-1' });
     const enqueue = vi.fn();
     const body = parse(await h.forge(request({ ids: [idOf(1), idOf(2)] }), context, { enqueue }));
-    expect(body.started).toEqual([{ id: idOf(2), jobId: 'id-4' }]);
-    expect(body.items.find((i) => i.id === idOf(1))).toMatchObject({ status: 'forged', contentId: 'c-1' });
+    expect(body.started).toEqual([{ id: idOf(2), jobId: 'id-1' }]);
+    expect(body.changed.map((i) => i.id)).toEqual([idOf(2)]);
+    expect((await listed(h)).find((i) => i.id === idOf(1))).toMatchObject({ status: 'forged', contentId: 'c-1' });
     expect((await h.forge(request({ ids: [idOf(2)] }), context, {})).status).toBe(500);
   });
 
-  it('writes each job before marking its entry, and a failed job write leaves that entry and the later ones queued and named', async () => {
+  it('two Saves racing on one entry start one job: the claim is the gate', async () => {
+    const { h, store } = await seeded();
+    // The second claim finds the entry already forging (the first wrote it) and skips.
+    const enqueue = vi.fn();
+    const first = parse(await h.forge(request({ ids: [idOf(1)] }), context, { enqueue }));
+    const second = parse(await h.forge(request({ ids: [idOf(1)] }), context, { enqueue }));
+    expect(first.started).toHaveLength(1);
+    expect(second.started).toEqual([]);
+    expect(store.upsertDoc.mock.calls.filter(([c]) => c === 'jobs')).toHaveLength(1);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed job write reverts the claim and leaves that entry and the later ones queued and named', async () => {
     const { h, store } = await seeded();
     const order = [];
     store.upsertDoc.mockImplementation(async (container, doc) => {
-      order.push(`job:${doc.payload.queueItemId}`);
+      order.push(`job:${doc.payload.queueItemId === idOf(2) ? 2 : 1}`);
       if (doc.payload.queueItemId === idOf(2)) throw new Error('jobs container unavailable');
       store.docs.set(`${container}/${doc.id}`, { ...doc });
       return doc;
     });
     const original = store.patchDoc.getMockImplementation();
     store.patchDoc.mockImplementation(async (...args) => {
-      order.push(`mark:${args[1]}`);
+      order.push(`${args[2].status}:${args[1] === idOf(2) ? 2 : 1}`);
       return original(...args);
     });
     const enqueue = vi.fn();
     const body = parse(await h.forge(request({ ids: [idOf(1), idOf(2), idOf(3)] }), context, { enqueue }));
-    expect(order).toEqual([`job:${idOf(1)}`, `mark:${idOf(1)}`, `job:${idOf(2)}`]);
-    expect(body.started).toEqual([{ id: idOf(1), jobId: 'id-4' }]);
+    expect(order).toEqual(['forging:1', 'job:1', 'forging:2', 'job:2', 'queued:2']);
+    expect(body.started).toEqual([{ id: idOf(1), jobId: 'id-1' }]);
     expect(body.notStarted).toEqual([
       { id: idOf(2), error: 'jobs container unavailable' },
       { id: idOf(3), error: 'not attempted after an earlier job write failed' },
     ]);
-    expect(body.items.map((i) => i.status).sort()).toEqual(['forging', 'queued', 'queued']);
+    expect((await listed(h)).map((i) => i.status).sort()).toEqual(['forging', 'queued', 'queued']);
     expect(enqueue).toHaveBeenCalledTimes(1);
   });
 });
@@ -390,19 +418,18 @@ describe('the job outcome lands on the entry', () => {
       { now: () => NOW, sleep }
     );
     expect(sleep).toHaveBeenCalledTimes(6);
-    const body = parse(await h.list(request(null, 'GET'), context));
-    expect(body.items[0]).toMatchObject({ status: 'forged', contentId: 'c-7', error: null });
+    expect((await listed(h))[0]).toMatchObject({ status: 'forged', contentId: 'c-7', error: null });
     expect(
       await recordQueueOutcome(store, { queueItemId: `${QUEUE_ID_PREFIX}gone`, status: 'failed', error: 'x' }, { now: () => NOW, sleep })
     ).toBeNull();
     expect(await recordQueueOutcome(store, { queueItemId: '../x', status: 'failed' }, { now: () => NOW, sleep })).toBeNull();
   });
 
-  it('the list reconciles a forging entry whose job document has finished', async () => {
+  it('the list reconciles a forging entry whose job document has finished, and one whose job was never written', async () => {
     const store = memStore();
     const h = handlers(store);
-    await h.add(request({ urls: ['https://a.test/1', 'https://b.test/2'] }), context);
-    await h.forge(request({ ids: [idOf(1), idOf(2)] }), context, { enqueue: vi.fn() });
+    await h.add(request({ urls: URLS }), context);
+    await h.forge(request({ ids: [idOf(1), idOf(2), idOf(3)] }), context, { enqueue: vi.fn() });
     const jobOf = (id) => store.docs.get(`admin_config/${id}`).jobId;
     store.docs.set(`jobs/${jobOf(idOf(1))}`, {
       id: jobOf(idOf(1)),
@@ -410,9 +437,14 @@ describe('the job outcome lands on the entry', () => {
       result: { success: true, contentId: 'c-1' },
     });
     store.docs.set(`jobs/${jobOf(idOf(2))}`, { id: jobOf(idOf(2)), status: 'running' });
+    store.docs.delete(`jobs/${jobOf(idOf(3))}`);
     const body = parse(await h.list(request(null, 'GET'), context));
     expect(body.items.find((i) => i.id === idOf(1))).toMatchObject({ status: 'forged', contentId: 'c-1' });
     expect(body.items.find((i) => i.id === idOf(2)).status).toBe('forging');
+    expect(body.items.find((i) => i.id === idOf(3))).toMatchObject({
+      status: 'failed',
+      error: expect.stringMatching(/never written/),
+    });
   });
 });
 
@@ -420,7 +452,7 @@ describe('updateEntry and entryBrief', () => {
   it('retries a 412 and writes on the next read; gives up after the attempts with a plain sentence', async () => {
     const store = memStore();
     const h = handlers(store);
-    await h.add(request({ urls: ['https://n.test'] }), context);
+    await h.add(request({ urls: ['https://a.test/1'] }), context);
     store.conflictsLeft = 2;
     const after = await updateEntry(store, idOf(1), () => ({ title: 'named' }), { sleep: async () => {} });
     expect(after.title).toBe('named');
@@ -434,9 +466,9 @@ describe('updateEntry and entryBrief', () => {
   it('a change that returns null writes nothing; an unknown id answers null', async () => {
     const store = memStore();
     const h = handlers(store);
-    await h.add(request({ urls: ['https://n.test'] }), context);
+    await h.add(request({ urls: ['https://a.test/1'] }), context);
     store.patchDoc.mockClear();
-    expect((await updateEntry(store, idOf(1), () => null)).url).toBe('https://n.test/');
+    expect((await updateEntry(store, idOf(1), () => null)).url).toBe('https://a.test/1');
     expect(store.patchDoc).not.toHaveBeenCalled();
     expect(await updateEntry(store, `${QUEUE_ID_PREFIX}missing`, () => ({}))).toBeNull();
     expect(await updateEntry(store, 'forge_profile', () => ({}))).toBeNull();
@@ -485,7 +517,7 @@ describe('the first cut’s single document', () => {
     expect(body.items.map((i) => i.url)).toEqual(['https://b.test/2', 'https://a.test/1']);
     const a = body.items.find((i) => i.url === 'https://a.test/1');
     expect(a).toMatchObject({
-      id: idOf(1),
+      id: entryIdFor('https://a.test/1'),
       docType: QUEUE_DOC_TYPE,
       kind: 'guide',
       status: 'queued',
@@ -501,17 +533,20 @@ describe('the first cut’s single document', () => {
     const emptied = store.docs.get(`admin_config/${LEGACY_QUEUE_DOC_ID}`);
     expect(emptied.items).toEqual([]);
     expect(emptied.migratedCount).toBe(2);
-    // A second list migrates nothing more.
     store.createDoc.mockClear();
     await h.list(request(null, 'GET'), context);
     expect(store.createDoc).not.toHaveBeenCalled();
     expect(entries(store)).toHaveLength(2);
   });
 
-  it('skips URLs the queue already has, and does nothing without a legacy document', async () => {
+  it('is idempotent under a concurrent first read: a URL already present is a 409 skipped, and a lost final ETag is nothing to do', async () => {
     const store = memStore([legacy]);
     const h = handlers(store);
     await h.add(request({ urls: ['https://a.test/1'] }), context);
+    // Another reader emptied the legacy document first: the replace meets a 412.
+    store.replaceDocIfMatch.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('Precondition failed'), { code: 412 });
+    });
     const moved = await migrateLegacyQueue({ store, now: () => NOW, uuid: () => 'm-1' });
     expect(moved).toBe(1);
     expect(entries(store).map((e) => e.url).sort()).toEqual(['https://a.test/1', 'https://b.test/2']);

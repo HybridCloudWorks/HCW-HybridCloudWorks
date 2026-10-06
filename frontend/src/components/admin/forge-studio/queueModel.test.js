@@ -17,6 +17,7 @@ import {
   statusOf,
   toggleId,
 } from './queueModel';
+import { mergeDelta } from './useForgeQueue';
 
 const entry = (over = {}) => ({
   id: 'e1',
@@ -105,5 +106,28 @@ describe('status, summary, selection', () => {
     expect(one.size).toBe(1);
     expect(editable({ status: 'forging' })).toBe(false);
     expect(editable({ status: 'failed' })).toBe(true);
+  });
+});
+
+describe('mergeDelta (the hook’s merge of a mutation answer)', () => {
+  it('replaces changed entries, adds new ones, drops removed ids, and keeps newest first', () => {
+    const items = [
+      { id: 'a', addedAt: '2026-10-06T10:00:00Z', status: 'queued' },
+      { id: 'b', addedAt: '2026-10-06T09:00:00Z', status: 'queued' },
+    ];
+    const next = mergeDelta(
+      items,
+      [
+        { id: 'b', addedAt: '2026-10-06T09:00:00Z', status: 'forging' },
+        { id: 'c', addedAt: '2026-10-06T11:00:00Z', status: 'queued' },
+      ],
+      ['a']
+    );
+    expect(next.map((e) => [e.id, e.status])).toEqual([
+      ['c', 'queued'],
+      ['b', 'forging'],
+    ]);
+    expect(items).toHaveLength(2);
+    expect(mergeDelta(items)).toEqual(items);
   });
 });

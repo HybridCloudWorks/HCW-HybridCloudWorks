@@ -16,11 +16,18 @@
  * without racing a bulk edit of other entries. The old single document is
  * migrated into entries on the first read after deploy and emptied.
  *
+ * An entry's id is the hash of its URL (`entryIdFor`), so the URL is the
+ * identity: two adds of one URL, or an add racing the migration, meet at
+ * `createDoc` and the loser's 409 reads as "already there" — no read-then-
+ * create window. Mutations answer only the entries they changed (and the
+ * ids they removed); the list answers the queue once, bounded by the cap.
+ *
  * Entry statuses: `queued` (fields may still be blank), `forging` (a job is
  * running, `jobId` says which), `forged` (`contentId` is the document; the
  * entry stays until removed so the owner can open it), `failed` (`error`
  * says why; Save again re-queues it).
  */
+import { createHash } from 'node:crypto';
 import { ADMIN_CONFIG_PARTITION } from '../../cosmos-client.js';
 import { JOBS_CONTAINER, TERMINAL_JOB_STATUSES, newJobDoc } from '../../jobs.js';
 import { actorName, json } from './config.js';
@@ -89,10 +96,14 @@ export function entryBrief(entry, fields = {}) {
   return normalizeBrief({ ...merged, mode: 'url', sourceUrl: entry.url });
 }
 
-/** The queue entry a URL becomes: one admin_config document of its own. */
-export function newEntry({ url, id, stamp, actor, title = '' }) {
+/** The id a URL's entry has: the prefix plus the URL's SHA-1, so one URL is one entry. */
+export const entryIdFor = (url) =>
+  `${QUEUE_ID_PREFIX}${createHash('sha1').update(String(url)).digest('hex')}`;
+
+/** The queue entry a URL becomes: one admin_config document of its own, its id the URL's hash. */
+export function newEntry({ url, stamp, actor, title = '' }) {
   return {
-    id: id.startsWith(QUEUE_ID_PREFIX) ? id : `${QUEUE_ID_PREFIX}${id}`,
+    id: entryIdFor(url),
     configScope: ADMIN_CONFIG_PARTITION,
     docType: QUEUE_DOC_TYPE,
     url,
@@ -112,9 +123,11 @@ export function newEntry({ url, id, stamp, actor, title = '' }) {
 
 /** Every entry, newest first (same stamp: insertion order). */
 export async function readEntries(store) {
+  // Bounded by the cap, which is the one thing the add path enforces, so
+  // fetchAll accumulates at most MAX_QUEUE_ITEMS entries.
   const rows = await store.queryDocs(
     CONTAINER,
-    'SELECT * FROM c WHERE c.configScope = @scope AND c.docType = @type',
+    `SELECT TOP ${MAX_QUEUE_ITEMS} * FROM c WHERE c.configScope = @scope AND c.docType = @type`,
     [
       { name: '@scope', value: ADMIN_CONFIG_PARTITION },
       { name: '@type', value: QUEUE_DOC_TYPE },
@@ -255,8 +268,12 @@ export async function reconcileForging(ctx, entries) {
   const updated = new Map();
   for (const item of forging) {
     const job = await ctx.store.readDoc(JOBS_CONTAINER, item.jobId, item.jobId).catch(() => null);
-    if (!job || !TERMINAL_JOB_STATUSES.includes(job.status)) continue;
-    const outcome = outcomeFor({ status: job.status, result: job.result, error: job.error });
+    if (job && !TERMINAL_JOB_STATUSES.includes(job.status)) continue;
+    // No job document at all: the claim was written and the job never was
+    // (the write failed and the revert failed too). Failed, not forging.
+    const outcome = job
+      ? outcomeFor({ status: job.status, result: job.result, error: job.error })
+      : { status: 'failed', contentId: null, error: 'the forge job was never written; Save again' };
     const after = await updateEntry(ctx.store, item.id, (entry) =>
       entry.status === 'forging' ? { ...outcome, updatedAt: ctx.now().toISOString() } : null
     ).catch(() => null);
@@ -271,7 +288,6 @@ function entryFromLegacy(ctx, item, url) {
   return {
     ...newEntry({
       url,
-      id: ctx.uuid(),
       stamp: item.addedAt || stamp,
       actor: item.addedBy || 'migration',
       title: item.title,
@@ -286,35 +302,65 @@ function entryFromLegacy(ctx, item, url) {
   };
 }
 
+/** `createDoc`, with a 409 (the URL's entry exists) answered as null rather than thrown. */
+async function createUnlessPresent(store, entry) {
+  try {
+    return await store.createDoc(CONTAINER, entry);
+  } catch (error) {
+    if (error?.code === 409) return null;
+    throw error;
+  }
+}
+
 /**
  * The first cut's single document: its entries become documents of their
- * own (URLs the queue already has are skipped), and it is emptied so this
- * runs once. Nothing when there is no such document or it is already empty.
+ * own and it is emptied so this runs once. Idempotent under concurrent
+ * first reads: an entry's id is its URL's hash, so a second reader's
+ * createDoc meets a 409 and moves on, and the final emptying is under the
+ * legacy document's ETag (the loser's 412 is nothing to do). Nothing when
+ * there is no such document or it is already empty.
  */
 export async function migrateLegacyQueue(ctx) {
   const legacy = await ctx.store.readDoc(CONTAINER, LEGACY_QUEUE_DOC_ID, ADMIN_CONFIG_PARTITION);
   const items = Array.isArray(legacy?.items) ? legacy.items : [];
   if (!items.length) return 0;
-  const have = new Set((await readEntries(ctx.store)).map((entry) => entry.url));
   let moved = 0;
   for (const item of items) {
     const url = normalizeQueueUrl(item.url);
-    if (!url || have.has(url)) continue;
-    await ctx.store.createDoc(CONTAINER, entryFromLegacy(ctx, item, url));
-    have.add(url);
-    moved += 1;
+    if (!url) continue;
+    if (await createUnlessPresent(ctx.store, entryFromLegacy(ctx, item, url))) moved += 1;
   }
-  await ctx.store.replaceDocIfMatch(
-    CONTAINER,
-    { ...legacy, items: [], migratedAt: ctx.now().toISOString(), migratedCount: moved },
-    PK
-  );
+  try {
+    await ctx.store.replaceDocIfMatch(
+      CONTAINER,
+      { ...legacy, items: [], migratedAt: ctx.now().toISOString(), migratedCount: moved },
+      PK
+    );
+  } catch (error) {
+    if (error?.code !== 412) throw error;
+  }
   return moved;
 }
 
-/** The public shape of the queue: items newest first, the cap. */
-const answer = (items, extra = {}) =>
-  json(200, { ok: true, items, total: items.length, max: MAX_QUEUE_ITEMS, ...extra });
+const byNewest = (a, b) => String(b.addedAt).localeCompare(String(a.addedAt));
+
+/** The list: every entry, newest first, and the cap. */
+const answerList = (items) =>
+  json(200, { ok: true, items, total: items.length, max: MAX_QUEUE_ITEMS });
+
+/**
+ * A mutation's answer: only the entries it changed (`changed`, newest
+ * first) and the ids it removed, never the whole queue — a 5,000-entry
+ * queue must not come back on every Save. The page merges them.
+ */
+const answerDelta = ({ changed = [], removed = [] }, extra = {}) =>
+  json(200, {
+    ok: true,
+    changed: [...changed].sort(byNewest),
+    removed,
+    max: MAX_QUEUE_ITEMS,
+    ...extra,
+  });
 
 async function readBody(request) {
   try {
@@ -332,28 +378,30 @@ async function addUrls(ctx, body, auth) {
   }
   const urls = [...new Set(raw.map(normalizeQueueUrl).filter(Boolean))];
   if (!urls.length) return json(400, { ok: false, error: 'urls required: no http(s) URL given' });
-  const existing = await readEntries(ctx.store);
-  const have = new Set(existing.map((entry) => entry.url));
+  let count = (await readEntries(ctx.store)).length;
   const stamp = ctx.now().toISOString();
   const actor = actorName(auth.user);
+  const changed = [];
   const added = [];
   const skipped = [];
   let full = 0;
-  let count = existing.length;
   for (const url of urls) {
-    if (have.has(url)) {
-      skipped.push(url);
-    } else if (count >= MAX_QUEUE_ITEMS) {
+    if (count >= MAX_QUEUE_ITEMS) {
       full += 1;
-    } else {
-      const entry = newEntry({ url, id: ctx.uuid(), stamp, actor });
-      await ctx.store.createDoc(CONTAINER, entry);
-      have.add(url);
-      added.push(entry.id);
-      count += 1;
+      continue;
     }
+    // The id is the URL's hash: an existing entry answers 409 here, which is
+    // the dedupe — no read-then-create window for two adds to slip through.
+    const written = await createUnlessPresent(ctx.store, newEntry({ url, stamp, actor }));
+    if (!written) {
+      skipped.push(url);
+      continue;
+    }
+    changed.push(written);
+    added.push(written.id);
+    count += 1;
   }
-  return answer(await readEntries(ctx.store), { added, skipped, full });
+  return answerDelta({ changed }, { added, skipped, full });
 }
 
 /**
@@ -366,10 +414,14 @@ async function removeEntries(ctx, ids) {
   for (const id of ids) {
     const entry = await readEntry(ctx.store, id);
     if (!entry || entry.status === 'forging') continue;
-    await ctx.store.deleteDoc(CONTAINER, id, ADMIN_CONFIG_PARTITION);
+    try {
+      await ctx.store.deleteDoc(CONTAINER, id, ADMIN_CONFIG_PARTITION);
+    } catch (error) {
+      if (error?.code !== 404) throw error; // already gone: the same outcome
+    }
     removed.push(id);
   }
-  return answer(await readEntries(ctx.store), { removed });
+  return answerDelta({ removed });
 }
 
 /** POST cms/forge/queue/update — { ids[], fields } */
@@ -381,13 +433,16 @@ async function updateEntries(ctx, body) {
   if (change.error) return change.error;
   const stamp = ctx.now().toISOString();
   const applied = [];
+  const changed = [];
   for (const id of picked.ids) {
     const after = await updateEntry(ctx.store, id, (entry) =>
       entry.status === 'forging' ? null : applyFields(entry, change, stamp)
     );
-    if (after && after.status !== 'forging') applied.push(id);
+    if (!after || after.status === 'forging') continue;
+    applied.push(id);
+    changed.push(after);
   }
-  return answer(await readEntries(ctx.store), { applied });
+  return answerDelta({ changed }, { applied });
 }
 
 /** The job document one entry starts; the entry's brief rides on the payload. */
@@ -409,35 +464,44 @@ const jobFor = (item, { jobId, user, stamp }) =>
 const canForge = (item) => item.status !== 'forging' && item.status !== 'forged';
 
 /**
- * One entry into the forge: its job document first, then the entry marked
- * forging under its ETag (only if still forgeable), then its message.
- * Resolves to `{ started }` or `{ failed }` with the sentence.
+ * One entry into the forge. The entry is CLAIMED first — marked forging
+ * with the job's id under its own ETag, only if still forgeable — so two
+ * Saves racing on one entry start one job: the loser reads it forging and
+ * skips. Then the job document is written and its message emitted. A job
+ * write that fails reverts the claim to queued (best effort; should that
+ * fail too, the list's reconcile reads "no job document" as failed).
+ * Resolves to `{ started, entry }`, `{ failed, entry }` or `{ skipped }`.
  */
 async function forgeOne(ctx, id, { user, stamp, context, io }) {
-  const entry = await readEntry(ctx.store, id);
-  if (!entry || !canForge(entry)) return { skipped: true };
-  const jobDoc = jobFor(entry, { jobId: ctx.uuid(), user, stamp });
+  // The job id is drawn inside the claim, so an entry that is skipped
+  // consumes none, and a retried claim carries the id it finally wrote.
+  let jobId = null;
+  const entry = await updateEntry(ctx.store, id, (current) => {
+    if (!canForge(current)) return null;
+    jobId = ctx.uuid();
+    return { status: 'forging', jobId, error: null, updatedAt: stamp };
+  });
+  if (!entry || !jobId) return { skipped: true };
+  const jobDoc = jobFor(entry, { jobId, user, stamp });
   try {
     await ctx.store.upsertDoc(JOBS_CONTAINER, jobDoc);
   } catch (error) {
     context?.error?.(`[forge/queue] job write failed: ${error?.message || error}`);
-    return { failed: String(error?.message || error).slice(0, 300) };
+    const reverted = await updateEntry(ctx.store, id, (current) =>
+      current.jobId === jobId ? { status: 'queued', jobId: null, updatedAt: stamp } : null
+    ).catch(() => null);
+    return { failed: String(error?.message || error).slice(0, 300), entry: reverted || entry };
   }
-  await updateEntry(ctx.store, id, (current) =>
-    canForge(current) ? { status: 'forging', jobId: jobDoc.id, error: null, updatedAt: stamp } : null
-  );
   io.enqueue({ jobId: jobDoc.id, type: jobDoc.type });
-  return { started: { id, jobId: jobDoc.id } };
+  return { started: { id, jobId }, entry };
 }
 
 /**
  * POST cms/forge/queue/forge — { ids[] }; `io.enqueue` is the queue output
  * binding (the route collects what it emits and sets the binding once).
  *
- * A job write that fails leaves that entry and the later ones queued and
- * names them in `notStarted`, so Save again picks them up; a job whose
- * entry failed to be marked still runs, and its onComplete records the
- * outcome on the entry whatever its status then is.
+ * A job write that fails leaves that entry (reverted) and the later ones
+ * queued and names them in `notStarted`, so Save again picks them up.
  */
 async function forgeEntries(ctx, body, auth, context, io) {
   if (typeof io?.enqueue !== 'function') {
@@ -449,27 +513,26 @@ async function forgeEntries(ctx, body, auth, context, io) {
   const stamp = ctx.now().toISOString();
   const started = [];
   const notStarted = [];
+  const changed = [];
   for (const id of picked.ids) {
     if (notStarted.length) {
       notStarted.push({ id, error: 'not attempted after an earlier job write failed' });
       continue;
     }
     const one = await forgeOne(ctx, id, { user: auth.user, stamp, context, io });
+    if (one.entry) changed.push(one.entry);
     if (one.started) started.push(one.started);
     else if (one.failed) notStarted.push({ id, error: one.failed });
   }
-  return answer(await readEntries(ctx.store), {
-    started,
-    ...(notStarted.length ? { notStarted } : {}),
-  });
+  return answerDelta({ changed }, { started, ...(notStarted.length ? { notStarted } : {}) });
 }
 
 /**
  * The four routes (editor), each one call:
- *   GET  cms/forge/queue          → the entries (legacy document migrated first, forging entries reconciled)
- *   POST cms/forge/queue          { urls[] }         add, deduplicated against the queue
- *   POST cms/forge/queue/update   { ids[], fields }  apply fields to each; { ids[], remove: true } removes
- *   POST cms/forge/queue/forge    { ids[] }          start a forge-from-url job per entry, brief on the job
+ *   GET  cms/forge/queue          → every entry (legacy document migrated first, forging entries reconciled)
+ *   POST cms/forge/queue          { urls[] }         add; answers the entries created
+ *   POST cms/forge/queue/update   { ids[], fields }  apply fields; { ids[], remove: true } removes; answers the delta
+ *   POST cms/forge/queue/forge    { ids[] }          one forge-from-url job per entry; answers the delta
  */
 export function createForgeQueueHandlers({
   guard,
@@ -491,7 +554,7 @@ export function createForgeQueueHandlers({
   return {
     list: guarded(async () => {
       await migrateLegacyQueue(ctx);
-      return answer(await reconcileForging(ctx, await readEntries(store)));
+      return answerList(await reconcileForging(ctx, await readEntries(store)));
     }),
     add: guarded(async (request, auth) => addUrls(ctx, await readBody(request), auth)),
     update: guarded(async (request) => updateEntries(ctx, await readBody(request))),
