@@ -3551,8 +3551,6 @@ This project has not cut a tagged release; entries are grouped under
   drill"); success is one dated row in its Drills table with measured RPO
   and RTO.
 
-### Fixed
-
 - **Security: the deploy identity trusts the production environment only;
   its ref-form federated credentials and its unused Cosmos data-plane grants
   are gone (estate review 2026-10-06, finding SEC-2; owner decision that
