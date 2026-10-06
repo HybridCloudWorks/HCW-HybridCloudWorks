@@ -222,6 +222,8 @@
       - set
       - extensions.allowlist
       - "{{ arc_extensions_allowlist }}"
+  # Runs only when the stored value differs, so a run is a change.
+  changed_when: true
   when:
     - not ansible_check_mode
     - (arc_lockdown_current['extensions.allowlist'] | default('')) != arc_extensions_allowlist
@@ -234,6 +236,7 @@
       - set
       - incomingconnections.enabled
       - "false"
+  changed_when: true
   when:
     - not ansible_check_mode
     - (arc_lockdown_current['incomingconnections.enabled'] | default('true') | string | lower) != 'false'
