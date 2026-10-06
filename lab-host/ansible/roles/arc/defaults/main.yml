@@ -37,3 +37,8 @@ arc_service_principal_id: "{{ vault_arc_service_principal_id | default('') }}"
 arc_service_principal_secret: "{{ vault_arc_service_principal_secret | default('') }}"
 arc_tenant_id: "{{ vault_arc_tenant_id | default('') }}"
 arc_subscription_id: "{{ vault_arc_subscription_id | default('') }}"
+
+# The extensions the Arc agent may install, as azcmagent's allowlist value
+# (publisher/type, comma-separated). The Azure Monitor Agent is the one this
+# estate uses (LAB-6, 2026-10-06).
+arc_extensions_allowlist: "Microsoft.Azure.Monitor/AzureMonitorLinuxAgent"

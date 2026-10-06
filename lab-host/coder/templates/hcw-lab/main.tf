@@ -41,9 +41,14 @@ terraform {
   }
 }
 
-# The provisioner runs inside the Coder server container, which has
-# /var/run/docker.sock mounted; the provider's default host is that socket.
-provider "docker" {}
+# The daemon, through the allowlisting socket proxy on the Compose network
+# (lab-host/coder/docker-compose.yml, `coder-docker-proxy`; LAB-5,
+# 2026-10-06). Before that the coder container held the socket and the
+# provider's default host was that socket. Named here as well as in the
+# container's DOCKER_HOST, so the template reads true on its own.
+provider "docker" {
+  host = "tcp://coder-docker-proxy:2375"
+}
 
 locals {
   # ghcr.io/hybridcloudworks/hcw-lab, the `full` target of lab-image/Dockerfile,

@@ -4,6 +4,7 @@
 # Pulled by digest, never by tag (the tags in group_vars are for humans).
 coder_image_ref: "{{ coder_image }}@{{ coder_image_digest }}"
 coder_postgres_image_ref: "{{ coder_postgres_image }}@{{ coder_postgres_image_digest }}"
+coder_docker_proxy_image_ref: "{{ coder_docker_proxy_image }}@{{ coder_docker_proxy_image_digest }}"
 # The Compose file in this repository is the one source; the role copies it
 # rather than carrying a second copy under files/.
 coder_compose_source: "{{ role_path }}/../../../coder/docker-compose.yml"

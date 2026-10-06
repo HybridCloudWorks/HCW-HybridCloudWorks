@@ -10,6 +10,7 @@
 #
 # Success prints the resolved configuration's service names, one per line:
 #   coder
+#   coder-docker-proxy
 #   coder-postgres
 # and exits 0. Any parse or interpolation error exits non-zero with Compose's
 # own message.
@@ -22,10 +23,10 @@ trap 'rm -rf "$work"' EXIT
 cp "$here/docker-compose.yml" "$work/docker-compose.yml"
 : > "$work/coder.env"
 : > "$work/coder-postgres.env"
-printf 'CODER_IMAGE=%s\nCODER_POSTGRES_IMAGE=%s\nDOCKER_GID=%s\n' \
+printf 'CODER_IMAGE=%s\nCODER_POSTGRES_IMAGE=%s\nCODER_DOCKER_PROXY_IMAGE=%s\n' \
   'ghcr.io/coder/coder@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
   'postgres@sha256:0000000000000000000000000000000000000000000000000000000000000000' \
-  '999' > "$work/.env"
+  'tecnativa/docker-socket-proxy@sha256:0000000000000000000000000000000000000000000000000000000000000000' > "$work/.env"
 
 docker compose --project-directory "$work" -f "$work/docker-compose.yml" config --quiet
 docker compose --project-directory "$work" -f "$work/docker-compose.yml" config --services

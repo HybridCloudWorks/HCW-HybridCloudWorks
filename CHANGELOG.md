@@ -3527,6 +3527,40 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Lab host: the Coder server no longer holds the Docker socket, the
+  agent's install and unit are tightened, the Arc agent is locked down, and
+  ADR 0032's false detection claim is corrected (estate review 2026-10-06,
+  findings LAB-5, LAB-6 and LAB-1's record; owner decision that day).**
+  The Coder server container mounted the daemon's socket and joined the
+  docker group, so a vulnerability in Coder — reachable through Caddy by
+  every member of the GitHub organisation — was root on the host, holding
+  every other lab credential with it. A `coder-docker-proxy` Compose
+  service (tecnativa/docker-socket-proxy 0.3.0, pinned by index digest)
+  now mounts the socket read-only and answers only the API sections the
+  provisioner's Docker provider uses: containers, images, networks,
+  volumes, the lifecycle verbs and the read-only daemon endpoints; exec,
+  build, commit, swarm, system, plugins and daemon auth are refused. The
+  server reaches it over `DOCKER_HOST` and the template's provider names
+  the same address; the server has no socket and no docker group, the role
+  no longer reads the group id, and `template.test.mjs` asserts all of it
+  (three services, the read-only mount on the proxy alone, the allowlist,
+  no port). The labs agent's `npm ci` runs `--ignore-scripts` (no
+  dependency needs an install hook) and its unit gains address-family and
+  system-call filters plus kernel, cgroup, setuid and realtime protections
+  (MemoryDenyWriteExecute deliberately not: V8 needs it). The `arc` role
+  sets `extensions.allowlist` to the Azure Monitor Agent and turns Arc
+  incoming connections off, read-first so the play reports changed
+  truthfully: any Contributor on the resource group could otherwise run a
+  command as root through the control plane. ADR 0032's socket bullet
+  carries the amendment, its validation list names the proxy, and its
+  Cloudflare bullet no longer claims the plan check and drift monitor would
+  show a production DNS edit — neither reads Cloudflare; the only record is
+  Cloudflare's audit log, and the interim steps are the token's client-IP
+  filter and expiry and an audit-log notification. **Owner steps:** re-run
+  `bootstrap.sh`; `docker ps` then shows `coder-docker-proxy` and the coder
+  template's workspaces still start (the proxy is the only path the
+  provisioner has); `sudo azcmagent config list` shows the allowlist and
+  incoming connections off. Rollback is a revert and a re-run.
 - **The lab host's pins and the lab images are checked against upstream
   every week, and a pin that falls behind or an image with a fixable HIGH
   or CRITICAL vulnerability opens an issue (estate review 2026-10-06,

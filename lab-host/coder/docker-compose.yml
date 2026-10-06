@@ -58,12 +58,13 @@ services:
     depends_on:
       coder-postgres:
         condition: service_healthy
-    # The image runs as the non-root `coder` user. group_add puts that user in
-    # the host's docker group so it can drive the daemon through the socket
-    # below; the GID differs per host, so the role reads it with getent and
-    # writes it to .env.
-    group_add:
-      - "${DOCKER_GID:?set by the coder role in .env from getent group docker}"
+      coder-docker-proxy:
+        condition: service_started
+    # The image runs as the non-root `coder` user, and since 2026-10-06 it
+    # holds no socket and no docker group (estate review, LAB-5): the
+    # provisioner's Docker provider reaches the daemon through
+    # coder-docker-proxy below, over DOCKER_HOST, and gets only the API
+    # sections that service allows.
     # Coder listens on every interface INSIDE the container (a 127.0.0.1 bind
     # inside the container is unreachable from the host's port publish), and
     # Docker publishes it on the host's loopback only. Caddy on the host
@@ -126,15 +127,12 @@ services:
       # fixed below so this value cannot drift from it.
       CODER_PROXY_TRUSTED_HEADERS: "X-Forwarded-For"
       CODER_PROXY_TRUSTED_ORIGINS: "172.28.240.0/24"
+      # The daemon, through the allowlisting proxy on the Compose network
+      # (LAB-5). The template's Docker provider names the same address.
+      DOCKER_HOST: "tcp://coder-docker-proxy:2375"
     env_file:
       - path: ./coder.env
         required: true
-    volumes:
-      # One of two socket mounts on the host. The other is Portainer's, for
-      # the owner only, published on the loopback (ADR 0032, amendment of
-      # 2026-09-26); vps-agent reaches the daemon through its docker group
-      # membership instead. Workspaces never receive it (templates/hcw-lab).
-      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - coder
     deploy:
@@ -142,6 +140,68 @@ services:
         limits:
           cpus: "1.0"
           memory: 1G
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  # The Docker socket, behind an allowlist (estate review 2026-10-06, LAB-5).
+  # Until then the coder server held the socket itself, so a vulnerability
+  # in Coder — reachable through Caddy by every member of the GitHub
+  # organisation — was root on the host. This is HAProxy with one rule per
+  # Docker API section: the provisioner's Docker provider gets containers,
+  # images, networks, volumes, the lifecycle verbs it uses and the read-only
+  # daemon endpoints, and nothing else answers — no exec, no build, no
+  # commit, no swarm, no system prune, no daemon auth. The socket is mounted
+  # read-only (the proxy only connects to it). Compose network only, no
+  # published port, so only `coder` can reach it. Pinned by digest in
+  # ansible/group_vars/all.yml (coder_docker_proxy_image_digest). One of two
+  # socket holders on the host; the other is Portainer, for the owner only,
+  # on the loopback (ADR 0032, amendment of 2026-09-26). vps-agent reaches
+  # the daemon through its docker group membership. Workspaces never receive
+  # the socket (templates/hcw-lab).
+  coder-docker-proxy:
+    image: ${CODER_DOCKER_PROXY_IMAGE:?set by the coder role in .env from coder_docker_proxy_image and coder_docker_proxy_image_digest}
+    container_name: coder-docker-proxy
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: warning
+      CONTAINERS: "1"
+      IMAGES: "1"
+      NETWORKS: "1"
+      VOLUMES: "1"
+      POST: "1"
+      ALLOW_START: "1"
+      ALLOW_STOP: "1"
+      ALLOW_RESTARTS: "1"
+      INFO: "1"
+      VERSION: "1"
+      PING: "1"
+      EVENTS: "1"
+      EXEC: "0"
+      BUILD: "0"
+      COMMIT: "0"
+      AUTH: "0"
+      SECRETS: "0"
+      SWARM: "0"
+      SERVICES: "0"
+      NODES: "0"
+      TASKS: "0"
+      SYSTEM: "0"
+      PLUGINS: "0"
+      SESSION: "0"
+      DISTRIBUTION: "0"
+      CONFIGS: "0"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - coder
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: 64M
     logging:
       driver: json-file
       options:
