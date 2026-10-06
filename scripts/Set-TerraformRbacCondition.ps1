@@ -115,12 +115,23 @@ $DeniedOnDelete = @(
 
 function Invoke-AzJson {
   param([string[]] $Arguments)
-  $raw = & az @Arguments 2>&1
+  # stdout and stderr apart. With 2>&1 alone, az's WARNING lines (it prints
+  # one on `role assignment create --condition`) land in the text handed to
+  # ConvertFrom-Json and the parse fails AFTER the command has already run —
+  # which on the owner's first real run left the script stopped between a
+  # delete and a create. Native stderr arrives as ErrorRecord objects; the
+  # rest is stdout.
+  $result = & az @Arguments 2>&1
+  $stderr = @($result | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() })
+  $stdout = @($result | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { $_.ToString() })
   if ($LASTEXITCODE -ne 0) {
-    throw "az $($Arguments -join ' ') failed: $raw"
+    throw "az $($Arguments -join ' ') failed: $($stderr -join ' ') $($stdout -join ' ')"
   }
-  if (-not $raw) { return $null }
-  return ($raw | ConvertFrom-Json)
+  $warnings = @($stderr | Where-Object { $_ -match '^WARNING' })
+  foreach ($w in $warnings) { Write-Host "  (az) $w" }
+  $text = ($stdout -join "`n").Trim()
+  if (-not $text) { return $null }
+  return ($text | ConvertFrom-Json)
 }
 
 function Get-RoleDefinitionId {
@@ -193,8 +204,38 @@ function Get-RbacAdminAssignments {
 }
 
 $assignments = Get-RbacAdminAssignments -Principal $PrincipalId
-if ($assignments.Count -eq 0) {
-  throw "The identity holds no '$RoleName' assignment. Run scripts/bootstrap-terraform-oidc.ps1 first."
+
+# Recovery path: the bootstrap grants Contributor and RBAC Administrator at
+# the same subscription scopes, so a Contributor scope with no RBAC
+# Administrator beside it is a half-finished run (a delete that was not
+# followed by its create). Re-create there, with the condition, rather than
+# stopping on "run bootstrap first".
+$contributorScopes = @(
+  Invoke-AzJson @('role', 'assignment', 'list', '--assignee', $PrincipalId, '--all', '-o', 'json') |
+    Where-Object { $_.roleDefinitionName -eq 'Contributor' -and $_.scope -match '^/subscriptions/[^/]+$' } |
+    ForEach-Object { $_.scope }
+)
+$heldScopes = @($assignments | ForEach-Object { $_.scope })
+foreach ($scope in $contributorScopes) {
+  if ($heldScopes -contains $scope) { continue }
+  if (-not $PSCmdlet.ShouldProcess("$RoleName on $scope (missing beside Contributor)", 'create with the condition')) {
+    Write-Host "Would create $scope (missing beside Contributor)"
+    continue
+  }
+  Invoke-AzJson @(
+    'role', 'assignment', 'create',
+    '--assignee-object-id', $PrincipalId,
+    '--assignee-principal-type', 'ServicePrincipal',
+    '--role', $RoleName,
+    '--scope', $scope,
+    '--condition-version', '2.0',
+    '--condition', $condition,
+    '-o', 'json'
+  ) | Out-Null
+  Write-Host "created     $scope (was missing beside Contributor)"
+}
+if ($assignments.Count -eq 0 -and $contributorScopes.Count -eq 0) {
+  throw "The identity holds no '$RoleName' and no subscription-scope Contributor assignment. Run scripts/bootstrap-terraform-oidc.ps1 first."
 }
 
 foreach ($a in $assignments) {
