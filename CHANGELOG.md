@@ -19,6 +19,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Forge Studio: From a URL takes many URLs and .html files, and a Forge
+  Studio Queue completes them singly or in bulk (owner request 2026-10-06).**
+  The Source URL box accepts one URL or many (one per line, or a block of
+  text with links in it) and an Import .html button reads one or more saved
+  pages for the URLs they link to; every URL found becomes a row with its
+  own Remove, "Add all to the queue" (green) sends the rows to the queue and
+  "Remove all" (red) clears them first. A single URL continues to the Brief
+  as before. The queue is one `admin_config/forge_queue` document behind
+  `GET|POST cms/forge/queue`, `POST cms/forge/queue/update` and `POST
+  cms/forge/queue/forge` (editor; ETag writes, retried, because the job's
+  onComplete writes it too). On the new Queue tab the owner selects one
+  entry to complete its "From a URL" fields, or several to set the shared
+  fields once (a field shows a value when every selected entry agrees;
+  blank leaves each as it is); Save applies the values and starts one
+  `forge-from-url` job per entry with the brief on the payload, so the brief
+  lands on the document the job creates whether or not a browser waits, and
+  the entry shows forged (with an Open link) or failed when the job reports
+  back. "Save for later" applies the fields and stops. The Start grid gains
+  a Queue card with the count.
+
 - **Blog run: the October 2026 certification calendar for Azure, AWS and
   Google Cloud (owner request 2026-10-05).** Three drafts in `docs/content`
   for Admin → Drafts "Import from docs/content", each built only from vendor

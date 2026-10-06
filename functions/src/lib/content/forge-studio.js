@@ -29,6 +29,7 @@
  *   brief.js        the creative brief
  *   assist.js       the AI actions and the one router call per action
  *   workspace.js    the three workspace routes and their factory
+ *   queue.js        the Forge Studio Queue: many URLs, their fields, their jobs
  *   calibration.js  the voice-calibration job
  */
 export {
@@ -59,9 +60,26 @@ export {
   MAX_SAVE_BODY_CHARS,
   activityEntry,
   appendActivity,
+  applyBrief,
   workspaceWriteRefusal,
   createForgeWorkspaceHandlers,
 } from './forge-studio/workspace.js';
+export {
+  QUEUE_DOC_ID,
+  MAX_QUEUE_ITEMS,
+  MAX_URLS_PER_ADD,
+  QUEUE_BRIEF_FIELDS,
+  QUEUE_STATUSES,
+  normalizeQueueUrl,
+  readQueue,
+  updateQueue,
+  entryBrief,
+  newEntry,
+  applyFields,
+  outcomeFor,
+  recordQueueOutcome,
+  createForgeQueueHandlers,
+} from './forge-studio/queue.js';
 export {
   CALIBRATION_WRITE_ATTEMPTS,
   writeSuggestions,

@@ -28,7 +28,13 @@ import {
   inferProviderFromUrl,
   buildUrlSourceDoc,
 } from '../lib/content/draft-from-url.js';
-import { runVoiceCalibration } from '../lib/content/forge-studio.js';
+import {
+  applyBrief,
+  normalizeBrief,
+  recordQueueOutcome,
+  runVoiceCalibration,
+} from '../lib/content/forge-studio.js';
+import { actorName } from '../lib/auth/actor-name.js';
 import { createJobFailureOnComplete } from '../lib/job-failure-notify.js';
 import { registerJobType } from '../lib/jobs.js';
 
@@ -134,7 +140,13 @@ registerJobType('forge-article', {
  * document → the same pipeline `forge-article` runs. Split from the worker
  * for tests; the registered worker below wires the real dependencies.
  *
- * @param {{ url: string, provider?: string }} payload
+ * `brief` (with `kind`, `ideaOrigin`) is optional: the Forge Studio Queue
+ * sends the entry's brief on the job so it lands on the document the job
+ * creates (through the same applyBrief the Brief tab's route uses) before the
+ * pipeline runs — a single-URL start still saves its brief from the page
+ * afterwards, as before. A payload without a brief applies none.
+ *
+ * @param {{ url: string, provider?: string, brief?: object, kind?: string, ideaOrigin?: string, queueItemId?: string }} payload
  * @param {object} deps — { scrape, forge, store, now, uuid, log, actor }
  */
 export async function runForgeFromUrl(
@@ -149,6 +161,20 @@ export async function runForgeFromUrl(
   const doc = buildUrlSourceDoc({ source, provider, now, uuid });
   await docStore.upsertDoc('content', doc);
   log.log?.(`[forge-from-url] ${source.url} → content/${doc.id} (${source.wordCount} words)`);
+
+  // A brief on the job always has substance once the scraped URL is on it
+  // (sourceUrl counts), so it is applied whenever one was sent.
+  if (payload?.brief && typeof payload.brief === 'object') {
+    await applyBrief(docStore, {
+      doc,
+      brief: normalizeBrief({ ...payload.brief, mode: 'url', sourceUrl: source.url }),
+      kind: payload.kind || '',
+      ideaOrigin: payload.ideaOrigin || 'imported-source',
+      stamp: now().toISOString(),
+      actor: actorName(actor, 'forge'),
+    });
+    log.log?.(`[forge-from-url] ${doc.id} brief applied from the job`);
+  }
 
   const outcome = await forge.runForgePipeline({ contentId: doc.id, actor });
   log.log?.(`[forge-from-url] ${doc.id} → ${outcome.ok ? outcome.result.status : outcome.error}`);
@@ -167,12 +193,31 @@ export async function runForgeFromUrl(
       };
 }
 
+/**
+ * After a forge-from-url job: the failure ping as before, and — when the
+ * Forge Studio Queue started it (`payload.queueItemId`) — the outcome on the
+ * queue entry, so the Queue tab shows forged/failed without a browser having
+ * waited on the job.
+ */
+export async function forgeFromUrlComplete(info, hookCtx) {
+  await notifyOnFailure(info, hookCtx);
+  const queueItemId = info?.job?.payload?.queueItemId;
+  if (!queueItemId) return;
+  await recordQueueOutcome(
+    store,
+    { queueItemId, status: info.status, result: info.result, error: info.error },
+    { now: hookCtx?.now || (() => new Date()) }
+  );
+}
+
 registerJobType('forge-from-url', {
   // Scrape + forge; the result is staged, not live.
   role: 'editor',
   description:
-    'Blog Machine: scrape a URL into a source content document, then run the forge pipeline on it — staged forge_ready above the publish threshold, otherwise editing.',
-  maxPayloadBytes: 4096,
+    'Blog Machine: scrape a URL into a source content document, then run the forge pipeline on it — staged forge_ready above the publish threshold, otherwise editing. A brief on the payload (the Forge Studio Queue sends one) is saved onto the document first.',
+  // A URL plus a full brief (2,000-character objective, audience and key
+  // message, the lists): 4 KiB held only the URL.
+  maxPayloadBytes: 16384,
   // One scrape plus the same generation + grading budget forge-article gets.
   timeoutMs: 28 * 60 * 1000,
   worker: async (payload, { context, job }) =>
@@ -191,7 +236,7 @@ registerJobType('forge-from-url', {
       log: context,
       actor: job?.requestedBy || {},
     }),
-  onComplete: notifyOnFailure,
+  onComplete: forgeFromUrlComplete,
 });
 
 registerJobType('voice-calibration', {
