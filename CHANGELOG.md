@@ -3527,6 +3527,35 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Security: a shared integration key may only be sent to its vendor's
+  host, moving where a credential is sent needs `super_admin`, and every AI
+  provider or MCP server write is audited (estate review 2026-10-06,
+  finding AP-B1).** The key-name allowlist from ADR 0033 stopped an editor
+  naming the Cosmos connection string, but it still let the three keys the
+  seeded servers use be routed anywhere: a server saved at a host the
+  editor controls with `apiKeyEnvVar: "VPS_API_TOKEN"` received the lab-host
+  token as a bearer on the next Sync, in two requests. `ai/mcp-policy.js`
+  now carries `INTEGRATION_KEY_HOSTS` (Firecrawl, Replicate, and loopback
+  for the seeded Hostinger entry) and `validateMcpKeyBinding`, which the
+  config-collection writes check against the stored half of the pair (a URL
+  move on a server holding a shared key, or a shared key placed on a server
+  at the wrong host, is refused either way), `syncMcpTools` and `mcpProxy`
+  check before any call, and `resolveMcpAuthHeaders` refuses the bearer at
+  an unbound host or with no URL, so a document that slipped past save-time
+  still sends nothing. A write that moves credential routing — a new MCP
+  server, a URL change, a key-name change — needs `super_admin`, the role
+  that seeds the keys; flipping `enabled`, renaming, reordering or storing
+  an OAuth token stays at `editor`. Every `ai_providers` and `mcp_servers`
+  PUT, PATCH and DELETE now writes an `ai_config_updated` row to
+  `admin_audit_logs` with the actor, the field names, and the URL and
+  key NAME before and after (never a token value); the row is best effort,
+  so a failed audit never reports a landed save as refused. `MCP_*`
+  settings bind to no host: they are per-server secrets the owner creates
+  for one server. Tests: the binding for every shared key and the MCP_*
+  pass-through, no bearer at an unbound host, Sync and proxy refusing a
+  rogue server without calling it, PUT and PATCH refusals in both
+  directions, the `super_admin` gate on moves versus the editor toggle, and
+  the audit row's shape with no secret in it.
 - **Security: the article scraper and the supporting-document fetch now go
   through one SSRF guard (estate review 2026-10-06, finding AP-B2).**
   `generateArticleDraft` and the `forge-from-url` job fetched whatever URL the

@@ -7,11 +7,13 @@
  */
 import { parseMcpResponseBody } from '../cloud-tools/mcp-parse.js';
 import {
+  INTEGRATION_KEY_HOSTS,
   KNOWN_INTEGRATION_KEY_NAMES,
   MCP_KEY_ENV_PATTERN,
   readMcpSecret,
   resolveMcpAuthHeaders,
   validateMcpApiKeyEnvVar,
+  validateMcpKeyBinding,
   validateMcpUrl,
 } from './mcp-policy.js';
 
@@ -42,11 +44,13 @@ class McpUpstreamError extends Error {
  * from here.
  */
 export {
+  INTEGRATION_KEY_HOSTS,
   KNOWN_INTEGRATION_KEY_NAMES,
   MCP_KEY_ENV_PATTERN,
   readMcpSecret,
   resolveMcpAuthHeaders,
   validateMcpApiKeyEnvVar,
+  validateMcpKeyBinding,
   validateMcpUrl,
 };
 
@@ -446,7 +450,7 @@ async function loadMcpServer(store, serverId, onReadError) {
 function validatedMcpUrl(server) {
   try {
     const url = validateMcpUrl(server.url);
-    validateMcpApiKeyEnvVar(server.apiKeyEnvVar);
+    validateMcpKeyBinding({ url, apiKeyEnvVar: server.apiKeyEnvVar });
     return { url };
   } catch (error) {
     return { error: error.message };
@@ -488,6 +492,7 @@ function rpcOnServer({ serverId, server, url, rpcBody, env, options }) {
     authHeaders: resolveMcpAuthHeaders({
       oauthToken: server.oauthToken,
       apiKeyEnvVar: server.apiKeyEnvVar,
+      url,
       env,
     }),
     rpcBody,
