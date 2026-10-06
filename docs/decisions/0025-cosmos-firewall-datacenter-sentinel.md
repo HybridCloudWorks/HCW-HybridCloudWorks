@@ -194,6 +194,15 @@ And `heal-computed-properties --inspect`, a dispatch-only diagnostic, now needs
 an operator window through `cosmos_admin_ip_rules` like every other live-data
 inspection.
 
+**Amendment 2026-10-06 (estate review, finding SEC-2).** "CI holds no
+Cosmos data-plane role" was written while the deploy identity still carried
+two container-scoped Data Contributor grants on `content` and `blogs`, left
+from the `--inspect` path after its workflow was deleted. They had no
+consumer. Both were removed from `infra/oidc.tf` that day, together with the
+identity's two `ref:refs/heads/main` federated credentials, so the sentence
+is now true of every CI identity and `scripts/oidc-subjects.test.mjs` pins
+the deploy identity to environment-form subjects.
+
 **What is still true from the original analysis.** Everything in *Purpose and
 decision drivers* about the Cosmos firewall itself stands: there is still no
 narrower control-plane action than `databaseAccounts/*/write`, a per-run Cosmos

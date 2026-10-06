@@ -3527,6 +3527,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Security: the deploy identity trusts the production environment only;
+  its ref-form federated credentials and its unused Cosmos data-plane grants
+  are gone (estate review 2026-10-06, finding SEC-2; owner decision that
+  day).** `id-site-github-deploy-prod-cus-01` carried four federated
+  credentials: the production-environment pair every deploy actually
+  presents, and a `ref:refs/heads/main` pair that no workflow has presented
+  since the healer went in #816 and the manifest moved to the reader
+  identity in T-728. The ref pair was the way around the production gate:
+  any job on `main` holding `id-token: write` (ten workflows do, for Qlty,
+  Pages and the manifest) could have signed in as the deploy identity with no
+  reviewer and deployed code that runs as the Function App's own identity.
+  `infra/oidc.tf` deletes `github_branch` and `github_branch_immutable`, and
+  with them the two container-scoped Cosmos Data Contributor assignments on
+  `content` and `blogs` that outlived their `--inspect` reader and
+  contradicted ADR 0025's "CI holds no Cosmos data-plane role" (the ADR
+  carries the amendment). `scripts/oidc-subjects.test.mjs` now asserts the
+  deploy identity trusts environment-form subjects only, so the pair cannot
+  come back unnoticed; `scripts/assert-expected-plan.mjs` declares the four
+  destroys for the plan check. The reader identity keeps its ref pair: its
+  workflows name no environment and it holds read roles. **Owner step:**
+  confirm the `hcw-azure` run — expected `0 to add, 0 to change, 4 to
+  destroy` — and afterwards the federated-credential list shows the two
+  production-environment subjects and nothing else.
 - **Security: a shared integration key may only be sent to its vendor's
   host, moving where a credential is sent needs `super_admin`, and every AI
   provider or MCP server write is audited (estate review 2026-10-06,
