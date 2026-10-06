@@ -227,11 +227,20 @@ jobs:
   # hydration, console-error and smoke specs had real assertions and executed
   # only when someone remembered, and the admin spec could not fail (estate
   # review, finding QA-1). This job is NOT a required check: it is a signal
-  # for two weeks first, then the hydration and console-error specs become
-  # required in the ruleset. The build is the same `npm run build` the
-  # frontend row runs; `vite preview` serves it and the suites run against it
-  # on desktop Chrome and a Pixel 5. The contrast spec (66 axe runs) stays out
-  # of this job until its runtime is measured here.
+  # for two weeks first, then the hydration spec becomes required in the
+  # ruleset. The build is the same `npm run build` the frontend row runs;
+  # `vite preview` serves it and the suites run against it on desktop Chrome
+  # and a Pixel 5.
+  #
+  # Only the hydration and admin specs run here. The first run (PR #899)
+  # showed why: the console-error and smoke specs assert a clean console on
+  # the public pages, and a pull-request build has no API origin
+  # (VITE_AZURE_FUNCTIONS_URL is unset, and pointing it at the Function App
+  # from 127.0.0.1 fails CORS), so every public page logs "Public data fetch
+  # failed" and 32 of 70 cases failed on the environment, not the code. Those
+  # two specs need the deployed site, which is the post-deploy probe the
+  # review's PLAT-5 item describes for deploy-azure-frontend.yml. The
+  # contrast spec (66 axe runs) stays out until its runtime is measured.
   e2e:
     name: e2e (playwright, not required)
     runs-on: ubuntu-26.04
@@ -287,7 +296,7 @@ jobs:
         env:
           TEST_BASE_URL: http://127.0.0.1:4173
           CI: 'true'
-        run: npx playwright test --project=chromium --project=mobile-chrome hydration.spec.js console-errors.spec.js smoke.spec.js contentforge.spec.js
+        run: npx playwright test --project=chromium --project=mobile-chrome hydration.spec.js contentforge.spec.js
 
       - name: Upload the report on failure
         if: failure()

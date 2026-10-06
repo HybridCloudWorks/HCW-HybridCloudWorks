@@ -3604,9 +3604,14 @@ This project has not cut a tagged release; entries are grouped under
   short-circuited on `page.url().includes('admin')`, so a blank shell or a
   removed auth guard passed. `ci.yml` gains an `e2e` job, deliberately not
   a required check for two weeks: it installs Chromium, builds once, serves
-  the build with `vite preview`, and runs hydration, console-errors, smoke
-  and the rewritten admin spec on desktop Chrome and a Pixel 5 (a new
-  `mobile-chrome` project; CI retries drop from two to one). The admin spec
+  the build with `vite preview`, and runs the hydration spec and the
+  rewritten admin spec on desktop Chrome and a Pixel 5 (a new
+  `mobile-chrome` project; CI retries drop from two to one). Its first run
+  (#899) ran console-errors and smoke too and showed why they cannot run
+  here: a pull-request build has no API origin, so every public page logs
+  "Public data fetch failed" and 32 of 70 cases failed on the environment;
+  those two specs belong to the post-deploy probe of the deployed site
+  (PLAT-5), and the job was scoped the same day. The admin spec
   now pins what a visitor who has not signed in gets on four admin routes:
   the sign-in card, no navigation, no menu button, no data; that the card is
   keyboard reachable and the route titled; that a 375 px viewport never
