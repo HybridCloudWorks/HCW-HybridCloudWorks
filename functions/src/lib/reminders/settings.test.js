@@ -9,6 +9,8 @@ import {
   OVERDUE_REPEAT_DAYS,
   RemindersValidationError,
   daysUntil,
+  mergeStamps,
+  mergeStoredStamps,
   normalizeReminders,
   parseDateOnly,
   readStoredReminders,
@@ -143,6 +145,33 @@ describe('stageDue', () => {
   it('skips the ahead stage when leadDays is 0', () => {
     expect(stageDue(r({ dueDate: '2027-01-04', leadDays: 0 }), '2027-01-03')).toBeNull();
     expect(stageDue(r({ dueDate: '2027-01-04', leadDays: 0 }), '2027-01-04')).toBe('due');
+  });
+});
+
+describe('stamps from two writers', () => {
+  it('keeps the later instant per stage', () => {
+    expect(mergeStamps({ ahead: '2026-12-21T13:00:00.000Z' }, { ahead: '2026-12-28T13:00:00.000Z', due: '2027-01-04T13:00:00.000Z' })).toEqual({
+      ahead: '2026-12-28T13:00:00.000Z',
+      due: '2027-01-04T13:00:00.000Z',
+    });
+    expect(mergeStamps(undefined, {})).toEqual({});
+  });
+
+  it("folds the stored stamps into a save, by id, without resurrecting removed rows", () => {
+    const stored = {
+      reminders: [
+        { id: 'a', notified: { ahead: '2026-12-28T13:00:00.000Z' } },
+        { id: 'gone', notified: { due: '2026-01-01T13:00:00.000Z' } },
+      ],
+    };
+    const saved = normalizeReminders({
+      reminders: [reminder({ id: 'a', notified: {} }), reminder({ id: 'new' })],
+    });
+    const merged = mergeStoredStamps(saved, stored);
+    expect(merged.reminders.map((r) => r.id)).toEqual(['a', 'new']);
+    expect(merged.reminders[0].notified).toEqual({ ahead: '2026-12-28T13:00:00.000Z' });
+    expect(merged.reminders[1].notified).toEqual({});
+    expect(mergeStoredStamps(saved, null).reminders[0].notified).toEqual({});
   });
 });
 

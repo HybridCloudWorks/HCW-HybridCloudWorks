@@ -936,7 +936,7 @@ describe('agent health + temp storage', () => {
     await createAgentHealthCheck({ store, notifier, now }).run();
     expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
     const call = notifier.notifyTelegram.mock.calls[0][0];
-    expect(call).toMatchObject({ severity: 'error', source: AGENT_OFFLINE_SOURCE });
+    expect(call).toMatchObject({ severity: 'critical', source: AGENT_OFFLINE_SOURCE });
     expect(call.title).toMatch(/offline/i);
     expect(call.message).toContain('agent-1 (vps-hostinger-01)');
     expect(call.message).toContain('fails closed');

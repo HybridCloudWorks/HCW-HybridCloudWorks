@@ -83,7 +83,9 @@ export function createNotifier({
       };
       const last = Date.parse(state[source]?.lastNotifiedAt || '') || 0;
       if (now().getTime() - last < COOLDOWN_MS) {
-        log.log?.(`[notify] Cooldown active for source="${source}"; skipping Telegram send.`);
+        // The prefix only: a dynamic suffix is a content identifier
+        // (forge_ready:{contentId}, reminder:{id}), which telemetry never carries.
+        log.log?.(`[notify] Cooldown active for source="${String(source).split(':')[0]}"; skipping Telegram send.`);
         return { sent: false, reason: 'cooldown' };
       }
       const response = await fetchWithTimeout(

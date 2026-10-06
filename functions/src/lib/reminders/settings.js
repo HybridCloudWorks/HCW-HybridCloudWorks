@@ -19,6 +19,19 @@
  * from the sheet never makes a reminder fire twice.
  */
 
+import { STAGES, parseDateOnly } from './calendar.js';
+
+// The calendar (dates, stages) lives beside this file; re-exported so a
+// reader of the shape finds the whole of "reminders" from one import.
+export {
+  OVERDUE_REPEAT_DAYS,
+  STAGES,
+  dateOnly,
+  daysUntil,
+  parseDateOnly,
+  stageDue,
+} from './calendar.js';
+
 export const REMINDERS_CONFIG_ID = 'reminders';
 export const MAX_REMINDERS = 200;
 export const MAX_TITLE_LENGTH = 200;
@@ -26,15 +39,8 @@ export const MAX_NOTES_LENGTH = 2000;
 export const MAX_URL_LENGTH = 2048;
 export const MAX_LEAD_DAYS = 365;
 export const DEFAULT_LEAD_DAYS = 7;
-/** How often an overdue reminder is repeated until it is marked done. */
-export const OVERDUE_REPEAT_DAYS = 7;
-
-/** The three moments a reminder is said, in the order they happen. */
-export const STAGES = Object.freeze(['ahead', 'due', 'overdue']);
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Thrown by the normalizer; platform-settings.js turns it into a 400. */
 export class RemindersValidationError extends Error {
@@ -57,31 +63,6 @@ function assertOnlyKeys(object, allowed, where) {
   if (unknown.length > 0) {
     fail(`Unknown field(s) in ${where}: ${unknown.join(', ')}. Allowed: ${allowed.join(', ')}`);
   }
-}
-
-/** `YYYY-MM-DD` that names a real day (2026-02-30 is refused), else null. */
-export function parseDateOnly(value) {
-  if (typeof value !== 'string') return null;
-  const match = value.match(DATE_PATTERN);
-  if (!match) return null;
-  const [, y, m, d] = match.map(Number);
-  const utc = Date.UTC(y, m - 1, d);
-  const roundTrip = new Date(utc);
-  if (roundTrip.getUTCFullYear() !== y || roundTrip.getUTCMonth() !== m - 1 || roundTrip.getUTCDate() !== d) {
-    return null;
-  }
-  return utc;
-}
-
-/** The UTC calendar day of an instant, as `YYYY-MM-DD`. */
-export const dateOnly = (date) => new Date(date).toISOString().slice(0, 10);
-
-/** Whole days from `today` (YYYY-MM-DD) to `dueDate` (YYYY-MM-DD); negative when past. */
-export function daysUntil(dueDate, today) {
-  const due = parseDateOnly(dueDate);
-  const from = parseDateOnly(today);
-  if (due === null || from === null) return null;
-  return Math.round((due - from) / DAY_MS);
 }
 
 /** An https URL with nothing that could smuggle a second one, or empty. */
@@ -191,27 +172,31 @@ export function readStoredReminders(doc) {
   return normalizeReminders({ reminders: doc.reminders ?? [] });
 }
 
+/** Two `notified` maps as one: per stage, the later instant wins. */
+export function mergeStamps(a, b) {
+  const out = {};
+  for (const stage of STAGES) {
+    const [x, y] = [a?.[stage], b?.[stage]];
+    const later = [x, y].filter(Boolean).sort().at(-1);
+    if (later) out[stage] = later;
+  }
+  return out;
+}
+
 /**
- * Which stage, if any, `reminder` is due to be said at on `today`, given
- * what has been said already (`notified`). Null means stay quiet.
- *
- *   ahead    once, the first day within `leadDays` of the date
- *   due      once, on the day
- *   overdue  the day after, then every OVERDUE_REPEAT_DAYS until done
- *
- * A reminder marked done is never said. `leadDays` 0 skips the ahead stage.
+ * The sheet's save, with any stamp the timer wrote while the page was open
+ * kept: for each incoming row that the stored document also holds, `notified`
+ * is the merge of both. Rows the owner removed stay removed, rows they added
+ * carry only what they sent. Review of #910: without this, a save made after
+ * the 13:00 run erased that morning's stamp and the reminder was said again.
  */
-export function stageDue(reminder, today, nowMs = Date.parse(`${today}T00:00:00.000Z`)) {
-  if (reminder.done) return null;
-  const days = daysUntil(reminder.dueDate, today);
-  if (days === null) return null;
-  const notified = reminder.notified ?? {};
-  if (days > reminder.leadDays) return null;
-  if (days > 0) return notified.ahead ? null : 'ahead';
-  if (days === 0) return notified.due ? null : 'due';
-  if (!notified.overdue) return 'overdue';
-  const since = Date.parse(notified.overdue);
-  return Number.isFinite(since) && nowMs - since >= OVERDUE_REPEAT_DAYS * DAY_MS ? 'overdue' : null;
+export function mergeStoredStamps(value, storedDoc) {
+  const stored = new Map((storedDoc?.reminders ?? []).map((row) => [row?.id, row?.notified]));
+  return {
+    reminders: value.reminders.map((row) =>
+      stored.has(row.id) ? { ...row, notified: mergeStamps(stored.get(row.id), row.notified) } : row
+    ),
+  };
 }
 
 /** What the audit row records: counts and the next date, never titles. */

@@ -195,7 +195,7 @@ async function tellOwnerAgentStopped(notifier, agent, at, context) {
     await notifier.notifyTelegram({
       title: 'Lab agent offline (1)',
       message: `${agent.agentId} (${agent.hostname || 'host unknown'}) reported its own shutdown at ${at}. Public lab submission fails closed until it is back.`,
-      severity: 'error',
+      severity: 'critical',
       source: AGENT_OFFLINE_SOURCE,
     });
   } catch (error) {
@@ -219,8 +219,13 @@ async function heartbeatAgent({ guard, store, now, notifier }, request, context)
   // would wipe the stored hostname and version on every heartbeat — and
   // would route each one through the read-modify-write path, turning a
   // 30-second poll into two round trips instead of one.
+  // `offline` is terminal and wins over the job-derived `busy`: the agent
+  // sends `offline` with activeJobs > 0 when its shutdown deadline expires
+  // with work still running, and that is exactly the moment to say so.
+  let effective = status;
+  if (status !== 'offline' && activeJobs > 0) effective = 'busy';
   const updates = {
-    status: activeJobs > 0 ? 'busy' : status,
+    status: effective,
     activeJobs,
     lastSeenAt: now().toISOString(),
   };

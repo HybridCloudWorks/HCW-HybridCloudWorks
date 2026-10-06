@@ -30,7 +30,9 @@ export function createAgentHealthCheck({ store, notifier = null, now = () => new
       await notifier.notifyTelegram({
         title: `Lab agent offline (${agents.length})`,
         message: `Marked offline at ${at.toISOString()} after ${STALE_AFTER_MS / 1000}s without a heartbeat. Public lab submission fails closed until it is back.\n${lines.join('\n')}`,
-        severity: 'error',
+        // 'critical' draws the red marker; 'error' is not a level the notifier
+        // knows and fell through to the informational one (review of #910).
+        severity: 'critical',
         source: AGENT_OFFLINE_SOURCE,
       });
     } catch (error) {

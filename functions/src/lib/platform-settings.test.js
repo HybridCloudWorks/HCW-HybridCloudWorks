@@ -917,6 +917,41 @@ describe('handlers', () => {
     expect(typeof Object.prototype.docId).toBe('undefined');
   });
 
+  it('keeps a reminder stamp the timer wrote while the sheet was open, and reads the stored document only for a spec with merge (review of #910)', async () => {
+    const stamp = '2026-12-28T13:00:00.000Z';
+    const store = makeStore({
+      readDoc: vi.fn(async () => ({
+        id: 'reminders',
+        reminders: [{ id: 'a', title: 'T', dueDate: '2027-01-04', notified: { ahead: stamp } }],
+      })),
+    });
+    const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+    const put = await h.putSetting(
+      makeRequest({
+        params: { setting: 'reminders' },
+        body: {
+          reminders: [
+            { id: 'a', title: 'T renamed', dueDate: '2027-01-04', notified: {} },
+            { id: 'b', title: 'New', dueDate: '2027-02-01' },
+          ],
+        },
+      }),
+      context
+    );
+    expect(put.status).toBe(200);
+    const written = store.upsertDoc.mock.calls.find(([c]) => c === 'admin_config')[1];
+    expect(written.reminders[0]).toMatchObject({ title: 'T renamed', notified: { ahead: stamp } });
+    expect(written.reminders[1].notified).toEqual({});
+    expect(parse(put).value.reminders[0].notified).toEqual({ ahead: stamp });
+
+    const plain = makeStore();
+    await createPlatformSettingsHandlers({ guard: allowGuard, store: plain, ...fixed }).putSetting(
+      makeRequest({ params: { setting: 'podcast-feeds' }, body: { feeds: [] } }),
+      context
+    );
+    expect(plain.readDoc).not.toHaveBeenCalled();
+  });
+
   it('selects the saved newsletter template in the template cache, so a different one shows on the next preview', async () => {
     const templateCache = { select: vi.fn() };
     const h = createPlatformSettingsHandlers({

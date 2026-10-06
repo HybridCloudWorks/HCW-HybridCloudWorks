@@ -78,6 +78,7 @@ import {
   REMINDERS_CONFIG_ID,
   RemindersValidationError,
   emptyReminders,
+  mergeStoredStamps,
   normalizeReminders,
   summarizeReminders,
 } from './reminders/settings.js';
@@ -591,7 +592,9 @@ export function normalizeNewsletterSettings(body) {
  *
  * `options`, where a spec has it, is what the page may choose from; it rides
  * on the GET and PUT responses beside the value, priced by the server so the
- * card and the queued toast use the same figure.
+ * card and the queued toast use the same figure. `merge`, where a spec has
+ * it, folds the stored document into a PUT's value before the write, for a
+ * document another writer also touches.
  */
 export const PLATFORM_SETTINGS = Object.freeze({
   'default-heroes': Object.freeze({
@@ -656,6 +659,9 @@ export const PLATFORM_SETTINGS = Object.freeze({
       }
     },
     empty: emptyReminders,
+    // The timer stamps `notified` between the page's load and its save; the
+    // save keeps those stamps (review of #910).
+    merge: mergeStoredStamps,
   }),
 });
 
@@ -1032,9 +1038,13 @@ export function createPlatformSettingsHandlers({
 
       const parsed = normalizedSettingValue(spec, await request.json().catch(() => null));
       if (parsed.error) return parsed.error;
-      const { value } = parsed;
+      let { value } = parsed;
 
       try {
+        if (spec.merge) {
+          const stored = await store.readDoc('admin_config', spec.docId, ADMIN_CONFIG_PARTITION);
+          value = spec.merge(value, stored);
+        }
         const updatedAt = now().toISOString();
         await store.upsertDoc('admin_config', {
           id: spec.docId,

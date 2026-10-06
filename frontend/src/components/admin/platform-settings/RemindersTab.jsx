@@ -57,16 +57,25 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
  * day, destructive once past.
  */
 export function describeDue(reminder, today = todayIso()) {
-  if (reminder.done) return { label: 'Done', tone: 'muted' };
-  const days = daysUntil(reminder.dueDate, today);
-  if (days === null) return { label: 'No date yet', tone: 'muted' };
-  if (days < 0) return { label: `${plural(-days, 'day')} overdue`, tone: 'destructive' };
-  if (days === 0) return { label: 'Due today', tone: 'warning' };
+  const days = reminder.done ? null : daysUntil(reminder.dueDate, today);
   const lead = Number(reminder.leadDays);
-  if (Number.isFinite(lead) && days <= lead) {
-    return { label: `In ${plural(days, 'day')} · Telegram window open`, tone: 'warning' };
+  let label = 'No date yet';
+  let tone = 'muted';
+  if (reminder.done) {
+    label = 'Done';
+  } else if (days !== null && days < 0) {
+    label = `${plural(-days, 'day')} overdue`;
+    tone = 'destructive';
+  } else if (days === 0) {
+    label = 'Due today';
+    tone = 'warning';
+  } else if (days !== null && Number.isFinite(lead) && days <= lead) {
+    label = `In ${plural(days, 'day')} · Telegram window open`;
+    tone = 'warning';
+  } else if (days !== null) {
+    label = `In ${plural(days, 'day')}`;
   }
-  return { label: `In ${plural(days, 'day')}`, tone: 'muted' };
+  return { label, tone };
 }
 
 /** A fresh row; the id is the server's identity for the stamps, never shown. */

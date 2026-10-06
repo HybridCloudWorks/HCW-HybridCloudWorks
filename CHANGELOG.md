@@ -30,8 +30,12 @@ This project has not cut a tagged release; entries are grouped under
   done. A stage is stamped only when the message was sent, so an
   unconfigured bot means a retry tomorrow, not a reminder counted as said.
   **Owner steps:** add `SEND_REMINDERS` to `enabled_timers` on the
-  `hcw-azure` workspace and confirm the run (1 to change); then add the
-  first rows at https://hybridcloudworks.com/admin/platform?tab=reminders.
+  `hcw-azure` workspace and confirm the run. The plan reads 3 to add, 1 to
+  change, 3 to destroy: the three are the permanent azapi replacements every
+  plan of this root carries, and the one change is the function app's
+  `FEATURE_FLAG_SEND_REMINDERS`, declared for `assert-expected-plan.mjs`,
+  which is the check to read rather than the counts. Then add the first rows
+  at https://hybridcloudworks.com/admin/platform?tab=reminders.
 - **The owner hears on Telegram when a lab agent stops cleanly (LAB-2
   follow-up, 2026-10-06).** `systemctl stop` sends SIGTERM and the agent
   heartbeats `offline` itself, so the health timer never had a stale agent
