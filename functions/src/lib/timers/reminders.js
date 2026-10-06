@@ -141,6 +141,20 @@ async function writeStamps({ store, log }, doc, stamps) {
   return false;
 }
 
+/** Say every reminder whose stage has come; the stamps to write and the counts per stage. */
+async function sayDue(deps, reminders, today, at) {
+  const stamps = new Map();
+  const stages = { ahead: 0, due: 0, overdue: 0 };
+  for (const [index, reminder] of reminders.entries()) {
+    const stage = stageDue(reminder, today, at.getTime());
+    if (stage && (await sayReminder(deps, reminder, index, stage, today))) {
+      stamps.set(reminder.id, { [stage]: at.toISOString() });
+      stages[stage] += 1;
+    }
+  }
+  return { stamps, stages };
+}
+
 /**
  * @param {object} deps
  * @param {{ readDoc: Function, replaceDocIfMatch: Function }} deps.store
@@ -161,17 +175,7 @@ export function createReminderCheck({ store, notifier = null, now = () => new Da
       return { checked: value.reminders.length, sent: 0 };
     }
 
-    const stamps = new Map();
-    const stages = { ahead: 0, due: 0, overdue: 0 };
-    for (const [index, reminder] of value.reminders.entries()) {
-      const stage = stageDue(reminder, today, at.getTime());
-      if (!stage) continue;
-      if (await sayReminder({ notifier, log }, reminder, index, stage, today)) {
-        stamps.set(reminder.id, { [stage]: at.toISOString() });
-        stages[stage] += 1;
-      }
-    }
-
+    const { stamps, stages } = await sayDue({ notifier, log }, value.reminders, today, at);
     const stamped = stamps.size > 0 ? await writeStamps({ store, log }, doc, stamps) : true;
     log.log?.(`[sendReminders] ${value.reminders.length} reminder(s) checked, ${stamps.size} said`);
     return { checked: value.reminders.length, sent: stamps.size, stages, stamped };
