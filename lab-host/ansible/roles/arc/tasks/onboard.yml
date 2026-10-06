@@ -217,11 +217,28 @@
   changed_when: false
   when: not ansible_check_mode
 
-# Each set runs only when `config get`'s plain text does not already carry
-# the value, so a run is a change and a second run changes nothing. Plain
-# text on purpose: the first version read the whole configuration as JSON
-# and assumed a list of name/value objects, which it is not, and the play
-# stopped here on the owner's first re-run (2026-10-06).
+# `config get` prints `<key> : <value>` (the same layout as `config list`)
+# or the bare value, depending on the agent version. The first output line
+# is reduced to the value, and a list value to its sorted entries with brackets, quotes and
+# spaces removed, so the comparison below is whole-list equality: an
+# allowlist that CONTAINS the Azure Monitor Agent beside a second extension
+# is not the allowlist this role asserts, and is rewritten. (A substring
+# test here would have accepted it; review of #909.) The first version read
+# `config list --json` and assumed a list of name/value objects, which it is
+# not, and the play stopped here on the owner's first re-run (2026-10-06).
+- name: Reduce the two readings to comparable values
+  ansible.builtin.set_fact:
+    arc_allowlist_current: >-
+      {{ (arc_allowlist_get.stdout | regex_replace('^[^:\r\n]*:', '')
+          | regex_replace('[\[\]"\s]', '')).split(',')
+         | reject('eq', '') | sort }}
+    arc_allowlist_wanted: >-
+      {{ (arc_extensions_allowlist | regex_replace('\s', '')).split(',')
+         | reject('eq', '') | sort }}
+    arc_incoming_current: >-
+      {{ arc_incoming_get.stdout | regex_replace('^[^:\r\n]*:', '') | trim | lower }}
+  when: not ansible_check_mode
+
 - name: Allow only the Azure Monitor Agent extension
   ansible.builtin.command:
     argv:
@@ -230,10 +247,11 @@
       - set
       - extensions.allowlist
       - "{{ arc_extensions_allowlist }}"
+  # Runs only when the whole list differs, so a run is a change.
   changed_when: true
   when:
     - not ansible_check_mode
-    - arc_extensions_allowlist not in arc_allowlist_get.stdout
+    - arc_allowlist_current != arc_allowlist_wanted
 
 - name: Turn off incoming connections through Arc
   ansible.builtin.command:
@@ -246,4 +264,4 @@
   changed_when: true
   when:
     - not ansible_check_mode
-    - "'false' not in (arc_incoming_get.stdout | lower)"
+    - arc_incoming_current != 'false'
