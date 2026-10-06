@@ -59,19 +59,20 @@ export function decodeEntities(value) {
   });
 }
 
-/** The href attributes of a document, decoded — through the browser's parser when there is one. */
+/**
+ * The href attributes of a document and its visible text, entities decoded.
+ * Text work, deliberately: the file came from the owner's disk or clipboard
+ * and is never parsed into a DOM, so nothing in it can run or load (CodeQL
+ * flagged a DOMParser here, and the parser bought only the decoding, which
+ * decodeEntities does).
+ */
 function hrefsOf(html) {
-  if (typeof DOMParser !== 'undefined') {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    return {
-      hrefs: [...doc.querySelectorAll('a[href]')].map((a) => a.getAttribute('href') || ''),
-      text: doc.documentElement?.textContent || '',
-    };
-  }
   const hrefs = [];
-  for (const match of html.matchAll(HREF))
+  for (const match of html.matchAll(HREF)) {
     hrefs.push(decodeEntities(match[1] ?? match[2] ?? match[3] ?? ''));
-  return { hrefs, text: decodeEntities(html) };
+  }
+  const text = decodeEntities(html.replace(/<[^>]*>/g, ' '));
+  return { hrefs, text };
 }
 
 /**
