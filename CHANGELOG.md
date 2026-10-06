@@ -3554,8 +3554,6 @@ This project has not cut a tagged release; entries are grouped under
   is one `conditioned` line per subscription and every row `condition
   present` in the listing that follows.
 
-### Fixed
-
 - **One recovery objective pair everywhere, the as-built zone posture
   written down, a regional-loss procedure, and the first restore drill
   approved (estate review 2026-10-06, finding PLAT-1; owner decision that
