@@ -195,23 +195,48 @@
 # incoming connections (SSH over Arc, Windows Admin Center) are off: the
 # owner reaches the host over sshd with a key. Each setting is read first and
 # written only when it differs, so the play reports changed truthfully.
-- name: Read the Arc agent's configuration
+- name: Read the Arc agent's extension allowlist
   ansible.builtin.command:
     argv:
       - "{{ arc_azcmagent_path }}"
       - config
-      - list
-      - --json
-  register: arc_config_list
+      - get
+      - extensions.allowlist
+  register: arc_allowlist_get
   changed_when: false
   when: not ansible_check_mode
 
-- name: Record the Arc agent's lockdown state
+- name: Read whether incoming connections through Arc are enabled
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - config
+      - get
+      - incomingconnections.enabled
+  register: arc_incoming_get
+  changed_when: false
+  when: not ansible_check_mode
+
+# `config get` prints `<key> : <value>` (the same layout as `config list`)
+# or the bare value, depending on the agent version. The first output line
+# is reduced to the value, and a list value to its sorted entries with brackets, quotes and
+# spaces removed, so the comparison below is whole-list equality: an
+# allowlist that CONTAINS the Azure Monitor Agent beside a second extension
+# is not the allowlist this role asserts, and is rewritten. (A substring
+# test here would have accepted it; review of #909.) The first version read
+# `config list --json` and assumed a list of name/value objects, which it is
+# not, and the play stopped here on the owner's first re-run (2026-10-06).
+- name: Reduce the two readings to comparable values
   ansible.builtin.set_fact:
-    arc_lockdown_current: >-
-      {{ dict((arc_config_list.stdout | from_json)
-              | map(attribute='name')
-              | zip((arc_config_list.stdout | from_json) | map(attribute='value'))) }}
+    arc_allowlist_current: >-
+      {{ ((arc_allowlist_get.stdout_lines | first | default('')) | regex_replace('^[^:]*:', '')
+          | regex_replace('[\[\]"\s]', '')).split(',')
+         | reject('eq', '') | sort }}
+    arc_allowlist_wanted: >-
+      {{ (arc_extensions_allowlist | regex_replace('\s', '')).split(',')
+         | reject('eq', '') | sort }}
+    arc_incoming_current: >-
+      {{ (arc_incoming_get.stdout_lines | first | default('')) | regex_replace('^[^:]*:', '') | trim | lower }}
   when: not ansible_check_mode
 
 - name: Allow only the Azure Monitor Agent extension
@@ -222,11 +247,11 @@
       - set
       - extensions.allowlist
       - "{{ arc_extensions_allowlist }}"
-  # Runs only when the stored value differs, so a run is a change.
+  # Runs only when the whole list differs, so a run is a change.
   changed_when: true
   when:
     - not ansible_check_mode
-    - (arc_lockdown_current['extensions.allowlist'] | default('')) != arc_extensions_allowlist
+    - arc_allowlist_current != arc_allowlist_wanted
 
 - name: Turn off incoming connections through Arc
   ansible.builtin.command:
@@ -239,4 +264,4 @@
   changed_when: true
   when:
     - not ansible_check_mode
-    - (arc_lockdown_current['incomingconnections.enabled'] | default('true') | string | lower) != 'false'
+    - arc_incoming_current != 'false'
