@@ -23,7 +23,9 @@ import { test, expect } from '@playwright/test';
 const ADMIN_ROUTES = ['/admin', '/admin/queue', '/admin/platform-settings', '/admin/health'];
 
 for (const route of ADMIN_ROUTES) {
-  test(`${route}: signed out, the guard shows the sign-in card and none of the admin`, async ({ page }) => {
+  test(`${route}: signed out, the guard shows the sign-in card and none of the admin`, async ({
+    page,
+  }) => {
     await page.goto(route);
     const signIn = page.getByRole('button', { name: /sign in with microsoft/i });
     await expect(signIn).toBeVisible();
