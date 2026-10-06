@@ -666,16 +666,22 @@ deleted key would lose the Vault for good.
 
   *Amendment 2026-10-06 (estate review, LAB-5):* the Coder server no longer
   holds the socket. A `coder-docker-proxy` Compose service (HAProxy, one
-  allow rule per Docker API section) mounts it read-only, and the server
-  reaches the daemon through it over `DOCKER_HOST`: containers, images,
-  networks, volumes and the lifecycle verbs the provisioner uses, and
-  nothing else — no exec, build, commit, swarm, system or auth. A Coder
-  vulnerability is now bounded to what the proxy allows rather than root.
-  `template.test.mjs` asserts the mount, the allowlist and the absence of
-  the socket and the docker group from the server. The agent keeps its
+  allow rule per Docker API section) mounts it read-only on a control
+  network the server alone shares with it, and the server reaches the
+  daemon through it over `DOCKER_HOST`: containers, images, networks,
+  volumes and the lifecycle verbs the provisioner uses, and nothing else —
+  no exec, build, commit, swarm, system or auth. **This narrows a Coder
+  compromise; it does not contain it.** The proxy inspects paths, not
+  bodies, so a compromised server can still create a privileged container
+  or bind the host's `/` and start it, which is root as before. Containing
+  that needs a body-aware authorisation layer (a Docker authz plugin that
+  rejects privileged mode, host binds, host namespaces and added
+  capabilities) or a separate or rootless daemon for Coder, and that is the
+  revisit trigger, now with its shape written down. `template.test.mjs`
+  asserts the mount, every proxy policy key, the networks, and the absence
+  of the socket and the docker group from the server. The agent keeps its
   docker group; its unit gained system-call and address-family filters and
-  its `npm ci` runs with `--ignore-scripts`. Moving the agent to a rootless
-  daemon stays the revisit trigger.
+  its `npm ci` runs with `--ignore-scripts`.
 - **Cloudflare API tokens are zone-scoped, and `lab.hybridcloudworks.com` is
   a name in the production zone.** Cloudflare cannot scope a token to one
   record, so any token with DNS edit on `hybridcloudworks.com` can change the

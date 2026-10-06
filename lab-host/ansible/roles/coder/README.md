@@ -90,9 +90,13 @@ starts or stops it, adds the Caddy route and keeps a week of nightly dumps.
 
 The privilege boundary is the Compose file's and the template's, not this
 role's: the socket goes to the `coder-docker-proxy` service only, read-only,
-the `coder` service reaches the daemon through it over `DOCKER_HOST` and gets
-only the API sections it allows (no exec, build, commit, swarm or system; since
-2026-10-06, LAB-5), and
+on a control network the `coder` service alone shares with it; the server
+reaches the daemon through it over `DOCKER_HOST` and gets only the API
+sections it allows (no exec, build, commit, swarm or system; since
+2026-10-06, LAB-5). That narrows what a compromised server can do and does
+not contain it — the proxy reads paths, not bodies, so container creation
+with a privileged flag or a host bind still succeeds; the Compose file says
+what would — and
 `lab-host/coder/templates/hcw-lab/template.test.mjs` asserts what a
 workspace may and may not have.
 
@@ -158,8 +162,9 @@ A publish by `bootstrap.sh` would need a token stored in the vault, and on
 this host a token that can publish a template is as good as root. The
 template runs in Coder's provisioner, inside the `coder` container, which
 reaches the daemon through the socket proxy; a template version that asks the
-Docker provider for a privileged container with the host's `/` mounted gets
-one, because the proxy allows container creation and does not read the body.
+Docker provider for a privileged container with the host's `/` mounted still
+gets one, because the proxy allows container creation and does not read the
+body (LAB-5 narrowed the daemon's other sections, not this one).
 `template.test.mjs` keeps this repository's template from doing that, but a
 token pushes whatever it is given, and Coder's API answers it from anywhere
 on the internet through Caddy. The narrowest v2.37.3 token that could

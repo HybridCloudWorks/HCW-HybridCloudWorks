@@ -3540,11 +3540,18 @@ This project has not cut a tagged release; entries are grouped under
   provisioner's Docker provider uses: containers, images, networks,
   volumes, the lifecycle verbs and the read-only daemon endpoints; exec,
   build, commit, swarm, system, plugins and daemon auth are refused. The
-  server reaches it over `DOCKER_HOST` and the template's provider names
-  the same address; the server has no socket and no docker group, the role
-  no longer reads the group id, and `template.test.mjs` asserts all of it
-  (three services, the read-only mount on the proxy alone, the allowlist,
-  no port). The labs agent's `npm ci` runs `--ignore-scripts` (no
+  server reaches it over `DOCKER_HOST` on a control network the two alone
+  share (PostgreSQL stays on the `coder` network only, #900 review), and
+  the template's provider names the same address; the server has no socket
+  and no docker group, the role no longer reads the group id, and
+  `template.test.mjs` asserts all of it (three services, the read-only
+  mount on the proxy alone, every proxy policy key, the networks, no port).
+  Stated plainly, as the #900 review asked: this narrows a Coder compromise
+  and does not contain it. The proxy reads paths, not bodies, so a
+  compromised server can still create a privileged container or bind the
+  host's `/` and start it; containing that needs a body-aware authorisation
+  layer or a separate or rootless daemon for Coder, which ADR 0032 keeps as
+  the revisit trigger with that shape written down. The labs agent's `npm ci` runs `--ignore-scripts` (no
   dependency needs an install hook) and its unit gains address-family and
   system-call filters plus kernel, cgroup, setuid and realtime protections
   (MemoryDenyWriteExecute deliberately not: V8 needs it). The `arc` role

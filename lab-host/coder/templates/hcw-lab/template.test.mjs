@@ -136,15 +136,37 @@ test('the coder server keeps its non-root user and reaches the daemon only throu
   assert.equal(services['coder-docker-proxy'].filter((line) => /^\s*ports:/.test(line)).length, 0, 'the proxy publishes no port');
 });
 
-test('the proxy allows the API sections the provisioner uses and refuses the ones that are root (LAB-5)', () => {
+test('the proxy policy is exactly the allowlist the provisioner needs, every key pinned (LAB-5)', () => {
   const proxy = services['coder-docker-proxy'];
   const value = (name) => proxy.find((line) => new RegExp(`^\\s*${name}:`).test(line))?.match(/"(\d)"/)?.[1];
-  for (const on of ['CONTAINERS', 'IMAGES', 'NETWORKS', 'VOLUMES', 'POST', 'ALLOW_START', 'ALLOW_STOP', 'ALLOW_RESTARTS']) {
-    assert.equal(value(on), '1', `${on} is on`);
-  }
-  for (const off of ['EXEC', 'BUILD', 'COMMIT', 'AUTH', 'SECRETS', 'SWARM', 'SYSTEM', 'PLUGINS', 'SESSION', 'CONFIGS']) {
-    assert.equal(value(off), '0', `${off} is off`);
-  }
+  const on = ['CONTAINERS', 'IMAGES', 'NETWORKS', 'VOLUMES', 'POST', 'ALLOW_START', 'ALLOW_STOP', 'ALLOW_RESTARTS', 'INFO', 'VERSION', 'PING', 'EVENTS'];
+  const off = ['EXEC', 'BUILD', 'COMMIT', 'AUTH', 'SECRETS', 'SWARM', 'SERVICES', 'NODES', 'TASKS', 'SYSTEM', 'PLUGINS', 'SESSION', 'DISTRIBUTION', 'CONFIGS'];
+  for (const name of on) assert.equal(value(name), '1', `${name} is on`);
+  for (const name of off) assert.equal(value(name), '0', `${name} is off`);
+  // Every policy key the service sets is one of the two lists above: a key
+  // added or renamed without a decision here fails, which is the point of
+  // a regression guard (#900 review).
+  const configured = proxy
+    .map((line) => line.match(/^\s*([A-Z_]+):\s*"[01]"\s*$/)?.[1])
+    .filter(Boolean);
+  assert.deepEqual(configured.sort(), [...on, ...off].sort());
+});
+
+test('the proxy and the server share a control network that PostgreSQL is not on (#900 review)', () => {
+  const networksOf = (lines) => {
+    const start = lines.findIndex((line) => /^\s*networks:\s*$/.test(line));
+    if (start === -1) return [];
+    const out = [];
+    for (const line of lines.slice(start + 1)) {
+      const m = line.match(/^\s*-\s*([a-z-]+)\s*$/);
+      if (!m) break;
+      out.push(m[1]);
+    }
+    return out;
+  };
+  assert.deepEqual(networksOf(services['coder-docker-proxy']), ['coder-control'], 'the proxy is on the control network only');
+  assert.deepEqual(networksOf(services.coder), ['coder', 'coder-control'], 'the server is on both, coder first');
+  assert.deepEqual(networksOf(services['coder-postgres']), ['coder'], 'postgres never joins the control network');
 });
 
 test('nothing in either file is privileged', () => {
