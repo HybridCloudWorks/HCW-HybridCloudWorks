@@ -227,14 +227,14 @@ export async function scrapeArticle(
     // re-checked hop by hop (2026-10-06 review, AP-B2). A refused address is a
     // failed scrape like any other; the fallbacks below send the URL to a
     // third-party service rather than fetching it from here.
-    const response = await guardedFetch(url, {
+    const { response, text } = await guardedFetch(url, {
       fetch: fetchImpl,
       resolve,
       timeoutMs: 30000,
       headers: BROWSER_HEADERS,
     });
     if (!response.ok) throw new Error(`Status code ${response.status}`);
-    const fullHtml = await response.text();
+    const fullHtml = text();
     const { articleHtml, contentText, images } = extractArticle(fullHtml, url);
     const markdown = htmlToMarkdown(articleHtml);
     log.log?.(`[scraper] ${markdown.length} chars markdown, ${images.length} images`);

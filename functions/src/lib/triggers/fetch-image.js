@@ -17,7 +17,7 @@
  * tested; here the response itself is in hand, so the gate is on the measured
  * `Content-Type`, which is strictly stronger than an extension guess.
  */
-import { isPrivateIp, validateFetchUrl } from '../http/guarded-fetch.js';
+import { isPrivateIp, pinnedDispatcher, validateFetchUrl } from '../http/guarded-fetch.js';
 
 // The SSRF guard lives in lib/http/guarded-fetch.js since the 2026-10-06
 // review (AP-B2) so the scraper and the document fetch share it; re-exported
@@ -160,7 +160,11 @@ export async function fetchImage(
 ) {
   let current = url;
   for (let hop = 0; hop <= maxRedirects; hop += 1) {
-    await validateFetchUrl(current, resolve ? { resolve } : {});
+    // The connection is pinned to the address the guard validated (PR #889
+    // review): a rebinding host cannot answer the check with a public
+    // address and the connect with a private one.
+    const { address } = await validateFetchUrl(current, resolve ? { resolve } : {});
+    const dispatcher = pinnedDispatcher(address);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
@@ -168,10 +172,12 @@ export async function fetchImage(
       response = await fetchImpl(current, {
         redirect: 'manual',
         signal: controller.signal,
+        dispatcher,
         headers: { 'User-Agent': 'Mozilla/5.0 HybridCloudWorks-Bot/1.0' },
       });
     } catch (error) {
       clearTimeout(timer);
+      dispatcher.close().catch(() => {});
       throw error?.name === 'AbortError'
         ? new Error(`Request timed out fetching ${current}`)
         : error;

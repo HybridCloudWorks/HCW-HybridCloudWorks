@@ -3544,10 +3544,25 @@ This project has not cut a tagged release; entries are grouped under
   or headless fallback, which would only fetch the same forbidden target from
   their side. `triggers/fetch-image.js` re-exports `isPrivateIp` and
   `validateFetchUrl` from the new module, so its importers and tests keep
-  their names. Tests: the guard's own suite (private, link-local, localhost,
-  relative and private-bound redirects, redirect limit, timeout), scraper
-  cases proving no fetch and no fallback on a refused target, and a drafter
-  case proving no `documentUrls` byte is read from a private, link-local or
+  their names. Copilot's review of #889 tightened the guard four ways, all
+  taken: Azure's platform address `168.63.129.16` (WireServer, plain HTTP),
+  carrier-grade NAT and the multicast/reserved ranges are refused with the
+  rest; the connection is pinned to the address the guard validated, through
+  an undici `Agent` whose lookup answers only that address (undici becomes a
+  declared dependency; it was already in the tree under cheerio), so a
+  rebinding host cannot pass the check with one record and connect with
+  another, and `fetch-image.js` pins the same way; an IPv6 literal, and a
+  name the IPv4 lookup cannot resolve, are refusals rather than fall-through
+  to the reader; and the deadline now covers the body, which is read under
+  it and under a byte cap inside the guard (`{ response, buffer, text }`
+  comes back, not a live Response), so a document origin that sends headers
+  and then stalls is cut off. Tests: the guard's own suite (every refused
+  range including the Azure address, IPv6 literals, unresolvable names,
+  pinned lookup in both callback shapes, a rebinding host, relative and
+  private-bound redirects with re-pinning, redirect limit, streamed and
+  declared body caps, a hung socket and a stalled body), scraper cases
+  proving no fetch and no fallback on a refused target, and a drafter case
+  proving no `documentUrls` byte is read from a private, link-local or
   localhost address or across a redirect onto one.
 
 ### Fixed

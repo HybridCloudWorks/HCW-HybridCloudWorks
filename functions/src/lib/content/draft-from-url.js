@@ -123,22 +123,24 @@ async function fetchDocumentUrl(url, { fetchImpl = globalThis.fetch, resolve, lo
     // The URL is the caller's. guardedFetch refuses private, link-local and
     // loopback targets (and re-checks every redirect) before any byte is read
     // back into the draft (2026-10-06 review, AP-B2).
-    const response = await guardedFetch(url, {
+    // The byte cap and the deadline both live in the guard, and the deadline
+    // covers the body: a document origin that sends headers and then stalls
+    // is cut off, not waited on.
+    const { response, buffer, text } = await guardedFetch(url, {
       fetch: fetchImpl,
       resolve,
       timeoutMs: DOCUMENT_FETCH_TIMEOUT_MS,
+      maxBytes: DOCUMENT_FETCH_LIMIT_BYTES,
     });
     if (!response.ok) return null;
     const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
     const name = new URL(url).pathname.split('/').filter(Boolean).at(-1) || url;
     if (contentType.includes('application/pdf')) {
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.byteLength > DOCUMENT_FETCH_LIMIT_BYTES) return null;
       return { name, mimeType: 'application/pdf', base64Data: buffer.toString('base64') };
     }
-    const text = await response.text();
-    if (!text.trim()) return null;
-    return { name, textContent: text.slice(0, 18000) };
+    const content = text();
+    if (!content.trim()) return null;
+    return { name, textContent: content.slice(0, 18000) };
   } catch (error) {
     log.warn?.(`[draft-from-url] document fetch failed for ${url}: ${error.message}`);
     return null;
