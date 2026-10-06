@@ -238,6 +238,142 @@ async function readBody(request) {
   }
 }
 
+/** The entries after adding `urls`: what was added, what the queue already had, what did not fit. */
+function addMutation(urls, { stamp, actor, uuid }) {
+  const report = { added: [], skipped: [], full: 0 };
+  const mutate = (items) => {
+    const have = new Set(items.map((item) => item.url));
+    report.added = [];
+    report.skipped = [];
+    report.full = 0;
+    for (const url of urls) {
+      if (have.has(url)) {
+        report.skipped.push(url);
+      } else if (items.length >= MAX_QUEUE_ITEMS) {
+        report.full += 1;
+      } else {
+        const entry = newEntry({ url, id: uuid(), stamp, actor });
+        items.push(entry);
+        have.add(url);
+        report.added.push(entry.id);
+      }
+    }
+    return report.added.length ? items : null;
+  };
+  return { mutate, report };
+}
+
+/** POST cms/forge/queue — { urls[] } */
+async function addUrls(ctx, body, auth) {
+  const raw = Array.isArray(body?.urls) ? body.urls : [];
+  if (raw.length > MAX_URLS_PER_ADD) {
+    return json(400, { ok: false, error: `At most ${MAX_URLS_PER_ADD} URLs per add` });
+  }
+  const urls = [...new Set(raw.map(normalizeQueueUrl).filter(Boolean))];
+  if (!urls.length) return json(400, { ok: false, error: 'urls required: no http(s) URL given' });
+  const { mutate, report } = addMutation(urls, {
+    stamp: ctx.now().toISOString(),
+    actor: actorName(auth.user),
+    uuid: ctx.uuid,
+  });
+  const doc = await updateQueue(ctx.store, mutate, { now: ctx.now });
+  return answer(doc, report);
+}
+
+/** POST cms/forge/queue/update — { ids[], remove: true } */
+async function removeEntries(ctx, ids) {
+  const gone = new Set(ids);
+  const doc = await updateQueue(
+    ctx.store,
+    (items) => {
+      const kept = items.filter((item) => !gone.has(item.id));
+      return kept.length === items.length ? null : kept;
+    },
+    { now: ctx.now }
+  );
+  return answer(doc, { removed: ids });
+}
+
+/** POST cms/forge/queue/update — { ids[], fields } */
+async function updateEntries(ctx, body) {
+  const picked = idsOf(body);
+  if (picked.error) return picked.error;
+  if (body?.remove === true) return removeEntries(ctx, picked.ids);
+  const change = fieldsOf(body);
+  if (change.error) return change.error;
+  const wanted = new Set(picked.ids);
+  const stamp = ctx.now().toISOString();
+  let applied = [];
+  const doc = await updateQueue(
+    ctx.store,
+    (items) => {
+      applied = [];
+      return items.map((item) => {
+        if (!wanted.has(item.id) || item.status === 'forging') return item;
+        applied.push(item.id);
+        return applyFields(item, change, stamp);
+      });
+    },
+    { now: ctx.now }
+  );
+  return answer(doc, { applied });
+}
+
+/** The job document one entry starts; the entry's brief rides on the payload. */
+const jobFor = (item, { jobId, user, stamp }) =>
+  newJobDoc({
+    id: jobId,
+    type: 'forge-from-url',
+    payload: {
+      url: item.url,
+      brief: entryBrief(item),
+      kind: item.kind || '',
+      ideaOrigin: item.ideaOrigin || 'imported-source',
+      queueItemId: item.id,
+    },
+    requestedBy: user,
+    createdAt: stamp,
+  });
+
+const canForge = (item) => item.status !== 'forging' && item.status !== 'forged';
+
+/** POST cms/forge/queue/forge — { ids[] }; `io.enqueue` is the queue output binding. */
+async function forgeEntries(ctx, body, auth, context, io) {
+  if (typeof io?.enqueue !== 'function') {
+    context?.error?.('forge/queue/forge: no queue output wired');
+    return json(500, { ok: false, error: 'Job queue is not configured' });
+  }
+  const picked = idsOf(body);
+  if (picked.error) return picked.error;
+  const wanted = new Set(picked.ids);
+  const stamp = ctx.now().toISOString();
+  const jobs = [];
+  let started = [];
+  const doc = await updateQueue(
+    ctx.store,
+    (items) => {
+      started = [];
+      jobs.length = 0;
+      return items.map((item) => {
+        if (!wanted.has(item.id) || !canForge(item)) return item;
+        const jobId = ctx.uuid();
+        jobs.push(jobFor(item, { jobId, user: auth.user, stamp }));
+        started.push({ id: item.id, jobId });
+        return { ...item, status: 'forging', jobId, error: null, updatedAt: stamp };
+      });
+    },
+    { now: ctx.now }
+  );
+  // The entries are marked first, then each job is written and queued: a
+  // job that fails to queue is swept back by the stale-queued sweeper, and
+  // an entry left `forging` with no job is the visible symptom.
+  for (const jobDoc of jobs) {
+    await ctx.store.upsertDoc(JOBS_CONTAINER, jobDoc);
+    io.enqueue({ jobId: jobDoc.id, type: jobDoc.type });
+  }
+  return answer(doc, { started });
+}
+
 /**
  * The four routes (editor), each one call:
  *   GET  cms/forge/queue          → the entries
@@ -251,6 +387,7 @@ export function createForgeQueueHandlers({
   now = () => new Date(),
   uuid = () => crypto.randomUUID(),
 }) {
+  const ctx = { store, now, uuid };
   const guarded = (fn) => async (request, context, io) => {
     const auth = await guard.requireRole(request, 'editor');
     if (auth.error) return auth.error;
@@ -261,139 +398,12 @@ export function createForgeQueueHandlers({
       return json(502, { ok: false, error: String(error?.message || error) });
     }
   };
-
   return {
     list: guarded(async () => answer(await readQueue(store))),
-
-    add: guarded(async (request, auth) => {
-      const body = await readBody(request);
-      const raw = Array.isArray(body?.urls) ? body.urls : [];
-      if (raw.length > MAX_URLS_PER_ADD) {
-        return json(400, { ok: false, error: `At most ${MAX_URLS_PER_ADD} URLs per add` });
-      }
-      const urls = [...new Set(raw.map(normalizeQueueUrl).filter(Boolean))];
-      if (!urls.length) return json(400, { ok: false, error: 'urls required: no http(s) URL given' });
-      const stamp = now().toISOString();
-      const actor = actorName(auth.user);
-      let added = [];
-      let skipped = [];
-      let full = 0;
-      const doc = await updateQueue(
-        store,
-        (items) => {
-          const have = new Set(items.map((item) => item.url));
-          added = [];
-          skipped = [];
-          full = 0;
-          for (const url of urls) {
-            if (have.has(url)) {
-              skipped.push(url);
-              continue;
-            }
-            if (items.length >= MAX_QUEUE_ITEMS) {
-              full += 1;
-              continue;
-            }
-            const entry = newEntry({ url, id: uuid(), stamp, actor });
-            items.push(entry);
-            have.add(url);
-            added.push(entry.id);
-          }
-          return added.length ? items : null;
-        },
-        { now }
-      );
-      return answer(doc, { added, skipped, full });
-    }),
-
-    update: guarded(async (request) => {
-      const body = await readBody(request);
-      const picked = idsOf(body);
-      if (picked.error) return picked.error;
-      const stamp = now().toISOString();
-      if (body?.remove === true) {
-        const gone = new Set(picked.ids);
-        const doc = await updateQueue(
-          store,
-          (items) => {
-            const kept = items.filter((item) => !gone.has(item.id));
-            return kept.length === items.length ? null : kept;
-          },
-          { now }
-        );
-        return answer(doc, { removed: picked.ids });
-      }
-      const change = fieldsOf(body);
-      if (change.error) return change.error;
-      const wanted = new Set(picked.ids);
-      let applied = [];
-      const doc = await updateQueue(
-        store,
-        (items) => {
-          applied = [];
-          return items.map((item) => {
-            if (!wanted.has(item.id) || item.status === 'forging') return item;
-            applied.push(item.id);
-            return applyFields(item, change, stamp);
-          });
-        },
-        { now }
-      );
-      return answer(doc, { applied });
-    }),
-
-    /** Start one job per entry; `io.enqueue` is the queue output binding. */
-    forge: guarded(async (request, auth, context, io) => {
-      if (typeof io?.enqueue !== 'function') {
-        context?.error?.('forge/queue/forge: no queue output wired');
-        return json(500, { ok: false, error: 'Job queue is not configured' });
-      }
-      const body = await readBody(request);
-      const picked = idsOf(body);
-      if (picked.error) return picked.error;
-      const wanted = new Set(picked.ids);
-      const stamp = now().toISOString();
-      const jobs = [];
-      let started = [];
-      const doc = await updateQueue(
-        store,
-        (items) => {
-          started = [];
-          jobs.length = 0;
-          return items.map((item) => {
-            if (!wanted.has(item.id) || item.status === 'forging' || item.status === 'forged') {
-              return item;
-            }
-            const jobId = uuid();
-            jobs.push(
-              newJobDoc({
-                id: jobId,
-                type: 'forge-from-url',
-                payload: {
-                  url: item.url,
-                  brief: entryBrief(item),
-                  kind: item.kind || '',
-                  ideaOrigin: item.ideaOrigin || 'imported-source',
-                  queueItemId: item.id,
-                },
-                requestedBy: auth.user,
-                createdAt: stamp,
-              })
-            );
-            started.push({ id: item.id, jobId });
-            return { ...item, status: 'forging', jobId, error: null, updatedAt: stamp };
-          });
-        },
-        { now }
-      );
-      // The entries are marked first, then each job is written and queued:
-      // a job that fails to queue is swept back by the stale-queued sweeper,
-      // and an entry left `forging` with no job is the visible symptom.
-      for (const jobDoc of jobs) {
-        await store.upsertDoc(JOBS_CONTAINER, jobDoc);
-        io.enqueue({ jobId: jobDoc.id, type: jobDoc.type });
-      }
-      return answer(doc, { started });
-    }),
+    add: guarded(async (request, auth) => addUrls(ctx, await readBody(request), auth)),
+    update: guarded(async (request) => updateEntries(ctx, await readBody(request))),
+    forge: guarded(async (request, auth, context, io) =>
+      forgeEntries(ctx, await readBody(request), auth, context, io)
+    ),
   };
 }

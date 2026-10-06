@@ -116,15 +116,14 @@ export function fieldsPayload(form, { onlyFilled = false } = {}) {
 }
 
 /** Does the entry's brief say anything a drafter could work from (beyond its URL)? */
+const SUBSTANCE_TEXT = ['objective', 'keyMessage', 'audience'];
+const SUBSTANCE_LISTS = ['requiredTopics', 'sources'];
+
 export function entryHasFields(entry) {
   const brief = entry?.brief || {};
-  return Boolean(
-    brief.objective ||
-    brief.keyMessage ||
-    brief.audience ||
-    (brief.requiredTopics || []).length ||
-    (brief.sources || []).length
-  );
+  const hasText = SUBSTANCE_TEXT.some((field) => Boolean(brief[field]));
+  const hasList = SUBSTANCE_LISTS.some((field) => (brief[field] || []).length > 0);
+  return hasText || hasList;
 }
 
 /** The one-line summary under an entry: what is filled, or that nothing is. */

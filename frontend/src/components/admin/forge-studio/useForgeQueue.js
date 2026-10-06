@@ -36,8 +36,8 @@ export function useForgeQueue({ enabled = true } = {}) {
     };
   }, []);
 
+  /** The server's answer becomes the state; a refused answer is an error. */
   const take = useCallback((answer) => {
-    if (!mounted.current) return answer;
     if (!answer?.ok) throw new Error(answer?.error || 'The queue did not answer.');
     setState((current) => ({
       ...current,
@@ -50,24 +50,38 @@ export function useForgeQueue({ enabled = true } = {}) {
     return answer;
   }, []);
 
-  const load = useCallback(async () => {
-    setState((current) => ({
-      ...current,
-      status: current.status === 'idle' ? 'loading' : current.status,
-    }));
-    try {
-      return take(await getJSON('cms/forge/queue'));
-    } catch (err) {
-      if (mounted.current) {
-        setState((current) => ({
-          ...current,
+  /**
+   * One call against the queue: `begin` is what the state shows while it
+   * runs, `onError` what a failure leaves on it. Resolves to the answer, or
+   * null when it failed; nothing is written after unmount.
+   */
+  const run = useCallback(
+    async (call, { begin, onError }) => {
+      setState((current) => ({ ...current, ...begin(current), error: null }));
+      try {
+        const answer = await call();
+        return mounted.current ? take(answer) : answer;
+      } catch (err) {
+        if (mounted.current) setState((current) => ({ ...current, ...onError(err) }));
+        return null;
+      } finally {
+        if (mounted.current) setState((current) => ({ ...current, busy: null }));
+      }
+    },
+    [take]
+  );
+
+  const load = useCallback(
+    () =>
+      run(() => getJSON('cms/forge/queue'), {
+        begin: (current) => ({ status: current.status === 'idle' ? 'loading' : current.status }),
+        onError: (err) => ({
           status: 'error',
           error: err?.message || 'The queue could not be read.',
-        }));
-      }
-      return null;
-    }
-  }, [take]);
+        }),
+      }),
+    [run]
+  );
 
   useEffect(() => {
     if (enabled) load();
@@ -83,20 +97,12 @@ export function useForgeQueue({ enabled = true } = {}) {
 
   /** One write: `busy` names it, the answer replaces the list, an error lands on the state. */
   const write = useCallback(
-    async (busy, call) => {
-      setState((current) => ({ ...current, busy, error: null }));
-      try {
-        return await take(await call());
-      } catch (err) {
-        if (mounted.current) {
-          setState((current) => ({ ...current, error: err?.message || 'The queue write failed.' }));
-        }
-        return null;
-      } finally {
-        if (mounted.current) setState((current) => ({ ...current, busy: null }));
-      }
-    },
-    [take]
+    (busy, call) =>
+      run(call, {
+        begin: () => ({ busy }),
+        onError: (err) => ({ error: err?.message || 'The queue write failed.' }),
+      }),
+    [run]
   );
 
   const add = useCallback(
