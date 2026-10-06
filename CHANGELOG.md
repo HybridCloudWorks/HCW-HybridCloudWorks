@@ -3527,6 +3527,35 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Security: the Terraform run identity's role-assignment right is
+  constrained, so a run can assign what `infra/` needs and never make itself
+  Owner or read the vault (estate review 2026-10-06, finding SEC-1; owner
+  decision that day).** `scripts/bootstrap-terraform-oidc.ps1` grants
+  `id-plat-terraform-prod-cus-01` Contributor + Role Based Access Control
+  Administrator per subscription, and its comment said RBAC Administrator
+  "cannot grant Owner or User Access Administrator". It can: without a
+  condition the role writes any assignment, so a compromised workspace, a
+  leaked `TFC_TOKEN`, or a malicious provider executed during a plan could
+  have assigned itself Owner, or Key Vault Secrets Officer on
+  `kv-site-prod-cus-01`, and read every production credential. New
+  `scripts/Set-TerraformRbacCondition.ps1` applies Microsoft's constrained
+  delegation: an ABAC condition on every RBAC Administrator assignment the
+  identity holds, built from role names resolved live, that refuses writes
+  of Owner, User Access Administrator, RBAC Administrator, Key Vault
+  Administrator, Key Vault Data Access Administrator, Key Vault Secrets
+  Officer, Key Vault Crypto Officer and Key Vault Certificates Officer —
+  except Secrets Officer to a USER principal, which is the `admin_object_ids`
+  seeding window — and refuses deletes of Owner, User Access Administrator
+  and RBAC Administrator. Everything `infra/` assigns today passes.
+  Idempotent, honours `-WhatIf`, re-creates an unconditioned assignment at
+  the same scope. The bootstrap script calls it at the end of its role step
+  and its comment now says what the role does. **Owner step:** run the
+  script once (section 0 of `docs/runbooks/deployment-runbook.md`); success
+  is one `conditioned` line per subscription and every row `condition
+  present` in the listing that follows.
+
+### Fixed
+
 - **One recovery objective pair everywhere, the as-built zone posture
   written down, a regional-loss procedure, and the first restore drill
   approved (estate review 2026-10-06, finding PLAT-1; owner decision that

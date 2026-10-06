@@ -601,9 +601,15 @@ foreach ($credentialName in ($subjects.Keys | Sort-Object)) {
 # Contributor creates the resources. It cannot create role assignments, and
 # infra/ creates several (Function App -> Key Vault, -> Cosmos, -> OpenAI, and
 # the GitHub deploy identity's own roles), so a role-assignment writer is
-# required too. Role Based Access Control Administrator is the narrow one: it
-# can assign roles but cannot grant Owner or User Access Administrator, so the
-# Terraform identity cannot escalate itself.
+# required too. Role Based Access Control Administrator is the narrower one:
+# it holds roleAssignments/write and nothing else of Microsoft.Authorization.
+#
+# It is NOT narrow on its own. This comment used to say it "cannot grant
+# Owner or User Access Administrator"; it can — an unconditioned RBAC
+# Administrator writes any role assignment, Owner included. What stops the
+# Terraform identity escalating itself is the ABAC condition
+# scripts/Set-TerraformRbacCondition.ps1 puts on the assignment (estate
+# review 2026-10-06, SEC-1), which this step calls once the roles exist.
 Write-Step 'Subscription role assignments'
 
 $requiredRoles = @('Contributor', 'Role Based Access Control Administrator')
@@ -641,6 +647,18 @@ foreach ($id in $TargetSubscriptionIds) {
       Write-Act "Would assign $role on $label"
     }
   }
+}
+
+# The condition on the RBAC Administrator assignments: constrained delegation,
+# so the identity can assign what infra/ needs and never Owner, User Access
+# Administrator, RBAC Administrator, or a Key Vault officer role to anything
+# but a named human (the seeding window). The script is idempotent and
+# honours -WhatIf. Without an identity (a -WhatIf discovery run before the
+# identity exists) there is nothing to condition yet.
+if ($identity -and $identity.principalId) {
+  & (Join-Path $PSScriptRoot 'Set-TerraformRbacCondition.ps1') -PrincipalId $identity.principalId -WhatIf:$WhatIfPreference
+} else {
+  Write-Act 'Would apply the RBAC Administrator condition (scripts/Set-TerraformRbacCondition.ps1) once the identity exists'
 }
 
 # ===========================================================================

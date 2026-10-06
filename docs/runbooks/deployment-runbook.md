@@ -234,6 +234,30 @@ a project is in `Default Project`, with the space.
 
 Bootstrap is done when a plan authenticates. Continue from section 1.
 
+### The condition on the identity's role-assignment right
+
+Since 2026-10-06 (estate review, finding SEC-1) the identity's Role Based
+Access Control Administrator assignments carry an ABAC condition: it can
+assign the roles `infra/` needs and cannot assign Owner, User Access
+Administrator, RBAC Administrator or a Key Vault officer role to anything
+but a named human (the `admin_object_ids` seeding window), and cannot remove
+an Owner or User Access Administrator assignment. The bootstrap script
+applies it at the end of its role step; on an estate bootstrapped before
+that date, apply it once from a desktop signed in as the owner:
+
+```powershell
+pwsh -NoProfile -File scripts/Set-TerraformRbacCondition.ps1 -WhatIf
+```
+
+```powershell
+pwsh -NoProfile -File scripts/Set-TerraformRbacCondition.ps1
+```
+
+Success is one `conditioned` line per subscription and a final listing in
+which every row reads `condition present`. The script resolves the role ids
+by name, prints the condition it applies, and leaves an assignment that
+already carries it alone.
+
 ## 1. Preflight (every change)
 
 1. Branch from `main`; never push to `main` directly.
