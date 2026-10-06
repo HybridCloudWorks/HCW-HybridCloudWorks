@@ -187,6 +187,16 @@ const baseAddress = (address) => address.replace(/\[[^\]]*\]$/, '');
  * has applied. "Declaring an intended change" in the header has the rest.
  */
 export const DECLARED = [
+  // LAB-2 follow-up (2026-10-06): the three lab rules match the host by
+  // _ResourceId instead of Computer; each is one query-string update.
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_heartbeat_missing',
+    path: 'criteria[0].query',
+    before: 'Heartbeat | where Computer == "arcs-lab-hybrid-prod-cus-01"',
+    after:
+      'Heartbeat | where tolower(_ResourceId) endswith "/providers/microsoft.hybridcompute/machines/arcs-lab-hybrid-prod-cus-01"',
+    reason: 'LAB-2: Heartbeat carries the OS hostname in Computer; the Arc name is in _ResourceId',
+  },
   // LAB-2 (estate review 2026-10-06): three lab alert rules in the
   // Management resource group. The DCR they read from is updated in place in
   // the same plan (two streams and three data sources added); that update is

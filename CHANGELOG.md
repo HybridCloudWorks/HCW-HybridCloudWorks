@@ -3527,6 +3527,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Lab alert rules match the host by `_ResourceId`, not by `Computer`
+  (LAB-2 follow-up, 2026-10-06).** `alert-lab-heartbeat-prod-cus` fired at
+  its first evaluation after the apply, with the host up: for an Arc machine
+  the Heartbeat, Perf and Syslog tables carry the OS hostname in `Computer`
+  and the Arc resource name only in `_ResourceId`, so `Computer ==
+  "arcs-lab-hybrid-prod-cus-01"` matched nothing. The three rules now share
+  one predicate on the lower-cased `_ResourceId` suffix. The heartbeat
+  change is declared for the plan check; the disk and unit-failure queries
+  are multi-line and the plan shows them beside it. **Owner step:** confirm
+  the `hcw-azure` run (3 to change); the heartbeat alert then resolves on
+  its next evaluation.
+
 - **Lab host: the Coder server no longer holds the Docker socket, the
   agent's install and unit are tightened, the Arc agent is locked down, and
   ADR 0032's false detection claim is corrected (estate review 2026-10-06,

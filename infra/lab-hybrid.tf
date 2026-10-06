@@ -422,6 +422,14 @@ resource "azurerm_monitor_diagnostic_setting" "lab_hybrid_key_vault" {
 # list -g rg-mgmt-plat-prod-cus` shows them.
 locals {
   lab_hybrid_machine_name = "arcs-lab-hybrid-${var.environment}-${var.region_abbreviation}-01"
+  # How the three rules below find the host's rows. NOT `Computer ==
+  # <arc name>`: for an Arc machine the Heartbeat, Perf and Syslog tables
+  # carry the OS hostname in `Computer`, and the Arc resource name appears
+  # only in `_ResourceId`. The first version of these rules matched on
+  # `Computer` and alert-lab-heartbeat fired at its first evaluation after
+  # the apply (2026-10-06), with the host up and heartbeating. `_ResourceId`
+  # is lower-cased by the platform; the suffix compare is case-insensitive.
+  lab_hybrid_host_rows = "where tolower(_ResourceId) endswith \"/providers/microsoft.hybridcompute/machines/${lower(local.lab_hybrid_machine_name)}\""
 }
 
 resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_heartbeat_missing" {
@@ -440,7 +448,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_heartbeat_
   auto_mitigation_enabled = true
 
   criteria {
-    query                   = "Heartbeat | where Computer == \"${local.lab_hybrid_machine_name}\""
+    query                   = "Heartbeat | ${local.lab_hybrid_host_rows}"
     time_aggregation_method = "Count"
     operator                = "LessThan"
     threshold               = 1
@@ -483,7 +491,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_disk_used"
   criteria {
     query                   = <<-KQL
       Perf
-      | where Computer == "${local.lab_hybrid_machine_name}"
+      | ${local.lab_hybrid_host_rows}
       | where ObjectName == "Logical Disk" and CounterName == "% Used Space" and InstanceName == "/"
       | summarize UsedPct = max(CounterValue)
     KQL
@@ -528,7 +536,7 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_unit_faile
   mute_actions_after_alert_duration = "PT6H"
 
   criteria {
-    query                   = "Syslog | where Computer == \"${local.lab_hybrid_machine_name}\" and ProcessName == \"hcw-unit-failed\""
+    query                   = "Syslog | ${local.lab_hybrid_host_rows} | where ProcessName == \"hcw-unit-failed\""
     time_aggregation_method = "Count"
     operator                = "GreaterThan"
     threshold               = 0
