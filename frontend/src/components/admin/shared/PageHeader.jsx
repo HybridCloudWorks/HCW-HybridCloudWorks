@@ -10,7 +10,7 @@
  * list of short lines shown in a collapsible "How this works" panel for a
  * first-time user; it is closed by default and remembered per page.
  */
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router';
 import { ChevronDown, ChevronRight, HelpCircle } from 'lucide-react';
 import { navItemFor, navGroupFor } from '@/config/adminNav';
@@ -67,12 +67,21 @@ export default function PageHeader({
   const [helpOpen, setHelpOpen] = useRemembered(`contentforge-help:${pathname}`, false);
   const helpId = `page-help-${pathname.replace(/[^a-z0-9]+/gi, '-')}`;
 
+  // The page's title is the document's title (WCAG 2.4.2; estate review
+  // 2026-10-06, AP-F3). No admin page used Helmet, so the tab, the history
+  // entry and the route announcer carried whatever the public site set last.
+  // AdminLayout sets a registry fallback on every route; this is the page's
+  // own, which wins because it commits later.
+  useEffect(() => {
+    if (title) document.title = `${title} · ContentForge`;
+  }, [title]);
+
   return (
     <header className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           {groupLabel && (
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+            <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
               {groupLabel}
             </p>
           )}

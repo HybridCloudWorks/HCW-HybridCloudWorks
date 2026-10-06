@@ -155,7 +155,7 @@ describe('the admin sidebar', () => {
   it('keeps the live count badges for the review queue, the editor and live pages', async () => {
     renderAdmin();
     // queue = 2 + 1 needing review; editor = 1 + 3 in progress; live = 5 + 2.
-    const queue = screen.getByRole('link', { name: 'Review Queue' });
+    const queue = screen.getByRole('link', { name: /^Review Queue/ });
     const editor = screen.getByRole('link', { name: 'Editor' });
     const live = screen.getByRole('link', { name: 'Live Pages' });
     expect(await within(queue).findByText('3')).toBeInTheDocument();
@@ -166,22 +166,24 @@ describe('the admin sidebar', () => {
   it('keeps the badge on the collapsed icon rail', async () => {
     stored['contentforge-sidebar-collapsed'] = 'true';
     renderAdmin();
-    const queue = screen.getByRole('link', { name: 'Review Queue' });
+    const queue = screen.getByRole('link', { name: /^Review Queue/ });
     expect(await within(queue).findByText('3')).toBeInTheDocument();
   });
 
   it('explains every item on hover with the registry sentence', () => {
     renderAdmin();
-    const queue = screen.getByRole('link', { name: 'Review Queue' });
+    const queue = screen.getByRole('link', { name: /^Review Queue/ });
     expect(queue).toHaveAttribute('title', group('Pipeline').items[2].description);
     const labs = screen.getByRole('link', { name: 'Labs' });
     expect(labs.getAttribute('title')).toMatch(/learning environments/i);
   });
 
   it('shows both lines of the brand, with room for them', () => {
-    renderAdmin();
-    const title = screen.getByText('ContentForge');
-    expect(screen.getByText('Influencer CMS')).toBeInTheDocument();
+    const { container } = renderAdmin();
+    // Scoped to the rail: the phone top bar carries the brand too (AP-F1).
+    const aside = within(container.querySelector('aside'));
+    const title = aside.getByText('ContentForge');
+    expect(aside.getByText('Influencer CMS')).toBeInTheDocument();
     expect(title.className).not.toContain('leading-none');
     expect(title.parentElement.parentElement.className).not.toMatch(/(^|\s)h-14(\s|$)/);
   });
@@ -215,5 +217,84 @@ describe('the admin sidebar', () => {
     const mains = screen.getAllByRole('main');
     expect(mains).toHaveLength(1);
     expect(mains[0]).toHaveAttribute('id', 'main-content');
+  });
+
+  it('folds the live count into the link name, so a screen reader hears it and the badge is decoration (AP-F2)', async () => {
+    renderAdmin();
+    const queue = await screen.findByRole('link', { name: 'Review Queue, 3 waiting' });
+    expect(within(queue).getByText('3')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByRole('link', { name: 'Labs' })).toBeInTheDocument();
+  });
+
+  it('sets a document title for every admin route from the registry (AP-F3)', () => {
+    document.title = 'HybridCloudWorks';
+    renderAdmin('/admin/labs');
+    expect(document.title).toBe('Labs · ContentForge');
+  });
+});
+
+/**
+ * The phone shell (estate review 2026-10-06, AP-F1): below `md` the rail is
+ * not rendered; a top bar carries a menu button that opens a drawer with every
+ * label visible, and the drawer closes on navigation.
+ */
+describe('the phone drawer', () => {
+  beforeEach(() => {
+    vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
+    postJSON.mockResolvedValue({ stats: { blog: { needsReview: 2 } } });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function renderShell() {
+    return render(
+      <main id="main-content" tabIndex={-1}>
+        <MemoryRouter initialEntries={['/admin/labs']}>
+          <Routes>
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route path="labs" element={<h1>Labs page</h1>} />
+              <Route path="queue" element={<h1>Queue page</h1>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </main>
+    );
+  }
+
+  it('hides the rail below md and offers a menu button in a top bar', () => {
+    const { container } = renderShell();
+    const aside = container.querySelector('aside');
+    expect(aside.className).toMatch(/(^|\s)hidden(\s|$)/);
+    expect(aside.className).toMatch(/(^|\s)md:flex(\s|$)/);
+    const bar = screen.getByRole('button', { name: 'Open menu' }).closest('div');
+    expect(bar.className).toMatch(/(^|\s)md:hidden(\s|$)/);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('opens a labelled drawer with every item readable, and closes it when an item is chosen', async () => {
+    const { findByRole, getByRole, queryByRole } = screen;
+    renderShell();
+    getByRole('button', { name: 'Open menu' }).click();
+    const drawer = await findByRole('dialog');
+    const menu = within(drawer).getByRole('navigation', { name: 'ContentForge menu' });
+    // Labels are text in the drawer, not tooltips: a phone has no hover.
+    expect(within(menu).getByText('Review Queue')).toBeInTheDocument();
+    expect(within(menu).getByText('Platform Settings')).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: 'Sign Out' })).toBeInTheDocument();
+    within(menu)
+      .getByRole('link', { name: /Review Queue/ })
+      .click();
+    await screen.findByText('Queue page');
+    await vi.waitFor(() => expect(queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('gives the content column phone padding and a wider desktop column than before', () => {
+    const { container } = renderShell();
+    const column = container.querySelector('#admin-main > div');
+    expect(column.className).toContain('max-w-5xl');
+    expect(column.className).toMatch(/(^|\s)p-4(\s|$)/);
+    expect(column.className).toMatch(/(^|\s)md:p-6(\s|$)/);
   });
 });
