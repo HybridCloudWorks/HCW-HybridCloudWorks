@@ -70,6 +70,52 @@ const DOC = {
   _etag: 'e1',
 };
 
+const QUEUE_ITEMS = [
+  {
+    id: 'q-1',
+    url: 'https://www.finops.org/insights/agentic-finops-adoption/',
+    title: '',
+    status: 'queued',
+    kind: '',
+    ideaOrigin: 'imported-source',
+    brief: {
+      mode: 'url',
+      sourceUrl: 'https://www.finops.org/insights/agentic-finops-adoption/',
+      objective: '',
+    },
+    addedAt: '2026-10-06T10:00:00.000Z',
+    updatedAt: '2026-10-06T10:00:00.000Z',
+  },
+  {
+    id: 'q-2',
+    url: 'https://learn.microsoft.com/azure/thing',
+    title: '',
+    status: 'queued',
+    kind: 'guide',
+    ideaOrigin: 'imported-source',
+    brief: {
+      mode: 'url',
+      sourceUrl: 'https://learn.microsoft.com/azure/thing',
+      objective: 'Teach',
+      tone: 'Opinionated',
+    },
+    addedAt: '2026-10-06T10:01:00.000Z',
+    updatedAt: '2026-10-06T10:01:00.000Z',
+  },
+  {
+    id: 'q-3',
+    url: 'https://aws.amazon.com/blogs/x',
+    title: 'Forged one',
+    status: 'forged',
+    contentId: 'c1',
+    kind: '',
+    ideaOrigin: 'imported-source',
+    brief: { mode: 'url', sourceUrl: 'https://aws.amazon.com/blogs/x' },
+    addedAt: '2026-10-06T09:00:00.000Z',
+    updatedAt: '2026-10-06T11:00:00.000Z',
+  },
+];
+
 function renderPage(entry = '/admin/forge-studio') {
   return render(
     <MemoryRouter initialEntries={[entry]}>
@@ -91,6 +137,8 @@ beforeEach(() => {
     if (route === 'getForgeConfig') return CONFIG;
     if (route.startsWith('cms/content/item')) return { success: true, item: DOC };
     if (route.startsWith('cms/platform-settings')) return { value: null };
+    if (route === 'cms/forge/queue')
+      return { ok: true, items: QUEUE_ITEMS, total: QUEUE_ITEMS.length, max: 200 };
     if (route.startsWith('cms/content?')) {
       return {
         items: [{ id: 'old-1', Title: 'An older piece', contentStatus: 'published', Live: true }],
@@ -460,5 +508,158 @@ describe('Voice & profile (the configuration, moved whole)', () => {
     );
     fireEvent.click(within(alert).getByRole('button', { name: /Try again/ }));
     expect(await screen.findByLabelText(/Word soup/)).toBeInTheDocument();
+  });
+});
+
+describe('From a URL with many URLs, and the Forge Studio Queue (owner request 2026-10-06)', () => {
+  const openUrl = async () => {
+    renderPage();
+    await screen.findByText('Forge Studio');
+    fireEvent.click(screen.getByRole('button', { name: /From a URL/ }));
+    return screen.getByLabelText('Source URL, or several');
+  };
+
+  it('one URL still continues to the Brief with it as the source', async () => {
+    const box = await openUrl();
+    fireEvent.change(box, { target: { value: 'https://a.test/one' } });
+    fireEvent.click(screen.getByRole('button', { name: /Continue to the brief/ }));
+    expect(selectedTab()).toBe('Brief');
+    expect(screen.getByText(/https:\/\/a\.test\/one/)).toBeInTheDocument();
+  });
+
+  it('several URLs become rows with Remove each, Remove all, and Add all sends them to the queue', async () => {
+    postJSON.mockImplementation(async (route, body) => {
+      if (route === 'cms/forge/queue') {
+        return {
+          ok: true,
+          items: QUEUE_ITEMS,
+          total: 3,
+          max: 200,
+          added: body.urls.map((u, i) => `n-${i}`),
+          skipped: [],
+        };
+      }
+      return { ok: true };
+    });
+    const box = await openUrl();
+    fireEvent.change(box, {
+      target: { value: 'Read https://a.test/one and https://b.test/two#frag\nhttps://a.test/one' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Detect URLs' }));
+    const list = within(screen.getByTestId('detected-urls'));
+    expect(list.getByText('2 URLs detected')).toBeInTheDocument();
+    fireEvent.click(list.getByRole('button', { name: 'Remove b.test/two' }));
+    expect(list.getByText('1 URL detected')).toBeInTheDocument();
+    // One left: it can continue to the brief on its own; add another first.
+    fireEvent.change(box, { target: { value: 'https://c.test/three' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Detect URLs' }));
+    expect(list.getByText('2 URLs detected')).toBeInTheDocument();
+    fireEvent.click(list.getByRole('button', { name: /Add all to the queue/ }));
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('cms/forge/queue', {
+        urls: ['https://a.test/one', 'https://c.test/three'],
+      })
+    );
+    expect(await screen.findByText(/2 added to the queue\./)).toBeInTheDocument();
+    expect(screen.queryByTestId('detected-urls')).not.toBeInTheDocument();
+
+    fireEvent.change(box, { target: { value: 'https://d.test/4 https://e.test/5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Detect URLs' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Remove all' }));
+    expect(screen.queryByTestId('detected-urls')).not.toBeInTheDocument();
+  });
+
+  it('the Queue card counts the entries still to forge and opens the Queue tab', async () => {
+    renderPage();
+    await screen.findByText('Forge Studio');
+    const card = await screen.findByRole('button', { name: /Queue · 2/ });
+    fireEvent.click(card);
+    expect(selectedTab()).toBe('Queue');
+    expect(await screen.findAllByTestId('queue-row')).toHaveLength(3);
+  });
+
+  it('selecting one entry shows its fields; Save applies them and starts its forge job', async () => {
+    postJSON.mockImplementation(async (route, body) => {
+      if (route === 'cms/forge/queue/update') {
+        return { ok: true, items: QUEUE_ITEMS, total: 3, max: 200, applied: body.ids };
+      }
+      if (route === 'cms/forge/queue/forge') {
+        return {
+          ok: true,
+          items: QUEUE_ITEMS.map((i) =>
+            body.ids.includes(i.id) ? { ...i, status: 'forging' } : i
+          ),
+          total: 3,
+          max: 200,
+          started: body.ids.map((id) => ({ id, jobId: `j-${id}` })),
+        };
+      }
+      return { ok: true };
+    });
+    renderPage('/admin/forge-studio?tab=queue');
+    const rows = await screen.findAllByTestId('queue-row');
+    expect(rows).toHaveLength(3);
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Select learn.microsoft.com/azure/thing' })
+    );
+    expect(screen.getByText('Fields for learn.microsoft.com/azure/thing')).toBeInTheDocument();
+    expect(screen.getByLabelText('Objective')).toHaveValue('Teach');
+    expect(screen.getByLabelText('Tone')).toHaveValue('Opinionated');
+    fireEvent.change(screen.getByLabelText('Key message'), { target: { value: 'One thing' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/ }));
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith(
+        'cms/forge/queue/update',
+        expect.objectContaining({
+          ids: ['q-2'],
+          fields: expect.objectContaining({
+            objective: 'Teach',
+            keyMessage: 'One thing',
+            tone: 'Opinionated',
+            kind: 'guide',
+          }),
+        })
+      )
+    );
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('cms/forge/queue/forge', { ids: ['q-2'] })
+    );
+    expect(await screen.findByText('Forging')).toBeInTheDocument();
+  });
+
+  it('selecting several shows the shared fields, sends only the filled ones, and a forged entry opens its draft', async () => {
+    postJSON.mockImplementation(async (route, body) => ({
+      ok: true,
+      items: QUEUE_ITEMS,
+      total: 3,
+      max: 200,
+      applied: body.ids,
+      started: [],
+    }));
+    renderPage('/admin/forge-studio?tab=queue');
+    await screen.findAllByTestId('queue-row');
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Select www.finops.org/insights/agentic-finops-adoption',
+      })
+    );
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Select learn.microsoft.com/azure/thing' })
+    );
+    expect(screen.getByText('Shared fields for 2 entries')).toBeInTheDocument();
+    // The two disagree on objective, so it is blank; set a shared tone and save for later.
+    expect(screen.getByLabelText('Objective')).toHaveValue('');
+    fireEvent.change(screen.getByLabelText('Tone'), { target: { value: 'Conversational' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save for later' }));
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('cms/forge/queue/update', {
+        ids: ['q-1', 'q-2'],
+        fields: { tone: 'Conversational' },
+      })
+    );
+    expect(postJSON).not.toHaveBeenCalledWith('cms/forge/queue/forge', expect.anything());
+
+    fireEvent.click(screen.getByRole('button', { name: /^Open/ }));
+    expect(selectedTab()).toBe('Draft');
   });
 });

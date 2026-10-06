@@ -10,6 +10,7 @@ import { readFileSync } from 'node:fs';
 // duplicate — so the registry is faked rather than shared across test files.
 vi.mock('../lib/jobs.js', () => ({ registerJobType: vi.fn() }));
 vi.mock('../lib/cosmos-client.js', () => ({
+  ADMIN_CONFIG_PARTITION: 'admin_config',
   readDoc: vi.fn(),
   queryDocs: vi.fn(),
   patchDoc: vi.fn(),
@@ -24,11 +25,15 @@ vi.mock('../lib/ai/router.js', () => ({
   getActiveAiProvider: vi.fn(),
 }));
 const issueBuild = vi.hoisted(() => vi.fn(async () => ({ success: true })));
+const notify = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../lib/job-failure-notify.js', () => ({
+  createJobFailureOnComplete: vi.fn(() => notify),
+}));
 vi.mock('../lib/newsletter/issue.js', () => ({
   createIssueBuilder: vi.fn(() => ({ build: issueBuild })),
 }));
 
-const { resolveForgeTargets, runForgeFromUrl, FORGE_MAX_BATCH, forgeStore } =
+const { resolveForgeTargets, runForgeFromUrl, forgeFromUrlComplete, FORGE_MAX_BATCH, forgeStore } =
   await import('./forge-jobs.js');
 const { registerJobType } = await import('../lib/jobs.js');
 
@@ -205,5 +210,133 @@ describe('runForgeFromUrl', () => {
     await expect(runForgeFromUrl({ url: 'https://a.example/x' }, d)).rejects.toThrow(
       /Generation failed/
     );
+  });
+});
+
+describe('forge-from-url with a brief on the payload (the Forge Studio Queue, 2026-10-06)', () => {
+  const PAGE = `<html><head><title>Scraped Page</title></head></html>`;
+  const deps = (over = {}) => ({
+    scrape: vi.fn(async () => ({
+      success: true,
+      markdown: '# Source',
+      html: PAGE,
+      images: [],
+      wordCount: 10,
+      scrapeMode: 'direct_html',
+    })),
+    forge: {
+      runForgePipeline: vi.fn(async () => ({
+        ok: true,
+        result: { success: true, contentId: 'new-1', status: 'forge_ready' },
+      })),
+    },
+    store: { upsertDoc: vi.fn(), patchDoc: vi.fn(async () => ({ _etag: 'e2' })) },
+    now: () => new Date('2026-10-06T00:00:00Z'),
+    uuid: () => 'new-1',
+    log: {},
+    actor: { email: 'owner@hcw' },
+    ...over,
+  });
+
+  it('applies the brief onto the source document before the pipeline runs, in URL mode on the scraped URL', async () => {
+    const d = deps();
+    const calls = [];
+    d.store.patchDoc.mockImplementation(async () => {
+      calls.push('brief');
+      return { _etag: 'e2' };
+    });
+    d.forge.runForgePipeline.mockImplementation(async () => {
+      calls.push('forge');
+      return { ok: true, result: { success: true, contentId: 'new-1', status: 'forge_ready' } };
+    });
+    await runForgeFromUrl(
+      {
+        url: 'https://learn.microsoft.com/azure/x',
+        brief: { objective: 'Explain', mode: 'idea', sourceUrl: 'https://evil.test', targetChannel: 'coder_corner' },
+        kind: 'guide',
+        ideaOrigin: 'imported-source',
+        queueItemId: 'q-1',
+      },
+      d
+    );
+    expect(calls).toEqual(['brief', 'forge']);
+    expect(d.store.patchDoc).toHaveBeenCalledWith(
+      'content',
+      'new-1',
+      expect.objectContaining({
+        kind: 'guide',
+        ideaOrigin: 'imported-source',
+        type: 'coder_corner',
+        publishTarget: 'coder_corner',
+        forgeBrief: expect.objectContaining({
+          objective: 'Explain',
+          mode: 'url',
+          sourceUrl: 'https://learn.microsoft.com/azure/x',
+          savedBy: 'owner@hcw',
+        }),
+        activity: [expect.objectContaining({ action: 'forge_brief_saved', actor: 'owner@hcw' })],
+      })
+    );
+  });
+
+  it('applies a brief that names only a tone (the URL gives it substance) and none when the payload has none', async () => {
+    const d = deps();
+    await runForgeFromUrl({ url: 'https://a.test/x', brief: { tone: 'Opinionated' } }, d);
+    expect(d.store.patchDoc).toHaveBeenCalledTimes(1);
+    expect(d.store.patchDoc.mock.calls[0][2].forgeBrief).toMatchObject({
+      tone: 'Opinionated',
+      sourceUrl: 'https://a.test/x',
+    });
+    await runForgeFromUrl({ url: 'https://a.test/x' }, d);
+    expect(d.store.patchDoc).toHaveBeenCalledTimes(1);
+    expect(d.forge.runForgePipeline).toHaveBeenCalledTimes(2);
+  });
+
+  it('onComplete hands the failure ping a payload with the URL and entry id only, never the brief', async () => {
+    notify.mockClear();
+    await forgeFromUrlComplete(
+      {
+        job: {
+          id: 'j3',
+          type: 'forge-from-url',
+          payload: { url: 'https://a.test', brief: { objective: 'secret plan' }, kind: 'guide', queueItemId: 'q-1' },
+        },
+        status: 'failed',
+        result: null,
+        error: 'scrape 403',
+      },
+      { context: {}, now: () => new Date('2026-10-06T00:00:00Z') }
+    );
+    expect(notify).toHaveBeenCalledTimes(1);
+    const [info] = notify.mock.calls[0];
+    expect(info.job.payload).toEqual({ url: 'https://a.test', queueItemId: 'q-1' });
+    expect(JSON.stringify(info)).not.toContain('secret plan');
+  });
+
+  it('onComplete records the outcome on the queue entry only when the job came from the queue', async () => {
+    const cosmos = await import('../lib/cosmos-client.js');
+    cosmos.readDoc.mockClear?.();
+    const hookCtx = { context: {}, now: () => new Date('2026-10-06T00:00:00Z') };
+    await forgeFromUrlComplete(
+      { job: { id: 'j1', type: 'forge-from-url', payload: { url: 'https://a.test' } }, status: 'succeeded', result: { success: true, contentId: 'c1' }, error: null },
+      hookCtx
+    );
+    expect(cosmos.readDoc).not.toHaveBeenCalledWith('admin_config', 'forge_queue', 'admin_config');
+    await forgeFromUrlComplete(
+      {
+        job: { id: 'j2', type: 'forge-from-url', payload: { url: 'https://a.test', queueItemId: 'q-1' } },
+        status: 'failed',
+        result: null,
+        error: 'scrape 403',
+      },
+      hookCtx
+    );
+    expect(cosmos.readDoc).toHaveBeenCalledWith('admin_config', 'forge_queue', 'admin_config');
+  });
+
+  it('the registered type takes a 16 KiB payload and uses the queue-aware onComplete', () => {
+    const spec = registrations.find(([name]) => name === 'forge-from-url')[1];
+    expect(spec.maxPayloadBytes).toBe(16384);
+    expect(spec.onComplete).toBe(forgeFromUrlComplete);
   });
 });

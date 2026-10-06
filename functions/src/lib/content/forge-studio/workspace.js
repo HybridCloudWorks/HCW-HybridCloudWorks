@@ -92,6 +92,25 @@ function briefUpdate({ brief, kind, ideaOrigin, stamp, actor, doc }) {
   };
 }
 
+/**
+ * Write a normalised brief (and kind, idea origin) onto a document: the
+ * route below and the forge-from-url job share it, so a brief carried on a
+ * job lands exactly as one saved from the Brief tab. Resolves to
+ * `{ update, written }`.
+ */
+export async function applyBrief(store, { doc, brief, kind = '', ideaOrigin = '', stamp, actor }) {
+  const update = briefUpdate({
+    brief,
+    kind: text(kind, 60),
+    ideaOrigin: text(ideaOrigin, 60),
+    stamp,
+    actor,
+    doc,
+  });
+  const written = await store.patchDoc('content', doc.id, update);
+  return { update, written };
+}
+
 /** POST cms/forge/brief — { contentId, brief, kind, ideaOrigin } */
 async function saveBrief(ctx, body, auth, context) {
   const target = await loadTarget(ctx.store, body);
@@ -109,8 +128,14 @@ async function saveBrief(ctx, body, auth, context) {
   const stamp = ctx.now().toISOString();
   const actor = actorName(auth.user);
   try {
-    const update = briefUpdate({ brief, kind, ideaOrigin, stamp, actor, doc: target.doc });
-    const written = await ctx.store.patchDoc('content', target.contentId, update);
+    const { update, written } = await applyBrief(ctx.store, {
+      doc: target.doc,
+      brief,
+      kind,
+      ideaOrigin,
+      stamp,
+      actor,
+    });
     return json(200, {
       ok: true,
       contentId: target.contentId,

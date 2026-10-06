@@ -2,8 +2,9 @@
  * Forge Studio's tabs, and where old addresses land (ADR 0033 §7 slice 2).
  *
  * The Studio was one configuration form until ADR 0033; it is now a
- * workspace that walks Start → Brief → Draft → Finish, with the voice
- * configuration kept whole under "Voice & profile". A bookmark to the old
+ * workspace that walks Start → Brief → Draft → Finish, with the Forge Studio
+ * Queue (many URLs at once, owner request 2026-10-06) beside them and the
+ * voice configuration kept whole under "Voice & profile". A bookmark to the old
  * page (no `?tab=`) opens on Start; the ids below name what the old form's
  * sections were called, so a link written from those words lands on the
  * configuration rather than on an empty workspace.
@@ -16,6 +17,7 @@ export const TABS = Object.freeze([
   { id: 'brief', label: 'Brief' },
   { id: 'draft', label: 'Draft' },
   { id: 'finish', label: 'Finish' },
+  { id: 'queue', label: 'Queue' },
   { id: 'voice', label: 'Voice & profile' },
 ]);
 

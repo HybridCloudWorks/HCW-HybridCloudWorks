@@ -10,6 +10,9 @@
  *                    draft, the editable text and the AI actions
  *   Finish           where it goes next: Drafts, review, Editor, Publish,
  *                    Social Hub, Image Prompts, Listen & Learn
+ *   Queue            the Forge Studio Queue: many URLs, their "From a URL"
+ *                    fields completed singly or in bulk, each sent into
+ *                    the forge-from-url job with its brief
  *   Voice & profile  the forge's configuration, moved here whole
  *
  * The session (useForgeSession) is held here so the four workspace tabs
@@ -30,8 +33,10 @@ import StartTab from '@/components/admin/forge-studio/StartTab';
 import BriefTab from '@/components/admin/forge-studio/BriefTab';
 import DraftTab from '@/components/admin/forge-studio/DraftTab';
 import FinishTab from '@/components/admin/forge-studio/FinishTab';
+import QueueTab from '@/components/admin/forge-studio/QueueTab';
 import VoiceProfileTab from '@/components/admin/forge-studio/VoiceProfileTab';
 import { TABS, resolveTab } from '@/components/admin/forge-studio/tabs';
+import { useForgeQueue } from '@/components/admin/forge-studio/useForgeQueue';
 import { useForgeSession } from '@/components/admin/forge-studio/useForgeSession';
 
 const HELP = [
@@ -39,6 +44,7 @@ const HELP = [
   'Brief: say what it is for, who reads it, what it becomes (kind) and how it started (idea origin), plus tone, length, topics, sources and the channel it publishes to.',
   'Draft: the document is created on the Drafts page first (Drafting), the brief is saved on it, then the forge writes, scrubs and grades the first draft. Edit the text; each AI action is one call to the router and is recorded on the document.',
   'Finish: send it to review, open it in the Editor, schedule it on Publish, or hand it to the Social Hub, Image Prompts or Listen & Learn with its id.',
+  'Queue: several URLs at once. Paste them or import .html files under From a URL; each becomes an entry whose fields you complete one at a time or together, and Save sends the selected entries into the forge with their brief.',
   'Voice & profile: the voice the forge writes in, the guardrails, the publish threshold and Auto-Forge. Calibration only suggests; you accept each chip.',
 ];
 
@@ -105,6 +111,7 @@ export default function ForgeStudioPage() {
     initialContentId: searchParams.get('contentId') || '',
     onContentId: (id) => setParams({ contentId: id || '' }),
   });
+  const queue = useForgeQueue({ enabled: authReady });
 
   const loadConfig = useCallback(() => {
     getJSON('getForgeConfig')
@@ -146,8 +153,24 @@ export default function ForgeStudioPage() {
     loadConfig();
   };
 
+  const openDocument = (contentId) => {
+    setParams({ tab: 'draft', contentId });
+  };
+
   const panels = {
-    start: () => <StartTab formats={formats} onStart={start} />,
+    start: () => (
+      <StartTab
+        formats={formats}
+        onStart={start}
+        onQueueAdd={queue.add}
+        onOpenQueue={() => setTab('queue')}
+        queueCount={queue.items.filter((entry) => entry.status !== 'forged').length}
+        queueBusy={Boolean(queue.busy)}
+      />
+    ),
+    queue: () => (
+      <QueueTab queue={queue} onOpenDocument={openDocument} onStart={() => setTab('start')} />
+    ),
     brief: () => (
       <BriefTab
         session={session}
