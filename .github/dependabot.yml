@@ -156,3 +156,17 @@ updates:
     cooldown:
       # Same constraint as the /infra entry: default-days only.
       default-days: 3
+
+  # The lab image's base (lab-image/Dockerfile, FROM by digest). Dependabot
+  # cannot read versions.env or the digests pinned where the images are
+  # consumed; .github/workflows/lab-supply-chain.yml watches those. This adds
+  # the one thing it can watch: the base image digest on the FROM lines
+  # (LAB-3, estate review 2026-10-06).
+  - package-ecosystem: docker
+    directory: /lab-image
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 3
