@@ -3527,6 +3527,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The browser suites run on every pull request, and the admin spec can
+  fail (estate review 2026-10-06, finding QA-1; owner decision that day).**
+  No workflow ran Playwright: the hydration (6 tests), console-error (17
+  routes) and smoke specs executed only when someone remembered, and
+  `e2e/contentforge.spec.js` held sixteen tests whose every assertion
+  short-circuited on `page.url().includes('admin')`, so a blank shell or a
+  removed auth guard passed. `ci.yml` gains an `e2e` job, deliberately not
+  a required check for two weeks: it installs Chromium, builds once, serves
+  the build with `vite preview`, and runs hydration, console-errors, smoke
+  and the rewritten admin spec on desktop Chrome and a Pixel 5 (a new
+  `mobile-chrome` project; CI retries drop from two to one). The admin spec
+  now pins what a visitor who has not signed in gets on four admin routes:
+  the sign-in card, no navigation, no menu button, no data; that the card is
+  keyboard reachable and the route titled; that a 375 px viewport never
+  scrolls sideways; and that the public home page never loads the identity
+  library. An authenticated journey needs a stubbed identity and is the
+  next step. The report and traces upload on failure.
 - **Admin Portal on a phone: an off-canvas menu with every label readable,
   a document title on every admin route, and the live counts in the link
   names (estate review 2026-10-06, findings AP-F1, AP-F2, AP-F3; owner
