@@ -19,15 +19,26 @@
  * says why; Save again re-queues it).
  */
 import { ADMIN_CONFIG_PARTITION } from '../../cosmos-client.js';
-import { JOBS_CONTAINER, newJobDoc } from '../../jobs.js';
+import { JOBS_CONTAINER, TERMINAL_JOB_STATUSES, newJobDoc } from '../../jobs.js';
 import { actorName, json } from './config.js';
 import { normalizeBrief, text } from './brief.js';
 
 export const QUEUE_DOC_ID = 'forge_queue';
 export const MAX_QUEUE_ITEMS = 200;
+/**
+ * The serialised document may not pass this: a Cosmos item is capped at
+ * 2 MB, and 200 entries each carrying a full brief (twelve 2,000-character
+ * sources, three 2,000-character texts) would. Half the limit, so a write
+ * is refused (413) long before Cosmos refuses it.
+ */
+export const MAX_QUEUE_BYTES = 1_000_000;
 export const MAX_URLS_PER_ADD = 100;
 export const MAX_IDS_PER_CALL = 200;
 export const QUEUE_WRITE_ATTEMPTS = 4;
+/** The job's onComplete hooks finish together and all write this one document. */
+export const OUTCOME_WRITE_ATTEMPTS = 10;
+/** Forging entries the list reconciles against their job documents per read. */
+export const RECONCILE_PER_READ = 20;
 export const QUEUE_STATUSES = Object.freeze(['queued', 'forging', 'forged', 'failed']);
 /** The brief fields a queue entry may carry; `mode` and `sourceUrl` are the entry's own. */
 export const QUEUE_BRIEF_FIELDS = Object.freeze([
@@ -82,13 +93,30 @@ export async function readQueue(store) {
   return { ...doc, items: Array.isArray(doc.items) ? doc.items : [] };
 }
 
+const tooLarge = () =>
+  Object.assign(
+    new Error(
+      `The Forge Studio Queue is full by size (over ${Math.round(MAX_QUEUE_BYTES / 1000)} KB): forge or remove entries before adding more.`
+    ),
+    { code: 413 }
+  );
+
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * Read → `mutate(items)` → write under the ETag, retried while another
- * writer gets there first. `mutate` returns the next items array (or null
- * to write nothing). Resolves to the document as written.
+ * writer gets there first (`attempts`, with a short growing pause between
+ * tries when `sleep` is given). `mutate` returns the next items array (or
+ * null to write nothing). Refuses (413) a document over MAX_QUEUE_BYTES.
+ * Resolves to the document as written.
  */
-export async function updateQueue(store, mutate, { now = () => new Date() } = {}) {
-  for (let attempt = 0; attempt < QUEUE_WRITE_ATTEMPTS; attempt += 1) {
+export async function updateQueue(
+  store,
+  mutate,
+  { now = () => new Date(), attempts = QUEUE_WRITE_ATTEMPTS, sleep = null } = {}
+) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0 && sleep) await sleep(25 * 2 ** Math.min(attempt, 5) + Math.random() * 25);
     const current = await readQueue(store);
     const nextItems = await mutate(current.items.map((item) => ({ ...item })));
     if (nextItems === null) return current;
@@ -99,6 +127,7 @@ export async function updateQueue(store, mutate, { now = () => new Date() } = {}
       items: nextItems,
       updatedAt: now().toISOString(),
     };
+    if (Buffer.byteLength(JSON.stringify(next), 'utf8') > MAX_QUEUE_BYTES) throw tooLarge();
     try {
       if (current._etag) {
         return await store.replaceDocIfMatch('admin_config', next, {
@@ -202,8 +231,16 @@ export function outcomeFor({ status, result, error }) {
 /**
  * The job's onComplete half: the entry `queueItemId` names takes the outcome.
  * Nothing when the entry is gone (the owner removed it while the job ran).
+ * Ten attempts with a growing pause, because a bulk Save's jobs finish close
+ * together and every hook writes this one document; and should they all
+ * lose, the list's reconcile (below) reads the job document on the next
+ * open, so a finished job is never left showing as forging.
  */
-export async function recordQueueOutcome(store, { queueItemId, status, result, error }, { now }) {
+export async function recordQueueOutcome(
+  store,
+  { queueItemId, status, result, error },
+  { now, sleep = defaultSleep }
+) {
   const id = String(queueItemId || '');
   if (!SAFE_ID.test(id)) return null;
   const outcome = outcomeFor({ status, result, error });
@@ -215,7 +252,39 @@ export async function recordQueueOutcome(store, { queueItemId, status, result, e
       items[index] = { ...items[index], ...outcome, updatedAt: now().toISOString() };
       return items;
     },
-    { now }
+    { now, attempts: OUTCOME_WRITE_ATTEMPTS, sleep }
+  );
+}
+
+/**
+ * Forging entries whose job has already finished take its outcome from the
+ * job document: the hook above may have lost every ETag race, or the host
+ * may have recycled before it ran. At most RECONCILE_PER_READ per read, so a
+ * list stays one page of job reads. Resolves to the queue after.
+ */
+export async function reconcileForging(ctx, queue) {
+  const forging = queue.items
+    .filter((item) => item.status === 'forging' && item.jobId)
+    .slice(0, RECONCILE_PER_READ);
+  if (!forging.length) return queue;
+  const outcomes = new Map();
+  for (const item of forging) {
+    const job = await ctx.store.readDoc(JOBS_CONTAINER, item.jobId, item.jobId).catch(() => null);
+    if (job && TERMINAL_JOB_STATUSES.includes(job.status)) {
+      outcomes.set(item.id, outcomeFor({ status: job.status, result: job.result, error: job.error }));
+    }
+  }
+  if (!outcomes.size) return queue;
+  const stamp = ctx.now().toISOString();
+  return updateQueue(
+    ctx.store,
+    (items) =>
+      items.map((item) =>
+        outcomes.has(item.id) && item.status === 'forging'
+          ? { ...item, ...outcomes.get(item.id), updatedAt: stamp }
+          : item
+      ),
+    { now: ctx.now }
   );
 }
 
@@ -280,18 +349,27 @@ async function addUrls(ctx, body, auth) {
   return answer(doc, report);
 }
 
-/** POST cms/forge/queue/update — { ids[], remove: true } */
+/**
+ * POST cms/forge/queue/update — { ids[], remove: true }. A forging entry is
+ * kept: its job is running and will report to it; `removed` names only what
+ * went.
+ */
 async function removeEntries(ctx, ids) {
-  const gone = new Set(ids);
+  const wanted = new Set(ids);
+  let removed = [];
   const doc = await updateQueue(
     ctx.store,
     (items) => {
-      const kept = items.filter((item) => !gone.has(item.id));
-      return kept.length === items.length ? null : kept;
+      removed = items
+        .filter((item) => wanted.has(item.id) && item.status !== 'forging')
+        .map((item) => item.id);
+      if (!removed.length) return null;
+      const gone = new Set(removed);
+      return items.filter((item) => !gone.has(item.id));
     },
     { now: ctx.now }
   );
-  return answer(doc, { removed: ids });
+  return answer(doc, { removed });
 }
 
 /** POST cms/forge/queue/update — { ids[], fields } */
@@ -337,7 +415,17 @@ const jobFor = (item, { jobId, user, stamp }) =>
 
 const canForge = (item) => item.status !== 'forging' && item.status !== 'forged';
 
-/** POST cms/forge/queue/forge — { ids[] }; `io.enqueue` is the queue output binding. */
+/**
+ * POST cms/forge/queue/forge — { ids[] }; `io.enqueue` is the queue output binding.
+ *
+ * Order matters: the job documents are written FIRST, then the entries are
+ * marked forging (only those whose job was written, and only if still
+ * forgeable at write time), then the messages go out. A job write that
+ * fails leaves that entry and the later ones queued and names them in
+ * `notStarted`, so Save again picks them up; a job whose entry failed to be
+ * marked still runs, and its onComplete records the outcome on the entry
+ * whatever its status then is.
+ */
 async function forgeEntries(ctx, body, auth, context, io) {
   if (typeof io?.enqueue !== 'function') {
     context?.error?.('forge/queue/forge: no queue output wired');
@@ -347,31 +435,42 @@ async function forgeEntries(ctx, body, auth, context, io) {
   if (picked.error) return picked.error;
   const wanted = new Set(picked.ids);
   const stamp = ctx.now().toISOString();
-  const jobs = [];
+  const current = await readQueue(ctx.store);
+  const candidates = current.items.filter((item) => wanted.has(item.id) && canForge(item));
+
+  const written = new Map(); // entry id → job document
+  const notStarted = [];
+  for (const item of candidates) {
+    if (notStarted.length) {
+      notStarted.push({ id: item.id, error: 'not attempted after an earlier job write failed' });
+      continue;
+    }
+    const jobDoc = jobFor(item, { jobId: ctx.uuid(), user: auth.user, stamp });
+    try {
+      await ctx.store.upsertDoc(JOBS_CONTAINER, jobDoc);
+      written.set(item.id, jobDoc);
+    } catch (error) {
+      context?.error?.(`[forge/queue] job write failed: ${error?.message || error}`);
+      notStarted.push({ id: item.id, error: String(error?.message || error).slice(0, 300) });
+    }
+  }
+
   let started = [];
   const doc = await updateQueue(
     ctx.store,
     (items) => {
       started = [];
-      jobs.length = 0;
       return items.map((item) => {
-        if (!wanted.has(item.id) || !canForge(item)) return item;
-        const jobId = ctx.uuid();
-        jobs.push(jobFor(item, { jobId, user: auth.user, stamp }));
-        started.push({ id: item.id, jobId });
-        return { ...item, status: 'forging', jobId, error: null, updatedAt: stamp };
+        const jobDoc = written.get(item.id);
+        if (!jobDoc || !canForge(item)) return item;
+        started.push({ id: item.id, jobId: jobDoc.id });
+        return { ...item, status: 'forging', jobId: jobDoc.id, error: null, updatedAt: stamp };
       });
     },
     { now: ctx.now }
   );
-  // The entries are marked first, then each job is written and queued: a
-  // job that fails to queue is swept back by the stale-queued sweeper, and
-  // an entry left `forging` with no job is the visible symptom.
-  for (const jobDoc of jobs) {
-    await ctx.store.upsertDoc(JOBS_CONTAINER, jobDoc);
-    io.enqueue({ jobId: jobDoc.id, type: jobDoc.type });
-  }
-  return answer(doc, { started });
+  for (const jobDoc of written.values()) io.enqueue({ jobId: jobDoc.id, type: jobDoc.type });
+  return answer(doc, { started, ...(notStarted.length ? { notStarted } : {}) });
 }
 
 /**
@@ -394,12 +493,13 @@ export function createForgeQueueHandlers({
     try {
       return await fn(request, auth, context, io);
     } catch (error) {
+      if (error?.code === 413) return json(413, { ok: false, error: error.message });
       context?.error?.(`[forge/queue] ${error?.message || error}`);
       return json(502, { ok: false, error: String(error?.message || error) });
     }
   };
   return {
-    list: guarded(async () => answer(await readQueue(store))),
+    list: guarded(async () => answer(await reconcileForging(ctx, await readQueue(store)))),
     add: guarded(async (request, auth) => addUrls(ctx, await readBody(request), auth)),
     update: guarded(async (request) => updateEntries(ctx, await readBody(request))),
     forge: guarded(async (request, auth, context, io) =>

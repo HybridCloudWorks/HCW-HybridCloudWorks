@@ -173,7 +173,7 @@ export async function runForgeFromUrl(
       stamp: now().toISOString(),
       actor: actorName(actor, 'forge'),
     });
-    log.log?.(`[forge-from-url] ${doc.id} brief applied from the job`);
+    log.log?.('[forge-from-url] brief applied from the job payload');
   }
 
   const outcome = await forge.runForgePipeline({ contentId: doc.id, actor });
@@ -200,8 +200,16 @@ export async function runForgeFromUrl(
  * waited on the job.
  */
 export async function forgeFromUrlComplete(info, hookCtx) {
-  await notifyOnFailure(info, hookCtx);
-  const queueItemId = info?.job?.payload?.queueItemId;
+  // The failure ping quotes the payload; with a brief on it that would send
+  // the objective, audience and key message to Telegram. It gets the URL and
+  // the queue entry id only — the type, id, status and error say the rest.
+  const payload = info?.job?.payload || {};
+  const redacted = {
+    ...info,
+    job: { ...info.job, payload: { url: payload.url, queueItemId: payload.queueItemId } },
+  };
+  await notifyOnFailure(redacted, hookCtx);
+  const queueItemId = payload.queueItemId;
   if (!queueItemId) return;
   await recordQueueOutcome(
     store,

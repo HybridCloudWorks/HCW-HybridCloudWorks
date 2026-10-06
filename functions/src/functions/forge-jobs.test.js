@@ -25,6 +25,10 @@ vi.mock('../lib/ai/router.js', () => ({
   getActiveAiProvider: vi.fn(),
 }));
 const issueBuild = vi.hoisted(() => vi.fn(async () => ({ success: true })));
+const notify = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock('../lib/job-failure-notify.js', () => ({
+  createJobFailureOnComplete: vi.fn(() => notify),
+}));
 vi.mock('../lib/newsletter/issue.js', () => ({
   createIssueBuilder: vi.fn(() => ({ build: issueBuild })),
 }));
@@ -286,6 +290,27 @@ describe('forge-from-url with a brief on the payload (the Forge Studio Queue, 20
     await runForgeFromUrl({ url: 'https://a.test/x' }, d);
     expect(d.store.patchDoc).toHaveBeenCalledTimes(1);
     expect(d.forge.runForgePipeline).toHaveBeenCalledTimes(2);
+  });
+
+  it('onComplete hands the failure ping a payload with the URL and entry id only, never the brief', async () => {
+    notify.mockClear();
+    await forgeFromUrlComplete(
+      {
+        job: {
+          id: 'j3',
+          type: 'forge-from-url',
+          payload: { url: 'https://a.test', brief: { objective: 'secret plan' }, kind: 'guide', queueItemId: 'q-1' },
+        },
+        status: 'failed',
+        result: null,
+        error: 'scrape 403',
+      },
+      { context: {}, now: () => new Date('2026-10-06T00:00:00Z') }
+    );
+    expect(notify).toHaveBeenCalledTimes(1);
+    const [info] = notify.mock.calls[0];
+    expect(info.job.payload).toEqual({ url: 'https://a.test', queueItemId: 'q-1' });
+    expect(JSON.stringify(info)).not.toContain('secret plan');
   });
 
   it('onComplete records the outcome on the queue entry only when the job came from the queue', async () => {

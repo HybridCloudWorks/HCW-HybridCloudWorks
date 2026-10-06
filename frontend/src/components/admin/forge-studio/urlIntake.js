@@ -46,10 +46,39 @@ export function extractUrlsFromText(text) {
   return out;
 }
 
+/** The five named references plus numeric ones — what a saved page's attributes carry. */
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+export function decodeEntities(value) {
+  return String(value ?? '').replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, ref) => {
+    if (ref[0] === '#') {
+      const code =
+        ref[1].toLowerCase() === 'x' ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : match;
+    }
+    return ENTITIES[ref.toLowerCase()] ?? match;
+  });
+}
+
+/** The href attributes of a document, decoded — through the browser's parser when there is one. */
+function hrefsOf(html) {
+  if (typeof DOMParser !== 'undefined') {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    return {
+      hrefs: [...doc.querySelectorAll('a[href]')].map((a) => a.getAttribute('href') || ''),
+      text: doc.documentElement?.textContent || '',
+    };
+  }
+  const hrefs = [];
+  for (const match of html.matchAll(HREF))
+    hrefs.push(decodeEntities(match[1] ?? match[2] ?? match[3] ?? ''));
+  return { hrefs, text: decodeEntities(html) };
+}
+
 /**
  * The distinct http(s) URLs an HTML document links to: every `href` first
  * (relative ones resolved against `baseUrl` when given), then any bare URL
- * in the text, so a saved newsletter yields its links and nothing else.
+ * in the page's text, so a saved newsletter yields its links and nothing
+ * else. Entities are decoded (`&amp;` is `&`), so a link's query survives.
  */
 export function extractUrlsFromHtml(html, { baseUrl = '' } = {}) {
   const out = [];
@@ -61,9 +90,9 @@ export function extractUrlsFromHtml(html, { baseUrl = '' } = {}) {
       out.push(url);
     }
   };
-  const source = String(html ?? '');
-  for (const match of source.matchAll(HREF)) {
-    const href = (match[1] ?? match[2] ?? match[3] ?? '').trim();
+  const { hrefs, text } = hrefsOf(String(html ?? ''));
+  for (const raw of hrefs) {
+    const href = raw.trim();
     if (!href || /^(#|mailto:|javascript:|tel:|data:)/i.test(href)) continue;
     if (/^https?:\/\//i.test(href)) {
       take(href);
@@ -75,7 +104,7 @@ export function extractUrlsFromHtml(html, { baseUrl = '' } = {}) {
       }
     }
   }
-  for (const url of extractUrlsFromText(source)) take(url);
+  for (const url of extractUrlsFromText(text)) take(url);
   return out;
 }
 

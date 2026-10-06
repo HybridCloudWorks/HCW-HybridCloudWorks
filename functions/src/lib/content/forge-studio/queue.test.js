@@ -6,6 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import {
+  MAX_QUEUE_BYTES,
   MAX_QUEUE_ITEMS,
   QUEUE_DOC_ID,
   applyFields,
@@ -354,5 +355,99 @@ describe('updateQueue', () => {
       { mode: 'idea', sourceUrl: 'https://evil.test', audience: 'devs' }
     );
     expect(brief).toMatchObject({ mode: 'url', sourceUrl: 'https://a.test/1', objective: 'o', audience: 'devs' });
+  });
+});
+
+describe('the review of #887: lost messages, stranded entries, size, order', () => {
+  const seeded = async () => {
+    const store = memStore();
+    const h = handlers(store);
+    await h.add(request({ urls: ['https://a.test/1', 'https://b.test/2', 'https://c.test/3'] }), context);
+    return { store, h };
+  };
+
+  it('Remove keeps a forging entry (its job will report to it) and names only what went', async () => {
+    const { h, store } = await seeded();
+    store.docs.get(`admin_config/${QUEUE_DOC_ID}`).items[0].status = 'forging';
+    const body = parse(await h.update(request({ ids: ['id-1', 'id-2'], remove: true }), context));
+    expect(body.removed).toEqual(['id-2']);
+    expect(body.items.map((i) => i.id).sort()).toEqual(['id-1', 'id-3']);
+    const none = parse(await h.update(request({ ids: ['id-1'], remove: true }), context));
+    expect(none.removed).toEqual([]);
+  });
+
+  it('refuses (413) a write that would take the document past MAX_QUEUE_BYTES', async () => {
+    const big = {
+      id: QUEUE_DOC_ID,
+      configScope: 'admin_config',
+      items: [{ id: 'huge', url: 'https://h.test', status: 'queued', title: 'x'.repeat(MAX_QUEUE_BYTES) }],
+    };
+    const h = handlers(memStore(big));
+    const res = await h.add(request({ urls: ['https://new.test/1'] }), context);
+    expect(res.status).toBe(413);
+    expect(parse(res).error).toMatch(/full by size/);
+  });
+
+  it('writes the job documents before marking entries, and a failed job write leaves that entry queued and named', async () => {
+    const { h, store } = await seeded();
+    const order = [];
+    store.upsertDoc.mockImplementation(async (container, doc) => {
+      order.push(`job:${doc.payload.queueItemId}`);
+      if (doc.payload.queueItemId === 'id-2') throw new Error('jobs container unavailable');
+      store.docs.set(`${container}/${doc.id}`, { ...doc });
+      return doc;
+    });
+    const original = store.replaceDocIfMatch.getMockImplementation();
+    store.replaceDocIfMatch.mockImplementation(async (...args) => {
+      order.push('queue');
+      return original(...args);
+    });
+    const enqueue = vi.fn();
+    const body = parse(await h.forge(request({ ids: ['id-1', 'id-2', 'id-3'] }), context, { enqueue }));
+    expect(order).toEqual(['job:id-1', 'job:id-2', 'queue']);
+    expect(body.started).toEqual([{ id: 'id-1', jobId: 'id-4' }]);
+    expect(body.notStarted).toEqual([
+      { id: 'id-2', error: 'jobs container unavailable' },
+      { id: 'id-3', error: 'not attempted after an earlier job write failed' },
+    ]);
+    expect(body.items.map((i) => [i.id, i.status])).toEqual([
+      ['id-1', 'forging'],
+      ['id-2', 'queued'],
+      ['id-3', 'queued'],
+    ]);
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('the list reconciles a forging entry whose job document has finished', async () => {
+    const { h, store } = await seeded();
+    await h.forge(request({ ids: ['id-1', 'id-2'] }), context, { enqueue: vi.fn() });
+    const q = store.docs.get(`admin_config/${QUEUE_DOC_ID}`);
+    const jobOf = (id) => q.items.find((i) => i.id === id).jobId;
+    store.docs.set(`jobs/${jobOf('id-1')}`, {
+      id: jobOf('id-1'),
+      status: 'succeeded',
+      result: { success: true, contentId: 'c-1' },
+    });
+    store.docs.set(`jobs/${jobOf('id-2')}`, { id: jobOf('id-2'), status: 'running' });
+    const body = parse(await h.list(request(null, 'GET'), context));
+    expect(body.items.find((i) => i.id === 'id-1')).toMatchObject({ status: 'forged', contentId: 'c-1' });
+    expect(body.items.find((i) => i.id === 'id-2').status).toBe('forging');
+  });
+
+  it('recordQueueOutcome outlasts several ETag races with a pause between tries', async () => {
+    const { h, store } = await seeded();
+    await h.forge(request({ ids: ['id-1'] }), context, { enqueue: vi.fn() });
+    store.conflictsLeft = 6;
+    const sleep = vi.fn(async () => {});
+    await recordQueueOutcome(
+      store,
+      { queueItemId: 'id-1', status: 'succeeded', result: { success: true, contentId: 'c-9' }, error: null },
+      { now: () => NOW, sleep }
+    );
+    expect(sleep).toHaveBeenCalledTimes(6);
+    expect(store.docs.get(`admin_config/${QUEUE_DOC_ID}`).items[0]).toMatchObject({
+      status: 'forged',
+      contentId: 'c-9',
+    });
   });
 });

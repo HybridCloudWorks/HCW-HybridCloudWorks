@@ -29,7 +29,9 @@ This project has not cut a tagged release; entries are grouped under
   as before. The queue is one `admin_config/forge_queue` document behind
   `GET|POST cms/forge/queue`, `POST cms/forge/queue/update` and `POST
   cms/forge/queue/forge` (editor; ETag writes, retried, because the job's
-  onComplete writes it too). On the new Queue tab the owner selects one
+  onComplete writes it too; a byte budget half the Cosmos item limit; the
+  list reconciles forging entries against their job documents, so a lost
+  onComplete never leaves one forging; removing keeps a forging entry). On the new Queue tab the owner selects one
   entry to complete its "From a URL" fields, or several to set the shared
   fields once (a field shows a value when every selected entry agrees;
   blank leaves each as it is); Save applies the values and starts one

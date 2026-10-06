@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   MAX_URLS_PER_IMPORT,
+  decodeEntities,
   extractUrls,
   extractUrlsFromHtml,
   extractUrlsFromText,
@@ -59,6 +60,13 @@ describe('extractUrlsFromHtml', () => {
       'https://b.test/two?x=1',
       'https://c.test/three',
     ]);
+  });
+
+  it('decodes entities in an href, so a query with &amp; keeps its second parameter', () => {
+    const html =
+      '<a href="https://a.test/?x=1&amp;y=2">q</a> <a href="https://b.test/&#x2F;p">n</a>';
+    expect(extractUrlsFromHtml(html)).toEqual(['https://a.test/?x=1&y=2', 'https://b.test//p']);
+    expect(decodeEntities('a &amp; b &lt; &#65; &quot;c&quot;')).toBe('a & b < A "c"');
   });
 
   it('resolves relative links only when a base URL is given', () => {

@@ -78,6 +78,7 @@ export {
   applyFields,
   outcomeFor,
   recordQueueOutcome,
+  reconcileForging,
   createForgeQueueHandlers,
 } from './forge-studio/queue.js';
 export {

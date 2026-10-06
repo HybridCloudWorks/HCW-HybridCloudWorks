@@ -116,8 +116,15 @@ httpRoute('cmsForgeQueueForge', {
   authLevel: 'anonymous',
   route: 'cms/forge/queue/forge',
   extraOutputs: [queueOutput],
-  handler: (request, context) =>
-    queue().forge(request, context, {
-      enqueue: (message) => context.extraOutputs.set(queueOutput, message),
-    }),
+  // The binding takes ONE value per invocation: setting it once per job
+  // would keep only the last message. The messages are collected and set
+  // together as an array, the way the cosmos-export scheduler does.
+  handler: async (request, context) => {
+    const messages = [];
+    const response = await queue().forge(request, context, {
+      enqueue: (message) => messages.push(message),
+    });
+    if (messages.length) context.extraOutputs.set(queueOutput, messages);
+    return response;
+  },
 });
