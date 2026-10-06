@@ -1,232 +1,70 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('ContentForge Admin Suite', () => {
-  test.beforeEach(async ({ page }) => {
-    // Navigate to admin dashboard
-    await page.goto('/admin', { waitUntil: 'networkidle' });
+/**
+ * The admin shell, as a visitor who has not signed in sees it.
+ *
+ * Until 2026-10-06 this file held sixteen tests that could not fail: every
+ * assertion short-circuited on `page.url().includes('admin')`, so a blank
+ * shell, a removed auth guard or a broken route all passed (estate review,
+ * finding QA-1). The build under test has no Entra configuration, so no test
+ * here signs in; what it pins is the one journey every admin starts with and
+ * the one an attacker would probe:
+ *
+ *   - an unauthenticated visit to any admin route shows the sign-in card and
+ *     NOTHING of the admin: no navigation, no page, no data;
+ *   - the sign-in card is reachable by keyboard and named for a screen reader;
+ *   - the admin route carries a document title (WCAG 2.4.2);
+ *   - at a phone width the page does not scroll sideways (AP-F1).
+ *
+ * An authenticated journey needs a stubbed identity (an MSAL route fixture)
+ * and is the next step, not a reason to keep a vacuous one.
+ */
+
+const ADMIN_ROUTES = ['/admin', '/admin/queue', '/admin/platform-settings', '/admin/health'];
+
+for (const route of ADMIN_ROUTES) {
+  test(`${route}: signed out, the guard shows the sign-in card and none of the admin`, async ({ page }) => {
+    await page.goto(route);
+    const signIn = page.getByRole('button', { name: /sign in with microsoft/i });
+    await expect(signIn).toBeVisible();
+    await expect(page.getByText('Admin Access Required')).toBeVisible();
+    // The admin navigation (the registry) must not render for a visitor.
+    await expect(page.getByRole('navigation', { name: 'ContentForge' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Open menu' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: /review queue/i })).toHaveCount(0);
   });
+}
 
-  test.describe('Dashboard', () => {
-    test('should display dashboard with stat cards', async ({ page }) => {
-      // Check for dashboard content
-      const _title = await page.title();
-      const headings = page.locator('h1, h2, h3');
-      const headingCount = await headings.count();
+test('the sign-in card is keyboard reachable and the route has a title', async ({ page }) => {
+  await page.goto('/admin');
+  const signIn = page.getByRole('button', { name: /sign in with microsoft/i });
+  await expect(signIn).toBeVisible();
+  await signIn.focus();
+  await expect(signIn).toBeFocused();
+  await expect(page).toHaveTitle(/.+/);
+  // One main landmark, with the id the route announcer focuses.
+  await expect(page.locator('main#main-content')).toHaveCount(1);
+});
 
-      // Dashboard should have headings or be accessible
-      expect(page.url()).toContain('admin');
-      expect(headingCount + _title.length).toBeGreaterThan(0);
-    });
+test('at a phone width the admin route never scrolls sideways', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 667 });
+  await page.goto('/admin/queue');
+  await expect(page.getByRole('button', { name: /sign in with microsoft/i })).toBeVisible();
+  const overflow = await page.evaluate(() => ({
+    scrollWidth: document.documentElement.scrollWidth,
+    clientWidth: document.documentElement.clientWidth,
+  }));
+  expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+});
 
-    test('should display content type tabs (Newsroom & Studio)', async ({ page }) => {
-      // Check for main content areas
-      const mainContent = page.locator('main');
-      const contentArea = page.locator('[role="main"]');
-
-      // Main content should exist
-      const hasMainContent = (await mainContent.count()) > 0 || (await contentArea.count()) > 0;
-      expect(hasMainContent || page.url().includes('admin')).toBeTruthy();
-    });
-
-    test('should navigate to queue page from dashboard', async ({ page }) => {
-      // Click a stat card or queue link
-      const queueLink = page.locator('a[href*="queue"]');
-
-      if (await queueLink.isVisible()) {
-        await queueLink.first().click();
-        await page.waitForURL('**/queue', { timeout: 5000 });
-
-        // Verify we're on queue page
-        const url = page.url();
-        expect(url).toContain('queue');
-      }
-    });
+test('the admin bundle keeps the identity library off public routes', async ({ page }) => {
+  // The public home page must not load MSAL (msal-not-on-public-routes.test.js
+  // pins the import graph; this pins the network).
+  const scripts = [];
+  page.on('request', (request) => {
+    if (request.resourceType() === 'script') scripts.push(request.url());
   });
-
-  test.describe('Review Queue', () => {
-    test('should load queue page with status filters', async ({ page }) => {
-      // Navigate to queue
-      await page.goto('/admin/queue', { waitUntil: 'networkidle' });
-
-      // Queue page should load and contain appropriate elements
-      const selects = page.locator('select');
-      const buttons = page.locator('button');
-
-      // Page should load with appropriate controls
-      expect(page.url()).toContain('queue');
-      expect((await selects.count()) + (await buttons.count())).toBeGreaterThan(0);
-    });
-
-    test('should display queue items with review actions', async ({ page }) => {
-      await page.goto('/admin/queue', { waitUntil: 'networkidle' });
-
-      // Look for approve/reject buttons
-      const approveBtn = page.locator('button:has-text("Approve")');
-      const rejectBtn = page.locator('button:has-text("Reject")');
-      const reviewActions = page.locator('[class*="action"], [role="button"]');
-
-      // Check if queue items are present
-      const actionCount = await reviewActions.count();
-
-      if (actionCount > 0) {
-        // If items exist, look for action buttons
-        const hasActions =
-          (await approveBtn.isVisible().catch(() => false)) ||
-          (await rejectBtn.isVisible().catch(() => false));
-        expect(hasActions || actionCount > 3).toBeTruthy();
-      }
-    });
-
-    test('should change status filter', async ({ page }) => {
-      await page.goto('/admin/queue', { waitUntil: 'networkidle' });
-
-      // Find filter control
-      const filterControl = page.locator('select, [role="combobox"]').first();
-
-      if (await filterControl.isVisible()) {
-        // Get initial state
-        const initialValue = await filterControl.inputValue();
-
-        // Click to open
-        await filterControl.click();
-
-        // Select a different option
-        const options = page.locator('[role="option"]');
-        const optionCount = await options.count();
-
-        if (optionCount > 1) {
-          await options.nth(1).click();
-
-          // Verify change
-          const newValue = await filterControl.inputValue();
-          expect(newValue).not.toEqual(initialValue);
-        }
-      }
-    });
-  });
-
-  test.describe('Editor', () => {
-    test('should load editor page', async ({ page }) => {
-      // Try to navigate to single item editor
-      await page.goto('/admin/editor', { waitUntil: 'networkidle' });
-
-      // Check for editor elements
-      const titleInput = page.locator('input[placeholder*="Title"], input[placeholder*="title"]');
-      const contentArea = page.locator('textarea, [role="textbox"]');
-      const editorContainer = page.locator('[class*="editor"]');
-
-      // Editor page should have input/content area
-      const hasEditorElements =
-        (await titleInput.count().then((c) => c > 0)) ||
-        (await contentArea.count().then((c) => c > 0)) ||
-        (await editorContainer.count().then((c) => c > 0));
-
-      expect(hasEditorElements || page.url().includes('editor')).toBeTruthy();
-    });
-  });
-
-  test.describe('Submit URLs', () => {
-    test('should load submit URLs page', async ({ page }) => {
-      await page.goto('/admin/submit', { waitUntil: 'networkidle' });
-
-      // Check for submit page elements
-      const inputs = page.locator('input');
-      const buttons = page.locator('button');
-
-      // Should have form elements
-      expect(page.url()).toContain('submit');
-      expect((await inputs.count()) + (await buttons.count())).toBeGreaterThan(0);
-    });
-
-    test('should show submit URL form', async ({ page }) => {
-      await page.goto('/admin/submit', { waitUntil: 'networkidle' });
-
-      // Form should be accessible and functional
-      const elements = page.locator('input, textarea, select, button');
-
-      // Should have form structure
-      const elementCount = await elements.count();
-      expect(elementCount > 0 || page.url().includes('submit')).toBeTruthy();
-    });
-  });
-
-  test.describe('Published Content', () => {
-    test('should load published page', async ({ page }) => {
-      await page.goto('/admin/published', { waitUntil: 'networkidle' });
-
-      // Page should load without errors
-      expect(page.url()).toContain('published');
-    });
-
-    test('should display published items in grid', async ({ page }) => {
-      await page.goto('/admin/published', { waitUntil: 'networkidle' });
-
-      // Look for grid/list container
-      const gridContainer = page.locator('[class*="grid"], [class*="list"]');
-      const items = page.locator('[class*="item"], [class*="card"]');
-
-      // Should have some display structure
-      const gridCount = await gridContainer.count();
-      const itemCount = await items.count();
-
-      expect(gridCount > 0 || itemCount > 0).toBeTruthy();
-    });
-  });
-
-  test.describe('Navigation', () => {
-    test('should navigate between admin pages', async ({ page }) => {
-      await page.goto('/admin', { waitUntil: 'networkidle' });
-
-      // Look for navigation links
-      const navLinks = page.locator('nav a, [role="navigation"] a');
-      const linkCount = await navLinks.count();
-
-      // Admin area should have navigation
-      expect(linkCount).toBeGreaterThan(0);
-    });
-
-    test('should have working navigation menu', async ({ page }) => {
-      await page.goto('/admin', { waitUntil: 'networkidle' });
-
-      // Look for menu items
-      const dashboardLink = page.locator('a:has-text("Dashboard")');
-      const queueLink = page.locator('a:has-text("Queue")');
-
-      // At least one admin menu item should be visible
-      const visible =
-        (await dashboardLink.isVisible().catch(() => false)) ||
-        (await queueLink.isVisible().catch(() => false));
-
-      expect(visible || page.url().includes('admin')).toBeTruthy();
-    });
-  });
-
-  test.describe('Responsive Design', () => {
-    test('should be responsive on mobile', async ({ page }) => {
-      await page.setViewportSize({ width: 375, height: 667 });
-      await page.goto('/admin', { waitUntil: 'networkidle' });
-
-      // Should render without layout shift
-      expect(page.url()).toContain('admin');
-    });
-
-    test('should be responsive on tablet', async ({ page }) => {
-      await page.setViewportSize({ width: 768, height: 1024 });
-      await page.goto('/admin/queue', { waitUntil: 'networkidle' });
-
-      // Page should remain functional
-      expect(page.url()).toContain('queue');
-    });
-  });
-
-  test.describe('Error Handling', () => {
-    test('should handle missing auth gracefully', async ({ page }) => {
-      // Admin pages should be protected
-      await page.goto('/admin', { waitUntil: 'networkidle' });
-
-      // Should either show auth guard or have loaded admin
-      const title = await page.title();
-      expect(title.length).toBeGreaterThan(0);
-    });
-  });
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+  expect(scripts.some((url) => /vendor-msal/.test(url))).toBe(false);
 });
