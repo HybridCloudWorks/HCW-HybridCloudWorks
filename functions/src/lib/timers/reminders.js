@@ -1,0 +1,184 @@
+/**
+ * timers/reminders.js — `sendReminders`, daily at 13:00 UTC (08:00 Central).
+ *
+ * Reads the owner's reminders sheet (admin_config/reminders, written from
+ * Platform Settings → Reminders; shape in lib/reminders/settings.js) and says
+ * on Telegram, through the shared notifier, each reminder whose stage has
+ * come: once within its lead days, once on the day, then weekly while it is
+ * overdue, until it is marked done. Owner request 2026-10-06.
+ *
+ * A stage is stamped on the reminder only when the notifier reports the
+ * message sent, so an unconfigured bot or a Telegram error means the same
+ * reminder is tried again tomorrow rather than counted as said.
+ *
+ * Two writers share the document: this timer stamps, the sheet edits. The
+ * stamps are written with the document's ETag and, when the sheet saved in
+ * between (412), re-read and re-applied onto the rows as they now stand — a
+ * row the owner removed meanwhile stays removed, a row they edited keeps the
+ * edit, and only `notified` gains the stage. The sheet's own PUT merges the
+ * other way (platform-settings.js, `merge`), so a stamp written while the
+ * page was open survives the save. Review of #910.
+ *
+ * Telemetry carries positions and counts, never a reminder's id: ids may be
+ * chosen by hand and a hand-chosen id is content.
+ *
+ * Each reminder is its own notifier source (`reminder:<id>`), so the
+ * notifier's fifteen-minute cooldown never lets one reminder silence another.
+ */
+import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
+import { dateOnly, daysUntil, stageDue } from '../reminders/calendar.js';
+import {
+  REMINDERS_CONFIG_ID,
+  RemindersValidationError,
+  mergeStamps,
+  readStoredReminders,
+} from '../reminders/settings.js';
+
+export const REMINDER_SOURCE_PREFIX = 'reminder:';
+export const STAMP_WRITE_ATTEMPTS = 3;
+const MAX_NOTES_IN_MESSAGE = 400;
+
+const SEVERITY = Object.freeze({ ahead: 'info', due: 'warning', overdue: 'critical' });
+const TITLE_PREFIX = Object.freeze({ ahead: 'Coming up', due: 'Due today', overdue: 'Overdue' });
+
+/** "in 7 days" / "today" / "3 days overdue". */
+export function describeDistance(days) {
+  if (days === 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  if (days > 1) return `in ${days} days`;
+  return days === -1 ? '1 day overdue' : `${-days} days overdue`;
+}
+
+/** The Telegram text for one reminder at one stage. */
+export function reminderMessage(reminder, stage, today) {
+  const days = daysUntil(reminder.dueDate, today);
+  const lines = [`Due ${reminder.dueDate} (${describeDistance(days)}).`];
+  if (reminder.notes) {
+    const notes =
+      reminder.notes.length > MAX_NOTES_IN_MESSAGE
+        ? `${reminder.notes.slice(0, MAX_NOTES_IN_MESSAGE)}…`
+        : reminder.notes;
+    lines.push('', notes);
+  }
+  if (reminder.url) lines.push('', reminder.url);
+  lines.push(
+    '',
+    stage === 'overdue'
+      ? 'Said again weekly until it is marked done on Platform Settings → Reminders.'
+      : 'Mark it done on Platform Settings → Reminders once it is handled.'
+  );
+  return { title: `${TITLE_PREFIX[stage]}: ${reminder.title}`, message: lines.join('\n') };
+}
+
+/** The stored document as reminders, or null (logged) when it does not validate. */
+function readValue(doc, log) {
+  try {
+    return readStoredReminders(doc);
+  } catch (error) {
+    if (!(error instanceof RemindersValidationError)) throw error;
+    log.warn?.(`[sendReminders] stored reminders do not validate; nothing said: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * Say one reminder at one stage; true when the message went. Never throws,
+ * since a notifier failure on one reminder must not stop the rest.
+ */
+async function sayReminder({ notifier, log }, reminder, index, stage, today) {
+  const { title, message } = reminderMessage(reminder, stage, today);
+  let result;
+  try {
+    result = await notifier.notifyTelegram({
+      title,
+      message,
+      severity: SEVERITY[stage],
+      source: `${REMINDER_SOURCE_PREFIX}${reminder.id}`,
+    });
+  } catch (error) {
+    log.warn?.(`[sendReminders] reminders[${index}] ${stage}: notifier threw: ${error?.message || error}`);
+    result = { sent: false, reason: 'exception' };
+  }
+  if (!result?.sent) {
+    log.warn?.(
+      `[sendReminders] reminders[${index}] ${stage}: not sent (${result?.reason || 'unknown'}); tried again tomorrow.`
+    );
+  }
+  return Boolean(result?.sent);
+}
+
+/** `rows` with each stamped id's `notified` merged in; rows not in `stamps` untouched. */
+const applyStamps = (rows, stamps) =>
+  (rows ?? []).map((row) =>
+    stamps.has(row.id) ? { ...row, notified: mergeStamps(row.notified, stamps.get(row.id)) } : row
+  );
+
+/**
+ * Write the stamps onto the document as it stands now, with its ETag. On a
+ * 412 the sheet saved meanwhile: re-read and re-apply onto the new rows.
+ * False when the document is gone or the attempts run out; either way the
+ * worst case is one repeated message tomorrow, never a lost edit.
+ */
+async function writeStamps({ store, log }, doc, stamps) {
+  let current = doc;
+  for (let attempt = 1; attempt <= STAMP_WRITE_ATTEMPTS; attempt += 1) {
+    try {
+      await store.replaceDocIfMatch(
+        'admin_config',
+        { ...current, reminders: applyStamps(current.reminders, stamps) },
+        { partitionKey: ADMIN_CONFIG_PARTITION }
+      );
+      return true;
+    } catch (error) {
+      if (error?.code !== 412) throw error;
+      current = await store.readDoc('admin_config', REMINDERS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
+      if (!current) return false;
+    }
+  }
+  log.warn?.(
+    `[sendReminders] stamps not written after ${STAMP_WRITE_ATTEMPTS} attempts (the sheet kept saving); the same reminders may be said again tomorrow.`
+  );
+  return false;
+}
+
+/** Say every reminder whose stage has come; the stamps to write and the counts per stage. */
+async function sayDue(deps, reminders, today, at) {
+  const stamps = new Map();
+  const stages = { ahead: 0, due: 0, overdue: 0 };
+  for (const [index, reminder] of reminders.entries()) {
+    const stage = stageDue(reminder, today, at.getTime());
+    if (stage && (await sayReminder(deps, reminder, index, stage, today))) {
+      stamps.set(reminder.id, { [stage]: at.toISOString() });
+      stages[stage] += 1;
+    }
+  }
+  return { stamps, stages };
+}
+
+/**
+ * @param {object} deps
+ * @param {{ readDoc: Function, replaceDocIfMatch: Function }} deps.store
+ * @param {{ notifyTelegram: Function }|null} [deps.notifier]
+ * @param {() => Date} [deps.now]
+ */
+export function createReminderCheck({ store, notifier = null, now = () => new Date(), log = {} }) {
+  async function run() {
+    const at = now();
+    const today = dateOnly(at);
+    const doc = await store.readDoc('admin_config', REMINDERS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
+    if (!doc) return { checked: 0, sent: 0 };
+
+    const value = readValue(doc, log);
+    if (!value) return { checked: 0, sent: 0, invalid: true };
+    if (!notifier?.notifyTelegram) {
+      log.warn?.('[sendReminders] no notifier; nothing said.');
+      return { checked: value.reminders.length, sent: 0 };
+    }
+
+    const { stamps, stages } = await sayDue({ notifier, log }, value.reminders, today, at);
+    const stamped = stamps.size > 0 ? await writeStamps({ store, log }, doc, stamps) : true;
+    log.log?.(`[sendReminders] ${value.reminders.length} reminder(s) checked, ${stamps.size} said`);
+    return { checked: value.reminders.length, sent: stamps.size, stages, stamped };
+  }
+  return { run };
+}

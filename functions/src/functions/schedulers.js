@@ -55,6 +55,7 @@ import { recordKeyVerdict } from '../lib/key-verdict.js';
 import { createBlogListingsScrape } from '../lib/timers/blog-listings.js';
 import { createPodcastIngest, createPodcastParser } from '../lib/timers/podcasts.js';
 import { createNewsletterAutoBuild } from '../lib/timers/newsletter-autobuild.js';
+import { createReminderCheck } from '../lib/timers/reminders.js';
 import { logDisabledSkip, timerEnabled } from '../lib/timers/flag-gate.js';
 
 /**
@@ -262,6 +263,17 @@ timer('checkAgentHealth', 'CHECK_AGENT_HEALTH', '0 */5 * * * *', (context) =>
 );
 
 // ── AI ───────────────────────────────────────────────────────────────────────
+
+// The owner's reminders sheet (Platform Settings → Reminders), said on
+// Telegram ahead of each date, on the day, and weekly while overdue until
+// marked done (owner request 2026-10-06). 13:00 UTC is 08:00 Central.
+timer('sendReminders', 'SEND_REMINDERS', '0 0 13 * * *', (context) =>
+  createReminderCheck({
+    store,
+    notifier: createNotifier({ store, log: context }),
+    log: context,
+  }).run()
+);
 
 timer('probeAiProviders', 'PROBE_AI_PROVIDERS', '0 15 6 * * 1', async (context) => {
   // #701, owner decision 2026-09-29: NVIDIA is the backup for content

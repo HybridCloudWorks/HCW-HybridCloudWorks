@@ -272,7 +272,7 @@ const ITEMS = [
     '/admin/platform',
     SlidersHorizontal,
     'Platform Settings',
-    'Defaults the pipeline reads on every run: covers, voices, content types, autoposting.',
+    'Defaults the pipeline reads on every run: covers, voices, content types, autoposting — and the reminders sheet.',
   ],
   [
     'platform',

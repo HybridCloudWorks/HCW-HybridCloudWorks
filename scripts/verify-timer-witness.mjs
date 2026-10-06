@@ -128,6 +128,7 @@ export const WITNESSES = {
   syncSocialCalendarScheduled: { none: 'writes social_posts, which has no public route' },
   refreshPlaudToken: { none: 'rotates a secret; nothing public changes' },
   probeAiProviders: { none: 'stamps ai_providers and writes ai_usage, which have no public route' },
+  sendReminders: { none: 'says reminders on Telegram and stamps admin_config/reminders, which has no public route' },
 };
 
 // ── pure helpers (unit-tested) ───────────────────────────────────────────────

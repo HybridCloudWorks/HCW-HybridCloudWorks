@@ -284,6 +284,29 @@ export const DECLARED = [
     after: 'true',
     reason: '#701: the probeAiProviders timer catalogued and armed in one apply',
   },
+  // The reminders timer's flag (owner request 2026-10-06), in its two runs
+  // or taken as one, the same three shapes as PROBE_AI_PROVIDERS above.
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.FEATURE_FLAG_SEND_REMINDERS',
+    before: undefined,
+    after: 'false',
+    reason: 'reminders: the sendReminders timer is catalogued, disarmed until enabled_timers names it',
+  },
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.FEATURE_FLAG_SEND_REMINDERS',
+    before: 'false',
+    after: 'true',
+    reason: 'reminders: SEND_REMINDERS added to enabled_timers, arming the daily check',
+  },
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.FEATURE_FLAG_SEND_REMINDERS',
+    before: undefined,
+    after: 'true',
+    reason: 'reminders: the sendReminders timer catalogued and armed in one apply',
+  },
   // #816 part 2: with cp_sortDate written by the apply (part 1, applied
   // 2026-10-03), the healer's custom-role assignment on the deploy identity
   // goes. Its role definition is the owner's, outside Terraform, so it is a

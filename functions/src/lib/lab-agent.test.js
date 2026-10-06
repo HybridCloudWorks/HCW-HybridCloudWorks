@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createLabAgentHandlers, AGENT_TERMINAL_STATUSES, OUTPUT_CAP_BYTES } from './lab-agent.js';
+import { AGENT_OFFLINE_SOURCE } from './timers/agent-health.js';
 
 const context = { log: vi.fn(), error: vi.fn(), warn: vi.fn() };
 const NOW = new Date('2026-08-10T04:00:00.000Z');
@@ -213,6 +214,77 @@ describe('heartbeatAgent', () => {
     const updates = store.patchDoc.mock.calls[0][2];
     expect(Object.values(updates).every((v) => v !== undefined)).toBe(true);
     expect(updates).not.toHaveProperty('hostname');
+  });
+
+  it('tells the owner once when the agent announces its own shutdown, and stamps offlineSince (LAB-2 follow-up)', async () => {
+    // `systemctl stop` → SIGTERM → the agent heartbeats `offline` itself, so
+    // the health timer never marks it and its message never fires; the
+    // owner's first LAB-2 test on 2026-10-06 was silent for this reason.
+    const notifier = { notifyTelegram: vi.fn(async () => ({ sent: true })) };
+    const store = emptyStore();
+    const h = createLabAgentHandlers({
+      guard: allowGuard({ status: 'idle', hostname: 'vps-hostinger-01' }),
+      store,
+      now: () => NOW,
+      notifier,
+    });
+    const res = await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context);
+    expect(res.status).toBe(200);
+    expect(store.patchDoc.mock.calls[0][2]).toMatchObject({
+      status: 'offline',
+      offlineSince: NOW.toISOString(),
+    });
+    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+    const call = notifier.notifyTelegram.mock.calls[0][0];
+    expect(call).toMatchObject({ severity: 'critical', source: AGENT_OFFLINE_SOURCE });
+    expect(call.message).toContain('vps-1 (vps-hostinger-01)');
+    expect(call.message).toContain('fails closed');
+
+    // Already offline: a repeated offline heartbeat is not a new event.
+    const again = createLabAgentHandlers({
+      guard: allowGuard({ status: 'offline' }),
+      store: emptyStore(),
+      now: () => NOW,
+      notifier,
+    });
+    await again.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context);
+    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+
+    // `stopping` and `idle` are not offline; no message and no offlineSince.
+    for (const status of ['stopping', 'idle']) {
+      const s2 = emptyStore();
+      await createLabAgentHandlers({ guard: allowGuard({ status: 'idle' }), store: s2, now: () => NOW, notifier })
+        .heartbeatAgent(req({ agentId: 'vps-1', status }), context);
+      expect(s2.patchDoc.mock.calls[0][2]).not.toHaveProperty('offlineSince');
+    }
+    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a terminal offline win over the job-derived busy, so a deadline shutdown with work running is still said', async () => {
+    const notifier = { notifyTelegram: vi.fn(async () => ({ sent: true })) };
+    const store = emptyStore();
+    const h = createLabAgentHandlers({ guard: allowGuard({ status: 'busy' }), store, now: () => NOW, notifier });
+    await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline', activeJobs: 2 }), context);
+    expect(store.patchDoc.mock.calls[0][2]).toMatchObject({ status: 'offline', activeJobs: 2, offlineSince: NOW.toISOString() });
+    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+
+    const s2 = emptyStore();
+    await createLabAgentHandlers({ guard: allowGuard({ status: 'idle' }), store: s2, now: () => NOW, notifier })
+      .heartbeatAgent(req({ agentId: 'vps-1', status: 'idle', activeJobs: 1 }), context);
+    expect(s2.patchDoc.mock.calls[0][2].status).toBe('busy');
+  });
+
+  it('records the offline heartbeat even when the notifier is absent or throws', async () => {
+    const store = emptyStore();
+    const silent = createLabAgentHandlers({ guard: allowGuard({ status: 'busy' }), store, now: () => NOW });
+    expect((await silent.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context)).status).toBe(200);
+    expect(store.patchDoc).toHaveBeenCalledTimes(1);
+
+    const throwing = { notifyTelegram: vi.fn(async () => { throw new Error('telegram down'); }) };
+    const store2 = emptyStore();
+    const loud = createLabAgentHandlers({ guard: allowGuard({ status: 'busy' }), store: store2, now: () => NOW, notifier: throwing });
+    expect((await loud.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context)).status).toBe(200);
+    expect(store2.patchDoc).toHaveBeenCalledTimes(1);
   });
 
   it('refuses to let the agent grant itself capabilities or rebind its identity', async () => {

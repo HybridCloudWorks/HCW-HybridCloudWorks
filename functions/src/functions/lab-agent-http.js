@@ -11,32 +11,37 @@
  */
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultAgentGuard } from '../lib/auth/default-agent-guard.js';
-import { queryDocs, readDoc, patchDoc, replaceDocIfMatch } from '../lib/cosmos-client.js';
+import { queryDocs, readDoc, patchDoc, replaceDocIfMatch, upsertDoc } from '../lib/cosmos-client.js';
 import { createLabAgentHandlers } from '../lib/lab-agent.js';
+import { createNotifier } from '../lib/notify.js';
 
-const handlers = () =>
+// The notifier is how the owner hears that an agent announced its own
+// shutdown (lib/lab-agent.js, heartbeat); it reads and writes the cooldown
+// document in `system`, hence upsertDoc beside the agent store's verbs.
+const handlers = (context) =>
   createLabAgentHandlers({
     guard: getDefaultAgentGuard(),
     store: { queryDocs, readDoc, patchDoc, replaceDocIfMatch },
+    notifier: createNotifier({ store: { readDoc, upsertDoc }, log: context }),
   });
 
 httpRoute('claimLabJob', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'agent/claimLabJob',
-  handler: (request, context) => handlers().claimLabJob(request, context),
+  handler: (request, context) => handlers(context).claimLabJob(request, context),
 });
 
 httpRoute('heartbeatLabAgent', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'agent/heartbeat',
-  handler: (request, context) => handlers().heartbeatAgent(request, context),
+  handler: (request, context) => handlers(context).heartbeatAgent(request, context),
 });
 
 httpRoute('completeLabJob', {
   methods: ['POST'],
   authLevel: 'anonymous',
   route: 'agent/completeLabJob',
-  handler: (request, context) => handlers().completeLabJob(request, context),
+  handler: (request, context) => handlers(context).completeLabJob(request, context),
 });

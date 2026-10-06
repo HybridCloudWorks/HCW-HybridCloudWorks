@@ -25,6 +25,8 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
+import { AGENT_OFFLINE_SOURCE } from './timers/agent-health.js';
+
 /**
  * Statuses a completing agent may report.
  *
@@ -177,7 +179,31 @@ async function claimLabJob(ctx, request, context) {
  * the registry's authorization inputs, and an endpoint the VPS can reach
  * must not be able to grant the VPS new job types or rebind its identity.
  */
-async function heartbeatAgent({ guard, store, now }, request, context) {
+/**
+ * The owner is told on Telegram when an agent announces its own shutdown.
+ * A `systemctl stop` sends SIGTERM and the agent heartbeats `stopping` then
+ * `offline` itself (vps-agent/index.js), so the five-minute health timer
+ * never sees a stale agent to mark and its notification never fires — the
+ * owner's first test of LAB-2 on 2026-10-06 produced no message for exactly
+ * this reason. Same source as the timer, so the cooldown makes a stop
+ * followed by the timer's own mark one message, not two. Best effort: the
+ * heartbeat is recorded whether or not the message goes.
+ */
+async function tellOwnerAgentStopped(notifier, agent, at, context) {
+  if (!notifier?.notifyTelegram) return;
+  try {
+    await notifier.notifyTelegram({
+      title: 'Lab agent offline (1)',
+      message: `${agent.agentId} (${agent.hostname || 'host unknown'}) reported its own shutdown at ${at}. Public lab submission fails closed until it is back.`,
+      severity: 'critical',
+      source: AGENT_OFFLINE_SOURCE,
+    });
+  } catch (error) {
+    context.warn?.(`heartbeatAgent: owner notification failed: ${error?.message || error}`);
+  }
+}
+
+async function heartbeatAgent({ guard, store, now, notifier }, request, context) {
   const parsed = await authenticatedAgentBody(guard, request);
   if (parsed.error) return parsed.error;
   const { body, agent } = parsed;
@@ -193,13 +219,23 @@ async function heartbeatAgent({ guard, store, now }, request, context) {
   // would wipe the stored hostname and version on every heartbeat — and
   // would route each one through the read-modify-write path, turning a
   // 30-second poll into two round trips instead of one.
+  // `offline` is terminal and wins over the job-derived `busy`: the agent
+  // sends `offline` with activeJobs > 0 when its shutdown deadline expires
+  // with work still running, and that is exactly the moment to say so.
+  let effective = status;
+  if (status !== 'offline' && activeJobs > 0) effective = 'busy';
   const updates = {
-    status: activeJobs > 0 ? 'busy' : status,
+    status: effective,
     activeJobs,
     lastSeenAt: now().toISOString(),
   };
   if (typeof body.hostname === 'string') updates.hostname = body.hostname.slice(0, 255);
   if (typeof body.version === 'string') updates.version = body.version.slice(0, 64);
+
+  // The transition the health timer would otherwise have recorded: the
+  // record said the agent was up, and this heartbeat says it has gone.
+  const goingOffline = updates.status === 'offline' && agent.status !== 'offline';
+  if (goingOffline) updates.offlineSince = updates.lastSeenAt;
 
   try {
     await store.patchDoc('lab_agents', agent.agentId, updates, {
@@ -208,6 +244,15 @@ async function heartbeatAgent({ guard, store, now }, request, context) {
   } catch (err) {
     context.error('heartbeatAgent failed:', err?.message);
     return json(500, { ok: false, error: 'Failed to record heartbeat' });
+  }
+
+  if (goingOffline) {
+    await tellOwnerAgentStopped(
+      notifier,
+      { ...agent, hostname: updates.hostname ?? agent.hostname },
+      updates.lastSeenAt,
+      context
+    );
   }
 
   return json(200, { ok: true });
@@ -290,8 +335,8 @@ async function completeLabJob({ guard, store, now }, request, context) {
  * @param {{ queryDocs: Function, readDoc: Function, patchDoc: Function, replaceDocIfMatch: Function }} deps.store
  * @param {() => Date} [deps.now]
  */
-export function createLabAgentHandlers({ guard, store, now = () => new Date() }) {
-  const ctx = { guard, store, now };
+export function createLabAgentHandlers({ guard, store, now = () => new Date(), notifier = null }) {
+  const ctx = { guard, store, now, notifier };
   return {
     claimLabJob: (request, context) => claimLabJob(ctx, request, context),
     heartbeatAgent: (request, context) => heartbeatAgent(ctx, request, context),

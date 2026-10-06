@@ -43,6 +43,7 @@ const empty = {
   'podcast-feeds': { feeds: [] },
   'listen-and-learn-speech': { geminiModel: 'gemini-3.1-flash-tts-preview' },
   'podcast-voices': { Maya: '', Elena: '' },
+  reminders: { reminders: [] },
 };
 
 function LocationProbe() {
@@ -80,6 +81,7 @@ describe('tabs', () => {
       ['taxonomy', 'Content types & origins'],
       ['social', 'Social automation'],
       ['audio', 'Audio'],
+      ['reminders', 'Reminders'],
       ['history', 'Change history'],
     ]);
     expect(resolveTab('audio').id).toBe('audio');
@@ -160,6 +162,13 @@ describe('tabs', () => {
     await screen.findByText('Social autoposting');
     expect(routesAsked()).toEqual([settingRoute('social-autopost')]);
     expect(postJSON).toHaveBeenCalledWith('publerProxy', { path: '/accounts', method: 'GET' });
+  });
+
+  it('deep-links Reminders, which reads the reminders document only', async () => {
+    renderAt('/admin/platform?tab=reminders');
+    await screen.findByText(/Nothing here yet/);
+    expect(routesAsked()).toEqual([settingRoute('reminders')]);
+    expect(postJSON).not.toHaveBeenCalled();
   });
 
   it('deep-links Change history, which reads the history route only', async () => {
