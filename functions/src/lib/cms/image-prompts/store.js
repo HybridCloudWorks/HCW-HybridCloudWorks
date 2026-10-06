@@ -99,7 +99,7 @@ export async function deleteLegacyPromptIfNeeded(store, setName, promptName) {
 export async function copyPrompts(store, fromSet, toSet, nowIso, updatedBy) {
   const prompts = await promptsOfSet(store, fromSet);
   for (const prompt of prompts) {
-    // eslint-disable-next-line no-unused-vars
+     
     const { _rid, _self, _etag, _attachments, _ts, ...rest } = prompt;
     await store.upsertDoc('image_prompt_sets_prompts', {
       ...rest,

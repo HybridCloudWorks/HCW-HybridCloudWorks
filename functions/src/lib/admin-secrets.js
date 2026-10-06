@@ -113,7 +113,7 @@ const INVISIBLE_PATTERN =
  * crash where a diagnosis should be — the measurement on 2026-09-09 caught
  * exactly that shape.
  */
-// eslint-disable-next-line no-control-regex
+ 
 const CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
 /** The four a phone keyboard or a rich-text editor substitutes for ' and ". */

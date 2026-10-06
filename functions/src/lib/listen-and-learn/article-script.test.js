@@ -402,8 +402,7 @@ describe('generateArticleScript', () => {
     // eligible" rather than like a bug.
     const generate = vi.fn().mockResolvedValue(script());
     for (const marker of [{ Live: true }, { Status: 'Live' }]) {
-      const { contentStatus, ...rest } = article;
-      // eslint-disable-next-line no-await-in-loop
+      const { contentStatus: _dropped, ...rest } = article;
       const result = await generateArticleScript({ article: { ...rest, ...marker }, generate });
       expect(result.sourceArticleId).toBe('art-1');
     }

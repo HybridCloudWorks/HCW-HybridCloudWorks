@@ -55,7 +55,7 @@ export async function deleteIgnoringMissing(store, container, id, partitionKey =
 
 /** A document without Cosmos's system fields. */
 export function stripSystem(doc) {
-  // eslint-disable-next-line no-unused-vars
+   
   const { _rid, _self, _etag, _attachments, _ts, ...rest } = doc || {};
   return rest;
 }

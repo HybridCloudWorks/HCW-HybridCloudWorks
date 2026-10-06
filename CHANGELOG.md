@@ -3551,6 +3551,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The agent health timer threw on every run since the 17:17Z deploy, and
+  that was the app-exceptions alert (2026-10-06).** `schedulers.js` called
+  `createNotifier` for `checkAgentHealth` (#894) without importing it, so the
+  handler failed with a `ReferenceError` every five minutes — three runs and
+  six exception rows a quarter hour, one over the rule's threshold of five —
+  and the agent-offline message could never have come from the timer. The
+  `sendReminders` timer (#910) had the same hole. The import is now static,
+  and the Functions package gains `eslint` as a correctness gate (`no-undef`,
+  unused variables, duplicate keys, unreachable code), run by the `functions
+  (azure)` CI row; against the previous `schedulers.js` it reports both sites.
+  The Telegram 403s the heartbeat path logged at 22:21Z and 22:23Z are
+  Telegram refusing the bot or chat, not the code; the owner's direct test
+  names which.
+
 - **Lab alert rules match the host by `_ResourceId`, not by `Computer`
   (LAB-2 follow-up, 2026-10-06).** `alert-lab-heartbeat-prod-cus` fired at
   its first evaluation after the apply, with the host up: for an Arc machine
