@@ -187,134 +187,19 @@ const baseAddress = (address) => address.replace(/\[[^\]]*\]$/, '');
  * has applied. "Declaring an intended change" in the header has the rest.
  */
 export const DECLARED = [
-  // LAB-2 follow-up (2026-10-06): the three lab rules match the host by
-  // _ResourceId instead of Computer; each is one query-string update.
-  {
-    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_heartbeat_missing',
-    path: 'criteria[0].query',
-    before: 'Heartbeat | where Computer == "arcs-lab-hybrid-prod-cus-01"',
-    after:
-      'Heartbeat | where tolower(_ResourceId) endswith "/providers/microsoft.hybridcompute/machines/arcs-lab-hybrid-prod-cus-01"',
-    reason: 'LAB-2: Heartbeat carries the OS hostname in Computer; the Arc name is in _ResourceId',
-  },
-  // LAB-2 (estate review 2026-10-06): three lab alert rules in the
-  // Management resource group. The DCR they read from is updated in place in
-  // the same plan (two streams and three data sources added); that update is
-  // a nested-block change this file cannot declare by path, so the plan
-  // reports it — read it beside these three.
-  {
-    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_heartbeat_missing',
-    action: 'create',
-    reason: 'LAB-2: Heartbeat absence on the lab host pages the owner',
-  },
-  {
-    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_disk_used',
-    action: 'create',
-    reason: 'LAB-2: root filesystem past 85% on the lab host',
-  },
-  {
-    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_unit_failed',
-    action: 'create',
-    reason: 'LAB-2: a watched systemd unit on the lab host failed',
-  },
-  // SEC-2 (estate review 2026-10-06): the deploy identity's two ref-form
-  // federated credentials and its two container-scoped Cosmos data-plane
-  // grants, none with a consumer. Four destroys, nothing created.
-  {
-    address: 'azurerm_federated_identity_credential.github_branch',
-    action: 'delete',
-    reason: 'SEC-2: no workflow presents the ref subject on the deploy identity; it routed around the production gate',
-  },
-  {
-    address: 'azurerm_federated_identity_credential.github_branch_immutable',
-    action: 'delete',
-    reason: 'SEC-2: the immutable half of the same retired pair',
-  },
-  {
-    address: 'azurerm_cosmosdb_sql_role_assignment.github_deploy_cosmos_content',
-    action: 'delete',
-    reason: 'SEC-2: the --inspect reader runs locally; the deploy identity needs no Cosmos data-plane role',
-  },
-  {
-    address: 'azurerm_cosmosdb_sql_role_assignment.github_deploy_cosmos_blogs',
-    action: 'delete',
-    reason: 'SEC-2: the --inspect reader runs locally; the deploy identity needs no Cosmos data-plane role',
-  },
-  // Two new keys on the Function App, so `before` is absent. Both values are
-  // known at plan time and neither is a secret: a switch, and a vault
-  // reference (the pointer, never the value).
-  {
-    address: 'azurerm_function_app_flex_consumption.hcw',
-    path: 'app_settings.LABS_PUBLIC_SUBMISSION_ENABLED',
-    before: undefined,
-    after: 'true',
-    reason: 'ADR 0032 decision 6 revised 2026-09-28: public Validate on the lab opened, locked to the site',
-  },
-  {
-    address: 'azurerm_function_app_flex_consumption.hcw',
-    path: 'app_settings.TURNSTILE_SECRET_KEY',
-    before: undefined,
-    after:
-      '@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/TURNSTILE-SECRET-KEY)',
-    reason: 'ADR 0032 decision 6 revised 2026-09-28: the Turnstile secret, as a Key Vault reference',
-  },
-  // The weekly AI provider probe's timer flag (#701), in its two runs: the
-  // merge adds the key disarmed, as local.timer_flags writes every timer not
-  // in enabled_timers; adding PROBE_AI_PROVIDERS to enabled_timers arms it.
-  {
-    address: 'azurerm_function_app_flex_consumption.hcw',
-    path: 'app_settings.FEATURE_FLAG_PROBE_AI_PROVIDERS',
-    before: undefined,
-    after: 'false',
-    reason: '#701: the probeAiProviders timer is catalogued, disarmed until enabled_timers names it',
-  },
+  // The weekly AI provider probe's timer flag (#701): the key applied disarmed
+  // ('false', present in state since the 2026-10-06 runs); adding
+  // PROBE_AI_PROVIDERS to enabled_timers arms it. Everything else declared
+  // on 2026-10-06 (LAB-2 rules and their _ResourceId predicates, SEC-2
+  // deletes, ADR 0032 decision 6 keys, SEND_REMINDERS, #816) applied in
+  // runs ScVFg7p4/JgUsqrst/8M1puNBH that day and was deleted here, as the
+  // header asks.
   {
     address: 'azurerm_function_app_flex_consumption.hcw',
     path: 'app_settings.FEATURE_FLAG_PROBE_AI_PROVIDERS',
     before: 'false',
     after: 'true',
     reason: '#701: PROBE_AI_PROVIDERS added to enabled_timers, arming the weekly probe',
-  },
-  // The same two runs taken as one: the key had not applied when the owner
-  // armed it, so a single plan adds it already "true".
-  {
-    address: 'azurerm_function_app_flex_consumption.hcw',
-    path: 'app_settings.FEATURE_FLAG_PROBE_AI_PROVIDERS',
-    before: undefined,
-    after: 'true',
-    reason: '#701: the probeAiProviders timer catalogued and armed in one apply',
-  },
-  // The reminders timer's flag (owner request 2026-10-06), in its two runs
-  // or taken as one, the same three shapes as PROBE_AI_PROVIDERS above.
-  {
-    address: 'azurerm_function_app_flex_consumption.hcw',
-    path: 'app_settings.FEATURE_FLAG_SEND_REMINDERS',
-    before: undefined,
-    after: 'false',
-    reason: 'reminders: the sendReminders timer is catalogued, disarmed until enabled_timers names it',
-  },
-  {
-    address: 'azurerm_function_app_flex_consumption.hcw',
-    path: 'app_settings.FEATURE_FLAG_SEND_REMINDERS',
-    before: 'false',
-    after: 'true',
-    reason: 'reminders: SEND_REMINDERS added to enabled_timers, arming the daily check',
-  },
-  {
-    address: 'azurerm_function_app_flex_consumption.hcw',
-    path: 'app_settings.FEATURE_FLAG_SEND_REMINDERS',
-    before: undefined,
-    after: 'true',
-    reason: 'reminders: the sendReminders timer catalogued and armed in one apply',
-  },
-  // #816 part 2: with cp_sortDate written by the apply (part 1, applied
-  // 2026-10-03), the healer's custom-role assignment on the deploy identity
-  // goes. Its role definition is the owner's, outside Terraform, so it is a
-  // data source here and plans no change of its own.
-  {
-    address: 'azurerm_role_assignment.github_deploy_cosmos_container_writer',
-    action: 'delete',
-    reason: "#816: the six-hourly healer is deleted, and with it the deploy identity's container-definition role",
   },
 ];
 

@@ -2886,6 +2886,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Plan-check declarations trimmed to the one still pending (2026-10-06).**
+  The `hcw-azure` runs after the stale #908 plan was discarded applied the
+  three lab rule predicates, the `SEND_REMINDERS` flag (`false`, then `true`
+  once `enabled_timers` named it), and confirmed the SEC-2 deletes, the ADR
+  0032 decision 6 keys and the #816 role removal are in state, so their
+  entries in `scripts/assert-expected-plan.mjs` are deleted as its header
+  asks. `FEATURE_FLAG_PROBE_AI_PROVIDERS` is still `false` in state, so its
+  arming declaration stays.
+
 - **Anthropic is a certification issuer, and the Top issuer stat wraps
   (owner request 2026-10-05).** `lib/certIssuers.js` gains `anthropic`
   (aliases `claude`, `anthropic pbc`; learn link anthropic.com/learn; its

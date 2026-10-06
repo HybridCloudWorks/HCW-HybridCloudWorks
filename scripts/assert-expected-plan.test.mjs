@@ -940,10 +940,13 @@ describe('conditional replacements and declared creates (#816)', () => {
     expect(declarationLines(result)).toEqual([`DECLARED    ${COSMOS}["content"] create (test)`]);
   });
 
-  it('passes the healer removal (#816 part 2) on the shipped declarations: 3 add, 1 change, 4 destroy', () => {
+  it('passes a declared delete beside the permanent diff: 3 add, 1 change, 4 destroy (the #816 healer removal, as it was declared)', () => {
+    // The shipped declaration applied on 2026-10-06 and was deleted, as the
+    // header asks, so the shape is declared here instead.
     const ROLE = 'azurerm_role_assignment.github_deploy_cosmos_container_writer';
+    const declaration = { address: ROLE, action: 'delete', reason: 'test' };
     const plan = withChanges({ address: ROLE, change: { actions: ['delete'] } });
-    const result = checkPlan(plan);
+    const result = checkPlan(plan, { declared: [declaration] });
     expect(result).toMatchObject({ ok: true, unexpected: [], missing: [] });
     expect(result.declared.map((d) => d.address)).toEqual([ROLE]);
   });
