@@ -208,6 +208,20 @@ describe('OIDC federated credentials cover every Azure login', () => {
     }
   );
 
+  it('the deploy identity trusts environment-form subjects only, so the production gate cannot be routed around (SEC-2)', () => {
+    // A ref-form credential on the deploy identity would let any job on
+    // main with `id-token: write` sign in as it without the production
+    // environment's reviewers. Retired 2026-10-06; this pins the retirement.
+    const subjects = byIdentity.github_deploy ?? [];
+    expect(subjects.length).toBeGreaterThan(0);
+    const refForm = subjects.filter((s) => s.includes(':ref:'));
+    expect(
+      refForm,
+      `github_deploy trusts a ref-form subject, which bypasses the production environment gate:\n  ${refForm.join('\n  ')}`
+    ).toEqual([]);
+    expect(subjects.every((s) => s.includes(':environment:production'))).toBe(true);
+  });
+
   it('trusts each subject in both the name and immutable-ID forms, per identity', () => {
     // GitHub composes the subject with numeric org/repo IDs embedded; the
     // repository trusts both forms deliberately (see infra/oidc.tf). One

@@ -36,19 +36,25 @@ resource "azurerm_user_assigned_identity" "github_deploy" {
   tags                = local.tags
 }
 
-# Trust GitHub's OIDC issuer for this repository on the deploy branch only.
+# RETIRED 2026-10-06 (estate review, finding SEC-2; owner decision that day):
+# the two `ref:refs/heads/main` credentials on THIS identity, name form here
+# and immutable form below.
+#
+# They trusted a subject no workflow presents. Every job that signs in as
+# the deploy identity declares `environment: production`, so GitHub composes
+# the environment form and the production reviewers gate the sign-in. The
+# ref form was the way around that gate: any job on `main` holding
+# `id-token: write` — ten workflows do, for Qlty, Pages and the manifest —
+# could have signed in as this identity with no reviewer and deployed code
+# that runs as the Function App's own identity. Deleting the pair closes the
+# route; `scripts/oidc-subjects.test.mjs` now asserts this identity trusts
+# environment-form subjects only. The reader identity keeps its ref pair
+# below: its workflows name no environment and it holds read roles.
 #
 # `subject` must match the token's claim EXACTLY. GitHub composes it as
-# repo:<org>/<repo>:ref:<git-ref>, so github_org, github_repo and
-# github_deploy_ref are load-bearing — a mismatch fails at azure/login with
-# AADSTS70021 and no indication of which component was wrong.
-resource "azurerm_federated_identity_credential" "github_branch" {
-  name                      = "github-${var.github_repo}-branch"
-  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
-  audience                  = ["api://AzureADTokenExchange"]
-  issuer                    = "https://token.actions.githubusercontent.com"
-  subject                   = "repo:${var.github_org}/${var.github_repo}:ref:${var.github_deploy_ref}"
-}
+# repo:<org>/<repo>:environment:<name> for a job that names an environment,
+# so github_org and github_repo are load-bearing — a mismatch fails at
+# azure/login with AADSTS70021 and no indication of which component was wrong.
 
 # RETIRED 2026-08-26 (T-524): the two `environment:data-migration` credentials,
 # name form here and immutable form below.
@@ -112,13 +118,10 @@ locals {
   github_immutable_prefix = "repo:${var.github_org}@312844660/${var.github_repo}@1268997852"
 }
 
-resource "azurerm_federated_identity_credential" "github_branch_immutable" {
-  name                      = "github-${var.github_repo}-branch-immutable"
-  user_assigned_identity_id = azurerm_user_assigned_identity.github_deploy.id
-  audience                  = ["api://AzureADTokenExchange"]
-  issuer                    = "https://token.actions.githubusercontent.com"
-  subject                   = "${local.github_immutable_prefix}:ref:${var.github_deploy_ref}"
-}
+# The immutable half of the deploy identity's ref pair stood here until
+# 2026-10-06 (SEC-2, see the note above the retired name form). Both halves
+# went together: one without the other is half a credential and fails on
+# whichever form the token carries.
 
 # The immutable half of the data-migration pair was removed here on 2026-08-26
 # with its name-form twin above (T-524). Both went together deliberately: one
@@ -149,13 +152,14 @@ resource "azurerm_federated_identity_credential" "github_branch_immutable" {
 #
 # The rule is per-workflow, not per-repository: a workflow that names an
 # environment needs an environment credential, one that does not needs the
-# branch credential. This said the branch pair was still needed because
+# branch credential. The branch pair was once needed because
 # heal-computed-properties.yml and publish-content-manifest.yml declared no
 # environment. publish-content-manifest has signed in as the reader identity
 # since T-728, and the healer was deleted in #816 part 2, so no workflow on
-# THIS identity presents the ref subject today. Retiring the branch pair is an
-# identity decision for the owner, as the data-migration pair was (T-524), so
-# it stays until that decision is made.
+# THIS identity presents the ref subject, and on 2026-10-06 the owner retired
+# the pair (SEC-2). These two environment credentials are the identity's
+# only trust now: a sign-in as the deploy identity passes the production
+# environment's reviewers or does not happen.
 # ---------------------------------------------------------------------------
 resource "azurerm_federated_identity_credential" "github_production" {
   name                      = "github-${var.github_repo}-env-production"
@@ -508,39 +512,15 @@ resource "azurerm_role_assignment" "github_copilot_review_reader" {
 # after the apply that destroys the assignment (Azure refuses to delete a
 # definition that still has one).
 #
-# The two container-scoped DATA-PLANE grants below are not part of this
-# removal. Their reader was the workflow's dispatch-only
-# `--inspect`; with the workflow gone, `apply-computed-sortdate.mjs --inspect`
-# runs locally under the operator's own sign-in.
-
-# `name` omitted on the data-plane assignments for the same reason as
-# func_cosmos in main.tf: the provider generates a stable GUID, and a
-# duplicated hardcoded name silently REPLACES another identity's assignment
-# instead of erroring.
-
-# The container segment of each scope comes from the CONTAINER RESOURCE, not a
-# string literal. A literal "colls/content" is correct text but carries no
-# dependency edge, so on a fresh apply Terraform ordered these before the
-# containers existed and Cosmos rejected them with "The collection with name
-# [content] ... could not be found". Referencing the resource makes the
-# ordering explicit and breaks if the container is ever renamed or removed —
-# both improvements over failing at apply time.
-
-resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_content" {
-  resource_group_name = azurerm_resource_group.app["db"].name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
-  principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
-  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["content"].name}"
-}
-
-resource "azurerm_cosmosdb_sql_role_assignment" "github_deploy_cosmos_blogs" {
-  resource_group_name = azurerm_resource_group.app["db"].name
-  account_name        = azurerm_cosmosdb_account.hcw.name
-  role_definition_id  = "${azurerm_cosmosdb_account.hcw.id}/sqlRoleDefinitions/00000000-0000-0000-0000-000000000002"
-  principal_id        = azurerm_user_assigned_identity.github_deploy.principal_id
-  scope               = "${azurerm_cosmosdb_account.hcw.id}/dbs/${azurerm_cosmosdb_sql_database.hcw.name}/colls/${azurerm_cosmosdb_sql_container.hcw["blogs"].name}"
-}
+# The two container-scoped DATA-PLANE grants (Cosmos Data Contributor on
+# `content` and `blogs` for this identity) outlived that removal until
+# 2026-10-06 (estate review, SEC-2). Their reader was the workflow's
+# dispatch-only `--inspect`; with the workflow gone,
+# `apply-computed-sortdate.mjs --inspect` runs locally under the operator's
+# own sign-in, so the grants had no consumer and contradicted ADR 0025's
+# "CI holds no Cosmos data-plane role". They are gone; the Function App's
+# own identity is the only principal with a Cosmos data-plane role
+# (func_cosmos in cosmos.tf).
 
 # ---------------------------------------------------------------------------
 # REMOVED 2026-08-24 — the production-import grants, and the gate that held them
@@ -627,24 +607,25 @@ output "deploy_principal_id" {
   value       = azurerm_user_assigned_identity.github_deploy.principal_id
 }
 
-# Eight entries since 2026-09-06, up from six: the Copilot review identity's
-# environment pair was added. Before that, six since 2026-08-29, when the reader
-# identity's ref pair was added (T-728). Keeping this list in step with the resources above is not
-# cosmetic — it is what an operator diffs a failing token's subject against, so
-# it has to name exactly what Entra trusts. Deleting the credentials without
-# deleting the entries is what broke `terraform validate` on PR #230.
+# Six entries since 2026-10-06, down from eight: the deploy identity's ref pair
+# was retired (SEC-2). Eight since 2026-09-06, when the Copilot review
+# identity's environment pair was added; six before that since 2026-08-29, when
+# the reader identity's ref pair was added (T-728). Keeping this list in step
+# with the resources above is not cosmetic — it is what an operator diffs a
+# failing token's subject against, so it has to name exactly what Entra trusts.
+# Deleting the credentials without deleting the entries is what broke
+# `terraform validate` on PR #230.
 #
-# NOTE for anyone debugging AADSTS700213 against this list: the two identities
-# trust the SAME ref subject, deliberately. A ref-form token is valid for either,
-# and which one a job gets is decided by the client-id it presents, not by the
-# subject. So a subject appearing here does not tell you the workflow reached the
-# identity you expected — check whether it sent CLIENT_ID or READER_CLIENT_ID.
+# NOTE for anyone debugging AADSTS700213 against this list: since SEC-2 the
+# ref subject is trusted by the READER identity only. A ref-form token sent
+# with CLIENT_ID (the deploy identity) fails here by design — a job that needs
+# the deploy identity names `environment: production` and presents the
+# environment form. Which identity a job reaches is decided by the client-id
+# it presents, so check whether it sent CLIENT_ID or READER_CLIENT_ID.
 output "federated_subjects" {
   description = "Exact OIDC subject claims trusted by these identities — compare against a failing token"
   value = [
-    azurerm_federated_identity_credential.github_branch.subject,
     azurerm_federated_identity_credential.github_production.subject,
-    azurerm_federated_identity_credential.github_branch_immutable.subject,
     azurerm_federated_identity_credential.github_production_immutable.subject,
     azurerm_federated_identity_credential.github_reader_branch.subject,
     azurerm_federated_identity_credential.github_reader_branch_immutable.subject,

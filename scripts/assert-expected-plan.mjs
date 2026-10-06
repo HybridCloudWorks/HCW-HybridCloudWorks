@@ -187,6 +187,29 @@ const baseAddress = (address) => address.replace(/\[[^\]]*\]$/, '');
  * has applied. "Declaring an intended change" in the header has the rest.
  */
 export const DECLARED = [
+  // SEC-2 (estate review 2026-10-06): the deploy identity's two ref-form
+  // federated credentials and its two container-scoped Cosmos data-plane
+  // grants, none with a consumer. Four destroys, nothing created.
+  {
+    address: 'azurerm_federated_identity_credential.github_branch',
+    action: 'delete',
+    reason: 'SEC-2: no workflow presents the ref subject on the deploy identity; it routed around the production gate',
+  },
+  {
+    address: 'azurerm_federated_identity_credential.github_branch_immutable',
+    action: 'delete',
+    reason: 'SEC-2: the immutable half of the same retired pair',
+  },
+  {
+    address: 'azurerm_cosmosdb_sql_role_assignment.github_deploy_cosmos_content',
+    action: 'delete',
+    reason: 'SEC-2: the --inspect reader runs locally; the deploy identity needs no Cosmos data-plane role',
+  },
+  {
+    address: 'azurerm_cosmosdb_sql_role_assignment.github_deploy_cosmos_blogs',
+    action: 'delete',
+    reason: 'SEC-2: the --inspect reader runs locally; the deploy identity needs no Cosmos data-plane role',
+  },
   // Two new keys on the Function App, so `before` is absent. Both values are
   // known at plan time and neither is a secret: a switch, and a vault
   // reference (the pointer, never the value).
