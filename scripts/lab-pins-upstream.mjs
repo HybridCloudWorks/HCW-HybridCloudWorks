@@ -123,11 +123,18 @@ async function fetchJson(url, headers = {}) {
   return JSON.parse(await fetchText(url, { Accept: 'application/json', ...headers }));
 }
 
+/** A string as a regular-expression literal: every metacharacter escaped. */
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /** Newest stable version in a Debian Packages index for one package name. */
 export function newestAptVersion(packagesText, packageName) {
   const versions = [];
+  // The name is a literal (`containerd.io`), so its dot is escaped: unescaped
+  // it would match any character, `containerdXio` included (CodeQL
+  // js/regex/missing-regexp-anchor on #899).
+  const header = new RegExp(`^Package: ${escapeRegExp(packageName)}$`, 'm');
   for (const stanza of packagesText.split(/\n\n+/)) {
-    if (!new RegExp(`^Package: ${packageName}$`, 'm').test(stanza)) continue;
+    if (!header.test(stanza)) continue;
     const v = coreVersion(stanza.match(/^Version: (.+)$/m)?.[1]);
     if (v) versions.push(v);
   }
