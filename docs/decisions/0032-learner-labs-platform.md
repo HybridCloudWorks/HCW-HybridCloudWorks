@@ -663,6 +663,25 @@ deleted key would lose the Vault for good.
   production zone's records until that zone exists, not data. Moving workspaces and
   jobs to a rootless or separate daemon is a revisit trigger, not a
   prerequisite.
+
+  *Amendment 2026-10-06 (estate review, LAB-5):* the Coder server no longer
+  holds the socket. A `coder-docker-proxy` Compose service (HAProxy, one
+  allow rule per Docker API section) mounts it read-only on a control
+  network the server alone shares with it, and the server reaches the
+  daemon through it over `DOCKER_HOST`: containers, images, networks,
+  volumes and the lifecycle verbs the provisioner uses, and nothing else —
+  no exec, build, commit, swarm, system or auth. **This narrows a Coder
+  compromise; it does not contain it.** The proxy inspects paths, not
+  bodies, so a compromised server can still create a privileged container
+  or bind the host's `/` and start it, which is root as before. Containing
+  that needs a body-aware authorisation layer (a Docker authz plugin that
+  rejects privileged mode, host binds, host namespaces and added
+  capabilities) or a separate or rootless daemon for Coder, and that is the
+  revisit trigger, now with its shape written down. `template.test.mjs`
+  asserts the mount, every proxy policy key, the networks, and the absence
+  of the socket and the docker group from the server. The agent keeps its
+  docker group; its unit gained system-call and address-family filters and
+  its `npm ci` runs with `--ignore-scripts`.
 - **Cloudflare API tokens are zone-scoped, and `lab.hybridcloudworks.com` is
   a name in the production zone.** Cloudflare cannot scope a token to one
   record, so any token with DNS edit on `hybridcloudworks.com` can change the
@@ -683,8 +702,15 @@ deleted key would lose the Vault for good.
   production record, and Caddy's token is scoped to that zone alone. Until
   the owner has that zone (a small annual spend, tracked on #661), Caddy's
   token has DNS edit on the production zone, and that interim is an accepted
-  risk recorded here rather than a surprise: the `hcw-azure` plan check and
-  the deploy-drift monitor would show any production record it altered.
+  risk recorded here rather than a surprise. *Corrected 2026-10-06 (estate
+  review, LAB-1):* this bullet used to say the `hcw-azure` plan check and
+  the deploy-drift monitor would show any production record the token
+  altered. Neither does: the drift monitor reads GitHub only, the plan covers
+  the three records Terraform manages, and the apex and `www` records are
+  hand-made. The only record of a zone edit is Cloudflare's own audit log.
+  Until the lab zone exists, the compensating steps are the token's
+  client-IP filter and expiry in Cloudflare and an audit-log notification
+  for DNS changes on the production zone, both owner steps.
 - **`lab-image/` is a new supply-chain surface.** Every image it publishes
   must be digest-pinned where consumed, and the existing
   `capabilities.test.js` assertion that every capability names a digest is the
@@ -760,7 +786,8 @@ deleted key would lose the Vault for good.
     > Machines in `rg-lab-hybrid-prod-cus`, and a `Heartbeat` query in the
     Management workspace returns rows for it.
   - The control plane is checked by name, not by count: `docker ps` on the
-    host shows the Compose services `coder` and `coder-postgres` (and the
+    host shows the Compose services `coder`, `coder-docker-proxy` and
+    `coder-postgres` (and the
     container `portainer` while `portainer_enabled` is true), and
     `systemctl` shows `caddy`, `hcw-labs-agent` and `node-exporter` active as
     host-native units (and `vault` while `vault_enabled` is true). Every other container carries either the

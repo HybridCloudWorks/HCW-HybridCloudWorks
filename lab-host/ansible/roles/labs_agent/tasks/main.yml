@@ -127,9 +127,12 @@
   loop_control:
     label: "{{ item.path | basename }}"
 
+# --ignore-scripts: none of the agent's dependencies needs an install hook
+# (checked 2026-10-06, LAB-5), and a postinstall in a compromised package
+# would otherwise run as root on the host.
 - name: Install the agent's production dependencies for this commit
   ansible.builtin.shell:
-    cmd: npm ci --omit=dev && touch "{{ labs_agent_deps_stamp }}"
+    cmd: npm ci --omit=dev --ignore-scripts && touch "{{ labs_agent_deps_stamp }}"
     chdir: "{{ labs_agent_app_dir }}"
     creates: "{{ labs_agent_deps_stamp }}"
   notify: Restart hcw-labs-agent

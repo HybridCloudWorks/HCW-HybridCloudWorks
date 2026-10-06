@@ -186,3 +186,57 @@
     success_msg: >-
       Connected to Azure Arc as {{ arc_resource_name }} in {{ arc_resource_group }}.
   when: not ansible_check_mode
+
+# Agent lockdown (estate review 2026-10-06, LAB-6, shipped with LAB-5). An
+# Arc machine accepts any extension and Run Command from any identity with
+# Contributor on its resource group, which is root on the host over the
+# control plane, bypassing sshd. The allowlist admits the one extension this
+# estate installs (the Azure Monitor Agent, docs/runbooks/labs-host.md), and
+# incoming connections (SSH over Arc, Windows Admin Center) are off: the
+# owner reaches the host over sshd with a key. Each setting is read first and
+# written only when it differs, so the play reports changed truthfully.
+- name: Read the Arc agent's configuration
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - config
+      - list
+      - --json
+  register: arc_config_list
+  changed_when: false
+  when: not ansible_check_mode
+
+- name: Record the Arc agent's lockdown state
+  ansible.builtin.set_fact:
+    arc_lockdown_current: >-
+      {{ dict((arc_config_list.stdout | from_json)
+              | map(attribute='name')
+              | zip((arc_config_list.stdout | from_json) | map(attribute='value'))) }}
+  when: not ansible_check_mode
+
+- name: Allow only the Azure Monitor Agent extension
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - config
+      - set
+      - extensions.allowlist
+      - "{{ arc_extensions_allowlist }}"
+  # Runs only when the stored value differs, so a run is a change.
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - (arc_lockdown_current['extensions.allowlist'] | default('')) != arc_extensions_allowlist
+
+- name: Turn off incoming connections through Arc
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - config
+      - set
+      - incomingconnections.enabled
+      - "false"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - (arc_lockdown_current['incomingconnections.enabled'] | default('true') | string | lower) != 'false'

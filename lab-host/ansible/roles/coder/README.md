@@ -89,7 +89,14 @@ starts or stops it, adds the Caddy route and keeps a week of nightly dumps.
    which the role first asserts is whole hours.
 
 The privilege boundary is the Compose file's and the template's, not this
-role's: the socket goes to the `coder` service only, and
+role's: the socket goes to the `coder-docker-proxy` service only, read-only,
+on a control network the `coder` service alone shares with it; the server
+reaches the daemon through it over `DOCKER_HOST` and gets only the API
+sections it allows (no exec, build, commit, swarm or system; since
+2026-10-06, LAB-5). That narrows what a compromised server can do and does
+not contain it — the proxy reads paths, not bodies, so container creation
+with a privileged flag or a host bind still succeeds; the Compose file says
+what would — and
 `lab-host/coder/templates/hcw-lab/template.test.mjs` asserts what a
 workspace may and may not have.
 
@@ -154,8 +161,10 @@ stops at step 3 and says Coder is probably not running.
 A publish by `bootstrap.sh` would need a token stored in the vault, and on
 this host a token that can publish a template is as good as root. The
 template runs in Coder's provisioner, inside the `coder` container, which
-holds the Docker socket; a template version that asks the Docker provider
-for a privileged container with the host's `/` mounted gets one.
+reaches the daemon through the socket proxy; a template version that asks the
+Docker provider for a privileged container with the host's `/` mounted still
+gets one, because the proxy allows container creation and does not read the
+body (LAB-5 narrowed the daemon's other sections, not this one).
 `template.test.mjs` keeps this repository's template from doing that, but a
 token pushes whatever it is given, and Coder's API answers it from anywhere
 on the internet through Caddy. The narrowest v2.37.3 token that could
@@ -176,6 +185,7 @@ owner's, made in a pane for the one run and expiring on its own.
 | `coder_max_workspaces` | required | Capacity the host is sized for; asserted against memory |
 | `coder_image`, `coder_image_tag`, `coder_image_digest` | required | Coder pin; run as `image@digest` |
 | `coder_postgres_image`, `coder_postgres_image_tag`, `coder_postgres_image_digest` | required | PostgreSQL pin; run as `image@digest` |
+| `coder_docker_proxy_image`, `coder_docker_proxy_image_tag`, `coder_docker_proxy_image_digest` | required | The Docker socket proxy pin (LAB-5); run as `image@digest` |
 | `coder_oauth2_github_client_id` | `vault_coder_oauth2_github_client_id` or empty | OAuth app |
 | `coder_oauth2_github_client_secret` | `vault_coder_oauth2_github_client_secret` or empty | OAuth app |
 | `coder_postgres_password` | `vault_coder_postgres_password` or empty | Database user `coder`; RFC 3986 unreserved characters only |

@@ -18,6 +18,11 @@ argument_specs:
         scripts/lab/Register-LabArc.ps1 -Connect adds after onboarding (docs/runbooks/labs-host.md).
     author: HybridCloudWorks
     options:
+      arc_extensions_allowlist:
+        type: str
+        required: false
+        default: "Microsoft.Azure.Monitor/AzureMonitorLinuxAgent"
+        description: The extensions the Arc agent may install, as azcmagent's extensions.allowlist value (LAB-6).
       arc_enabled:
         type: bool
         required: true

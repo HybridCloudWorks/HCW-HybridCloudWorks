@@ -69,15 +69,6 @@
     quiet: true
   when: coder_enabled | bool
 
-- name: Read the docker group's id for the coder container's group_add
-  ansible.builtin.getent:
-    database: group
-    key: docker
-
-- name: Record the docker group's id
-  ansible.builtin.set_fact:
-    coder_docker_gid: "{{ ansible_facts['getent_group']['docker'][1] }}"
-
 - name: Create the Compose project directory
   ansible.builtin.file:
     path: "{{ coder_project_dir }}"
@@ -94,7 +85,7 @@
     group: root
     mode: "0640"
 
-- name: Write the Compose interpolation values (image pins and docker gid)
+- name: Write the Compose interpolation values (the three image pins)
   ansible.builtin.template:
     src: compose.env.j2
     dest: "{{ coder_compose_env_file }}"

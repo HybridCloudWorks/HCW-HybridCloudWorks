@@ -105,26 +105,68 @@ function assignedObject(body, name) {
 const services = composeServices(compose);
 const containers = hclBlocks(mainTf, 'resource "docker_container"');
 
-test('the Compose file defines exactly the two services ADR 0032 names', () => {
-  assert.deepEqual(Object.keys(services).sort(), ['coder', 'coder-postgres']);
+test('the Compose file defines exactly the three services ADR 0032 names', () => {
+  assert.deepEqual(Object.keys(services).sort(), ['coder', 'coder-docker-proxy', 'coder-postgres']);
 });
 
-test('the Docker socket is mounted into the coder service and nowhere else', () => {
+test('the Docker socket is mounted read-only into the proxy service and nowhere else (LAB-5)', () => {
   const socketLines = (lines) => lines.filter((line) => line.includes('docker.sock'));
-  assert.equal(socketLines(services.coder).length, 1, 'coder mounts the socket once');
+  assert.equal(socketLines(services['coder-docker-proxy']).length, 1, 'the proxy mounts the socket once');
   assert.ok(
-    /^\s*-\s*\/var\/run\/docker\.sock:\/var\/run\/docker\.sock\s*$/.test(socketLines(services.coder)[0]),
-    'the mount is the plain socket path, not a directory above it',
+    /^\s*-\s*\/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro\s*$/.test(socketLines(services['coder-docker-proxy'])[0]),
+    'the mount is the plain socket path, read-only, not a directory above it',
   );
+  assert.equal(socketLines(services.coder).length, 0, 'the coder server never sees the socket');
   assert.equal(socketLines(services['coder-postgres']).length, 0, 'postgres never sees the socket');
   assert.equal(codeLines(mainTf).filter((line) => line.includes('docker.sock')).length, 0, 'the template never names the socket');
   assert.equal(codeLines(mainTf).filter((line) => /\/var\/run\b/.test(line)).length, 0, 'the template never reaches under /var/run');
 });
 
-test('the coder server keeps its non-root user and joins the docker group by GID', () => {
-  assert.ok(services.coder.some((line) => /^\s*group_add:\s*$/.test(line)), 'group_add is present');
-  assert.ok(services.coder.some((line) => /^\s*-\s*"\$\{DOCKER_GID/.test(line)), 'the GID comes from the role-written .env');
+test('the coder server keeps its non-root user and reaches the daemon only through the proxy', () => {
+  assert.equal(services.coder.filter((line) => /^\s*group_add:/.test(line)).length, 0, 'no docker group membership');
+  assert.ok(
+    services.coder.some((line) => /^\s*DOCKER_HOST:\s*"tcp:\/\/coder-docker-proxy:2375"\s*$/.test(line)),
+    'DOCKER_HOST names the proxy on the Compose network',
+  );
+  assert.ok(
+    codeLines(mainTf).some((line) => /host\s*=\s*"tcp:\/\/coder-docker-proxy:2375"/.test(line)),
+    'the template\'s Docker provider names the same proxy',
+  );
   assert.equal(services.coder.filter((line) => /^\s*user:/.test(line)).length, 0, 'no user: override, so the image default (non-root coder) stands');
+  assert.equal(services['coder-docker-proxy'].filter((line) => /^\s*ports:/.test(line)).length, 0, 'the proxy publishes no port');
+});
+
+test('the proxy policy is exactly the allowlist the provisioner needs, every key pinned (LAB-5)', () => {
+  const proxy = services['coder-docker-proxy'];
+  const value = (name) => proxy.find((line) => new RegExp(`^\\s*${name}:`).test(line))?.match(/"(\d)"/)?.[1];
+  const on = ['CONTAINERS', 'IMAGES', 'NETWORKS', 'VOLUMES', 'POST', 'ALLOW_START', 'ALLOW_STOP', 'ALLOW_RESTARTS', 'INFO', 'VERSION', 'PING', 'EVENTS'];
+  const off = ['EXEC', 'BUILD', 'COMMIT', 'AUTH', 'SECRETS', 'SWARM', 'SERVICES', 'NODES', 'TASKS', 'SYSTEM', 'PLUGINS', 'SESSION', 'DISTRIBUTION', 'CONFIGS'];
+  for (const name of on) assert.equal(value(name), '1', `${name} is on`);
+  for (const name of off) assert.equal(value(name), '0', `${name} is off`);
+  // Every policy key the service sets is one of the two lists above: a key
+  // added or renamed without a decision here fails, which is the point of
+  // a regression guard (#900 review).
+  const configured = proxy
+    .map((line) => line.match(/^\s*([A-Z_]+):\s*"[01]"\s*$/)?.[1])
+    .filter(Boolean);
+  assert.deepEqual(configured.sort(), [...on, ...off].sort());
+});
+
+test('the proxy and the server share a control network that PostgreSQL is not on (#900 review)', () => {
+  const networksOf = (lines) => {
+    const start = lines.findIndex((line) => /^\s*networks:\s*$/.test(line));
+    if (start === -1) return [];
+    const out = [];
+    for (const line of lines.slice(start + 1)) {
+      const m = line.match(/^\s*-\s*([a-z-]+)\s*$/);
+      if (!m) break;
+      out.push(m[1]);
+    }
+    return out;
+  };
+  assert.deepEqual(networksOf(services['coder-docker-proxy']), ['coder-control'], 'the proxy is on the control network only');
+  assert.deepEqual(networksOf(services.coder), ['coder', 'coder-control'], 'the server is on both, coder first');
+  assert.deepEqual(networksOf(services['coder-postgres']), ['coder'], 'postgres never joins the control network');
 });
 
 test('nothing in either file is privileged', () => {
