@@ -18,6 +18,8 @@ import {
   patchDoc,
   replaceDocIfMatch,
   createDoc,
+  deleteDoc,
+  queryDocs,
 } from '../lib/cosmos-client.js';
 import * as ai from '../lib/ai/router.js';
 import {
@@ -38,7 +40,7 @@ const queueOutput = output.storageQueue({
 const queue = () =>
   createForgeQueueHandlers({
     guard: getDefaultGuard(),
-    store: { readDoc, upsertDoc, replaceDocIfMatch, createDoc },
+    store: { readDoc, upsertDoc, patchDoc, replaceDocIfMatch, createDoc, deleteDoc, queryDocs },
   });
 
 const handlers = () =>

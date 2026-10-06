@@ -321,17 +321,25 @@ describe('forge-from-url with a brief on the payload (the Forge Studio Queue, 20
       { job: { id: 'j1', type: 'forge-from-url', payload: { url: 'https://a.test' } }, status: 'succeeded', result: { success: true, contentId: 'c1' }, error: null },
       hookCtx
     );
-    expect(cosmos.readDoc).not.toHaveBeenCalledWith('admin_config', 'forge_queue', 'admin_config');
+    expect(cosmos.readDoc).not.toHaveBeenCalledWith(
+      'admin_config',
+      expect.stringMatching(/^forge_queue_item:/),
+      'admin_config'
+    );
     await forgeFromUrlComplete(
       {
-        job: { id: 'j2', type: 'forge-from-url', payload: { url: 'https://a.test', queueItemId: 'q-1' } },
+        job: {
+          id: 'j2',
+          type: 'forge-from-url',
+          payload: { url: 'https://a.test', queueItemId: 'forge_queue_item:q-1' },
+        },
         status: 'failed',
         result: null,
         error: 'scrape 403',
       },
       hookCtx
     );
-    expect(cosmos.readDoc).toHaveBeenCalledWith('admin_config', 'forge_queue', 'admin_config');
+    expect(cosmos.readDoc).toHaveBeenCalledWith('admin_config', 'forge_queue_item:q-1', 'admin_config');
   });
 
   it('the registered type takes a 16 KiB payload and uses the queue-aware onComplete', () => {

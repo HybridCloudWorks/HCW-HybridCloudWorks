@@ -5,8 +5,13 @@
  * Pure; the file reading happens in the component.
  */
 
-/** More than this in one import is a mistake, not a reading list. */
-export const MAX_URLS_PER_IMPORT = 100;
+/**
+ * A browser favourites export runs to hundreds, sometimes a couple of
+ * thousand links (owner, 2026-10-06); the queue takes 2,000 per add.
+ */
+export const MAX_URLS_PER_IMPORT = 2000;
+/** Rows drawn in the detected list; the rest are counted, and Add all adds every one. */
+export const DETECTED_ROWS_SHOWN = 200;
 /** A saved page larger than this is not a reading list either. */
 export const MAX_HTML_FILE_BYTES = 5 * 1024 * 1024;
 

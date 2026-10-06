@@ -627,6 +627,41 @@ describe('From a URL with many URLs, and the Forge Studio Queue (owner request 2
     expect(await screen.findByText('Forging')).toBeInTheDocument();
   });
 
+  it('every row has its own remove, and the header removes the selection, skipping forging entries', async () => {
+    postJSON.mockImplementation(async (route, body) => ({
+      ok: true,
+      items: QUEUE_ITEMS.filter((i) => !body.ids.includes(i.id)),
+      total: 1,
+      max: 5000,
+      removed: body.ids,
+    }));
+    renderPage('/admin/forge-studio?tab=queue');
+    await screen.findAllByTestId('queue-row');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove aws.amazon.com/blogs/x' }));
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('cms/forge/queue/update', {
+        ids: ['q-3'],
+        remove: true,
+      })
+    );
+    expect(screen.getByRole('button', { name: /Remove selected/ })).toBeDisabled();
+    fireEvent.click(
+      screen.getByRole('checkbox', {
+        name: 'Select www.finops.org/insights/agentic-finops-adoption',
+      })
+    );
+    fireEvent.click(
+      screen.getByRole('checkbox', { name: 'Select learn.microsoft.com/azure/thing' })
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Remove selected \(2\)/ }));
+    await waitFor(() =>
+      expect(postJSON).toHaveBeenCalledWith('cms/forge/queue/update', {
+        ids: ['q-1', 'q-2'],
+        remove: true,
+      })
+    );
+  });
+
   it('selecting several shows the shared fields, sends only the filled ones, and a forged entry opens its draft', async () => {
     postJSON.mockImplementation(async (route, body) => ({
       ok: true,

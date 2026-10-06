@@ -65,20 +65,24 @@ export {
   createForgeWorkspaceHandlers,
 } from './forge-studio/workspace.js';
 export {
-  QUEUE_DOC_ID,
+  QUEUE_DOC_TYPE,
+  QUEUE_ID_PREFIX,
+  LEGACY_QUEUE_DOC_ID,
   MAX_QUEUE_ITEMS,
   MAX_URLS_PER_ADD,
   QUEUE_BRIEF_FIELDS,
   QUEUE_STATUSES,
   normalizeQueueUrl,
-  readQueue,
-  updateQueue,
+  readEntries,
+  readEntry,
+  updateEntry,
   entryBrief,
   newEntry,
   applyFields,
   outcomeFor,
   recordQueueOutcome,
   reconcileForging,
+  migrateLegacyQueue,
   createForgeQueueHandlers,
 } from './forge-studio/queue.js';
 export {

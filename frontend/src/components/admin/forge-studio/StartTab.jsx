@@ -27,6 +27,7 @@ import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { getJSON } from '@/lib/api';
 import { START_MODES } from './brief';
 import {
+  DETECTED_ROWS_SHOWN,
   MAX_HTML_FILE_BYTES,
   MAX_URLS_PER_IMPORT,
   extractUrls,
@@ -338,8 +339,14 @@ function UrlIntake({ onStart, onQueueAdd, queueBusy }) {
                 </Button>
               </div>
             </div>
+            {detected.length > DETECTED_ROWS_SHOWN && (
+              <p className="text-xs text-muted-foreground">
+                Showing the first {DETECTED_ROWS_SHOWN}; Add all adds every one of the{' '}
+                {detected.length}.
+              </p>
+            )}
             <ul className="divide-y divide-border rounded-md border border-border">
-              {detected.map((entry) => (
+              {detected.slice(0, DETECTED_ROWS_SHOWN).map((entry) => (
                 <li key={entry} className="flex items-center gap-2 px-3 py-2 text-sm">
                   <span className="min-w-0 flex-1 truncate" title={entry}>
                     {shortUrl(entry)}
