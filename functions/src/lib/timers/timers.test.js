@@ -18,7 +18,7 @@ import {
 } from './cert-image-cleanup.js';
 import { createSkillsHubScrape, buildCertEvent, extractExamCodes } from './skills-hub.js';
 import { createPlaudTokenRefresh } from './plaud-token.js';
-import { createAgentHealthCheck, STALE_AFTER_MS } from './agent-health.js';
+import { createAgentHealthCheck, STALE_AFTER_MS, AGENT_OFFLINE_SOURCE } from './agent-health.js';
 import { createTempStorageCleanup, parsePrefixes } from './temp-storage.js';
 import {
   createForgeScheduled,
@@ -926,6 +926,39 @@ describe('agent health + temp storage', () => {
       { status: 'offline', offlineSince: NOW.toISOString() },
       { partitionKey: 'agent-1' }
     );
+  });
+
+  it('tells the owner on Telegram when it marks an agent offline, and stays silent when nothing changed (LAB-2)', async () => {
+    const notifier = { notifyTelegram: vi.fn(async () => ({ sent: true })) };
+    const store = memStore({}, () => [
+      { id: 'agent-1', agentId: 'agent-1', status: 'idle', hostname: 'vps-hostinger-01', lastSeenAt: iso(-5 * 60 * 1000) },
+    ]);
+    await createAgentHealthCheck({ store, notifier, now }).run();
+    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+    const call = notifier.notifyTelegram.mock.calls[0][0];
+    expect(call).toMatchObject({ severity: 'error', source: AGENT_OFFLINE_SOURCE });
+    expect(call.title).toMatch(/offline/i);
+    expect(call.message).toContain('agent-1 (vps-hostinger-01)');
+    expect(call.message).toContain('fails closed');
+
+    const quiet = memStore({}, () => []);
+    await createAgentHealthCheck({ store: quiet, notifier, now }).run();
+    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks the agent offline even when the notifier is absent or throws (LAB-2)', async () => {
+    const store = memStore({}, () => [{ id: 'agent-1', agentId: 'agent-1', status: 'busy', lastSeenAt: null }]);
+    expect(await createAgentHealthCheck({ store, now }).run()).toEqual({ markedOffline: 1, agentIds: ['agent-1'] });
+
+    const throwing = { notifyTelegram: vi.fn(async () => { throw new Error('telegram down'); }) };
+    const store2 = memStore({}, () => [{ id: 'agent-1', agentId: 'agent-1', status: 'busy', lastSeenAt: null }]);
+    const log = { warn: vi.fn(), log: vi.fn() };
+    expect(await createAgentHealthCheck({ store: store2, notifier: throwing, now, log }).run()).toEqual({
+      markedOffline: 1,
+      agentIds: ['agent-1'],
+    });
+    expect(store2.patchDoc).toHaveBeenCalledTimes(1);
+    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/notification failed/));
   });
 
   it('temp storage: prefix + age only, dry-run by default, never a whole container', async () => {

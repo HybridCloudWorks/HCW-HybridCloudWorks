@@ -157,6 +157,9 @@ tables, and `Usage` is not billable.
 | `alert-app-exceptions` | 1 | More than 5 `AppExceptions` rows in 15 min | Handlers are throwing | The `AppExceptions` table, grouped by `ProblemId` and `OperationName` |
 | `alert-logs-capacity` | 2 | Billable ingestion passes 80% of the daily cap since the 08:00 UTC reset | Telemetry is about to stop for the day, taking the two log-based signals with it | The `Usage` table, grouped by `DataType`, over the same window |
 | ~~`alert-api-availability`~~ | 1 | **Not created** (`count = 0`) | — | See *[Reachability is covered, but not by the Azure test](#reachability-is-covered-but-not-by-the-azure-test)* |
+| `alert-lab-heartbeat` | 1 | No `Heartbeat` row from `arcs-lab-hybrid-prod-cus-01` in 30 min, evaluated every 15 min (stateful). In `rg-mgmt-plat-prod-cus`, Management subscription | The lab host is down, the Azure Monitor Agent is stopped, or the host cannot reach Azure; public lab submission fails closed meanwhile | `ssh hcw-lab 'systemctl status azuremonitoragent himdsd hcw-labs-agent --no-pager'`; the Hostinger panel if ssh fails |
+| `alert-lab-disk` | 2 | Root filesystem past 85% used, hourly. Management subscription | Docker images, Coder workspaces or pg_dumps filling the disk | `ssh hcw-lab 'df -h /; sudo docker system df; sudo ls -l /var/backups/coder'` |
+| `alert-lab-unit-failed` | 2 | A `hcw-unit-failed` line in `Syslog` from the lab host in the last hour, evaluated every 15 min. Management subscription | The Coder backup, the labs agent, Caddy or Vault entered the failed state; the line names the unit | `ssh hcw-lab 'sudo journalctl -u <the unit named> --since -2h --no-pager'` |
 
 ### Notes that change what you do
 

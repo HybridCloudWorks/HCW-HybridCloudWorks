@@ -48,9 +48,16 @@ the admin Labs page's Setup tab used to ask the owner to do by hand.
 
 `meta/argument_specs.yml` is the contract; the table is a summary of it.
 
+6. `hcw-unit-failed@.service`, a template unit the other roles name in
+   `OnFailure=` on the units that matter (the Coder backup, the labs agent,
+   Caddy, Vault). When one of them enters the failed state it logs one line
+   at `daemon.err`, which the Arc data collection rule ships and
+   `alert-lab-unit-failed` pages on (LAB-2, 2026-10-06).
+
 ## Handlers
 
-`Restart ssh`, `Restart unattended-upgrades`, `Restart fail2ban`.
+`Restart ssh`, `Restart unattended-upgrades`, `Restart fail2ban`, `Reload
+systemd for the failure notifier`.
 
 ## Check mode
 

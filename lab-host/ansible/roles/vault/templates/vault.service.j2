@@ -12,6 +12,8 @@
     wrote before #726, so merging the seal support alone restarts nothing. #}
 [Unit]
 Description=HashiCorp Vault (lab-host secrets only)
+# When Restart= gives up, say so where Azure can hear it (LAB-2).
+OnFailure=hcw-unit-failed@%n.service
 Documentation=https://developer.hashicorp.com/vault/docs
 Requires=network-online.target
 {% if vault_seal_azurekeyvault_enabled | bool %}

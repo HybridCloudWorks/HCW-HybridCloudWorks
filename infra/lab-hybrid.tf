@@ -83,8 +83,20 @@ resource "azurerm_role_assignment" "arc_onboarding" {
 # -----------------------------------------------------------------------------
 # Data collection rule (#663)
 # -----------------------------------------------------------------------------
-# Heartbeat and auth/authpriv syslog, and nothing else, so ingestion stays at
-# kilobytes a day against the workspace's daily cap (ADR 0032 consequences).
+# Heartbeat, auth/authpriv syslog, the four host counters the lab alerts read,
+# and the warning-and-above lines of the service facilities, so ingestion
+# stays at kilobytes a day against the workspace's daily cap (ADR 0032
+# consequences). Until 2026-10-06 the rule carried heartbeat and auth syslog
+# only, node_exporter listened on loopback for a scrape that never came, and
+# nothing alerted on any lab signal — the estate review's finding LAB-2: the
+# visitor learned the agent was offline before the owner did. The three
+# rules below this one are what the added streams feed.
+#
+# Perf: four counters at 60 s is about 6 KB a day. Syslog: the daemon,
+# syslog, kern, cron and user facilities at Warning and above only — Caddy's
+# renewal errors, Vault's seal errors, the agent's crash lines and the
+# failure notifier (`hcw-unit-failed@`, lab-host/ansible/roles/hardening)
+# all log there — while auth stays at Info because a login is Info.
 #
 # Heartbeat has no data source: the Azure Monitor Agent writes a Heartbeat row
 # every minute to each Log Analytics destination of every rule associated with
@@ -112,7 +124,7 @@ resource "azurerm_monitor_data_collection_rule" "lab_hybrid" {
   resource_group_name = azurerm_resource_group.lab_hybrid.name
   location            = azurerm_log_analytics_workspace.hcw.location
   kind                = "Linux"
-  description         = "Lab host (Arc): heartbeat and auth/authpriv syslog only (ADR 0032 decision 3, #663)"
+  description         = "Lab host (Arc): heartbeat, auth/authpriv syslog, service syslog at Warning+, and four host counters (ADR 0032 decision 3, #663; LAB-2 2026-10-06)"
 
   destinations {
     log_analytics {
@@ -126,12 +138,36 @@ resource "azurerm_monitor_data_collection_rule" "lab_hybrid" {
     destinations = ["log-plat"]
   }
 
+  data_flow {
+    streams      = ["Microsoft-Perf"]
+    destinations = ["log-plat"]
+  }
+
   data_sources {
     syslog {
       name           = "syslog-auth"
       facility_names = ["auth", "authpriv"]
       log_levels     = ["Info", "Notice", "Warning", "Error", "Critical", "Alert", "Emergency"]
       streams        = ["Microsoft-Syslog"]
+    }
+
+    syslog {
+      name           = "syslog-services"
+      facility_names = ["daemon", "syslog", "kern", "cron", "user"]
+      log_levels     = ["Warning", "Error", "Critical", "Alert", "Emergency"]
+      streams        = ["Microsoft-Syslog"]
+    }
+
+    performance_counter {
+      name                          = "perf-host"
+      sampling_frequency_in_seconds = 60
+      streams                       = ["Microsoft-Perf"]
+      counter_specifiers = [
+        "Processor(*)\\% Processor Time",
+        "Memory(*)\\% Used Memory",
+        "Logical Disk(*)\\% Used Space",
+        "Logical Disk(*)\\Free Megabytes",
+      ]
     }
   }
 
@@ -359,4 +395,160 @@ resource "azurerm_monitor_diagnostic_setting" "lab_hybrid_key_vault" {
   enabled_log {
     category = "AuditEvent"
   }
+}
+
+# -----------------------------------------------------------------------------
+# Lab alerts (LAB-2, estate review 2026-10-06)
+# -----------------------------------------------------------------------------
+# Three rules, all against the Management workspace the DCR above writes to,
+# so they take the Management provider, resource group and alerts identity the
+# way `logs_daily_cap` in observability.tf does. They route to the same action
+# group as every production rule: a lab that goes dark is the owner's problem
+# before it is a visitor's.
+#
+#   - heartbeat_missing: the Arc machine has not written a Heartbeat row in
+#     30 minutes. The agent writes one a minute, so this is the host down, the
+#     agent stopped, or the egress path to Azure gone. Stateful: one alert
+#     until it resolves.
+#   - disk_used: the root filesystem is past 85%. Docker images, Coder
+#     workspaces and seven days of pg_dumps all live there, and a full disk
+#     breaks Coder, Vault's raft store and job staging without a crash.
+#   - unit_failed: `hcw-unit-failed@` logged a failure for a unit it watches
+#     (the Coder backup, the labs agent, Caddy, Vault). The notifier writes one
+#     line at daemon.err; the DCR ships daemon at Warning and above.
+#
+# verify-alert-state.yml reads the web resource group only, so these are not
+# in its list yet (PLAT-4 of the same review); `az monitor scheduled-query
+# list -g rg-mgmt-plat-prod-cus` shows them.
+locals {
+  lab_hybrid_machine_name = "arcs-lab-hybrid-${var.environment}-${var.region_abbreviation}-01"
+}
+
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_heartbeat_missing" {
+  provider = azurerm.mgmt
+
+  name                = "alert-lab-heartbeat-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = azurerm_resource_group.platform_mgmt.location
+  scopes              = [azurerm_log_analytics_workspace.hcw.id]
+  description         = "The lab host's Arc agent has written no Heartbeat row for 30 minutes: the host is down, the Azure Monitor Agent is stopped, or the host cannot reach Azure. Public lab submission fails closed meanwhile. Stateful. ADR 0032, LAB-2."
+  severity            = 1
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT30M"
+
+  auto_mitigation_enabled = true
+
+  criteria {
+    query                   = "Heartbeat | where Computer == \"${local.lab_hybrid_machine_name}\""
+    time_aggregation_method = "Count"
+    operator                = "LessThan"
+    threshold               = 1
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
+}
+
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_disk_used" {
+  provider = azurerm.mgmt
+
+  name                = "alert-lab-disk-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = azurerm_resource_group.platform_mgmt.location
+  scopes              = [azurerm_log_analytics_workspace.hcw.id]
+  description         = "The lab host's root filesystem is past 85% used. Docker images, Coder workspaces, Vault's raft store and the pg_dumps share it; a full disk breaks them without a crash. Prune images or old dumps. LAB-2."
+  severity            = 2
+
+  evaluation_frequency = "PT1H"
+  window_duration      = "PT1H"
+
+  mute_actions_after_alert_duration = "PT6H"
+
+  criteria {
+    query                   = <<-KQL
+      Perf
+      | where Computer == "${local.lab_hybrid_machine_name}"
+      | where ObjectName == "Logical Disk" and CounterName == "% Used Space" and InstanceName == "/"
+      | summarize UsedPct = max(CounterValue)
+    KQL
+    time_aggregation_method = "Maximum"
+    metric_measure_column   = "UsedPct"
+    operator                = "GreaterThan"
+    threshold               = 85
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
+}
+
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_unit_failed" {
+  provider = azurerm.mgmt
+
+  name                = "alert-lab-unit-failed-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = azurerm_resource_group.platform_mgmt.location
+  scopes              = [azurerm_log_analytics_workspace.hcw.id]
+  description         = "A watched systemd unit on the lab host entered the failed state: the nightly Coder backup, the labs agent, Caddy or Vault. The line names the unit. LAB-2."
+  severity            = 2
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT1H"
+
+  mute_actions_after_alert_duration = "PT6H"
+
+  criteria {
+    query                   = "Syslog | where Computer == \"${local.lab_hybrid_machine_name}\" and ProcessName == \"hcw-unit-failed\""
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
 }
