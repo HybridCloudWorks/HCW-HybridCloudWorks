@@ -10,6 +10,7 @@
  * certificate failure fails the scrape, it is never bypassed.
  */
 import { load as loadHtml } from 'cheerio';
+import { guardedFetch } from '../http/guarded-fetch.js';
 import TurndownService from 'turndown';
 
 const BROWSER_HEADERS = {
@@ -38,6 +39,8 @@ const CONTENT_SELECTORS = [
   '.content',
 ];
 
+// Fallback fetches only (the reader and headless services, third parties the
+// platform chose). The page itself is fetched through guardedFetch below.
 async function fetchWithTimeout(fetchImpl, url, { timeoutMs, headers, method = 'GET', body } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -214,12 +217,19 @@ async function tryHeadlessFallback(url, startedAt, { env, fetchImpl, log }) {
  */
 export async function scrapeArticle(
   url,
-  { fetch: fetchImpl = globalThis.fetch, env = process.env, log = {}, now = Date.now } = {}
+  { fetch: fetchImpl = globalThis.fetch, env = process.env, log = {}, now = Date.now, resolve } = {}
 ) {
   const startedAt = now();
   log.log?.('[scraper] Fetching:', url);
   try {
-    const response = await fetchWithTimeout(fetchImpl, url, {
+    // `url` is whatever the editor (or a feed) named, so it is fetched through
+    // the SSRF guard: resolved first, private and link-local refused, redirects
+    // re-checked hop by hop (2026-10-06 review, AP-B2). A refused address is a
+    // failed scrape like any other; the fallbacks below send the URL to a
+    // third-party service rather than fetching it from here.
+    const response = await guardedFetch(url, {
+      fetch: fetchImpl,
+      resolve,
       timeoutMs: 30000,
       headers: BROWSER_HEADERS,
     });
@@ -242,6 +252,10 @@ export async function scrapeArticle(
     };
   } catch (error) {
     log.warn?.(`[scraper] Direct scrape failed: ${error.message}`);
+    // A URL the guard refused is not retried through a fallback: the reader
+    // and headless services would only fetch the same forbidden target from
+    // their side, and the answer here is "no", not "try harder".
+    if (error?.refused) return failure(startedAt, error.message);
     const deps = { env, fetchImpl, log };
     return (
       (await tryReaderFallback(url, startedAt, deps)) ||

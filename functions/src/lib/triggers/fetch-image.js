@@ -17,7 +17,12 @@
  * tested; here the response itself is in hand, so the gate is on the measured
  * `Content-Type`, which is strictly stronger than an extension guess.
  */
-import { lookup } from 'node:dns/promises';
+import { isPrivateIp, validateFetchUrl } from '../http/guarded-fetch.js';
+
+// The SSRF guard lives in lib/http/guarded-fetch.js since the 2026-10-06
+// review (AP-B2) so the scraper and the document fetch share it; re-exported
+// here so existing importers and tests keep their names.
+export { isPrivateIp, validateFetchUrl };
 
 /**
  * The image types this site stores, and the extension each is stored under.
@@ -87,29 +92,6 @@ function mediaTypeRefusal(contentType) {
   return type.startsWith('image/')
     ? { code: 'unsupported-image-type', reason: `image type ${type} is not one this site stores` }
     : { code: 'not-an-image', reason: `Content-Type ${type} is not an image` };
-}
-
-export function isPrivateIp(ip) {
-  const parts = String(ip).split('.').map(Number);
-  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p))) return false;
-  if (parts[0] === 127 || parts[0] === 10 || parts[0] === 0) return true;
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
-  if (parts[0] === 192 && parts[1] === 168) return true;
-  if (parts[0] === 169 && parts[1] === 254) return true;
-  return false;
-}
-
-/** Throws when the URL must not be fetched. */
-export async function validateFetchUrl(
-  urlString,
-  { resolve = (host) => lookup(host, { family: 4 }) } = {}
-) {
-  const url = new URL(urlString);
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Invalid protocol');
-  if (url.hostname === 'localhost') throw new Error('Localhost access denied');
-  const { address } = await resolve(url.hostname);
-  if (isPrivateIp(address)) throw new Error(`Private IP access denied: ${address}`);
-  return true;
 }
 
 /** True for a plain external http(s) URL string — not Firebase/GCS storage, not a Rowy object. */

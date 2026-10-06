@@ -188,7 +188,8 @@ describe('createUrlDrafter', () => {
         text: async () => 'kb text',
       };
     });
-    const { draftFromUrl } = createUrlDrafter({ drafter, scrape, fetch: fetchImpl });
+    const resolve = async () => ({ address: '93.184.216.34' });
+    const { draftFromUrl } = createUrlDrafter({ drafter, scrape, fetch: fetchImpl, resolve });
     await draftFromUrl({
       url: 'https://a.example/x',
       documentUrls: ['https://kb.example/doc.pdf', 'https://kb.example/missing', 'https://kb.example/notes.txt'],
@@ -199,6 +200,32 @@ describe('createUrlDrafter', () => {
       expect.objectContaining({ name: 'notes.txt', textContent: 'kb text' }),
     ]);
     expect(Buffer.from(docs[0].base64Data, 'base64').toString()).toBe('PDFDATA');
+  });
+
+  it('never fetches a documentUrl on the private network, link-local, or localhost, and a redirect there is refused', async () => {
+    const drafter = makeDrafter();
+    const scrape = vi.fn(async () => goodScrape());
+    const fetchImpl = vi.fn(async (url) =>
+      url.includes('bounce')
+        ? { ok: false, status: 302, headers: { get: (k) => (k === 'location' ? 'http://10.0.0.5/secret' : null) } }
+        : { ok: true, status: 200, headers: { get: () => 'text/plain' }, text: async () => 'leaked' }
+    );
+    const addresses = { 'kb.example': '93.184.216.34', 'internal.example': '10.0.0.5' };
+    const resolve = async (host) => ({ address: addresses[host] || '169.254.169.254' });
+    const { draftFromUrl } = createUrlDrafter({ drafter, scrape, fetch: fetchImpl, resolve });
+    await draftFromUrl({
+      url: 'https://a.example/x',
+      documentUrls: [
+        'http://internal.example/config',
+        'http://169.254.169.254/metadata/identity',
+        'http://localhost:7071/api/health',
+        'https://kb.example/bounce',
+      ],
+    });
+    const docs = drafter.generateDraft.mock.calls[0][0].supportingDocuments;
+    expect(docs).toEqual([]);
+    // Only the public host was ever contacted (once, for the redirect that was then refused).
+    expect(fetchImpl.mock.calls.map((c) => c[0])).toEqual(['https://kb.example/bounce']);
   });
 
   it('spends the budget on the scrapes and hands the drafter what is left', async () => {
