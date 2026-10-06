@@ -3617,8 +3617,6 @@ This project has not cut a tagged release; entries are grouped under
   proving no `documentUrls` byte is read from a private, link-local or
   localhost address or across a redirect onto one.
 
-### Fixed
-
 - **Cloudflare DNS records: `ignore_changes = [include_shadow_metadata]` on
   every `cloudflare_dns_record` in `infra/` and `infra-lab/` (owner decision
   2026-10-06: stay on provider 5.27.0).** Provider 5.26.0 surfaced the
@@ -4406,8 +4404,6 @@ This project has not cut a tagged release; entries are grouped under
   outright rather than building a path the route then rejects for an
   unrelated-looking reason.
 
-### Fixed
-
 - **Stage 3's "Upload Images" half had never worked (#630).** Article slot
   images on `/admin/submit` went to the `content` blob container. Every
   container is private in Terraform — "public" means reachable through the
@@ -4441,8 +4437,6 @@ This project has not cut a tagged release; entries are grouped under
 
   The write is module-level over a state bag, as `linkWrites.js` is, so it has
   seven tests without mounting a 2,859-line page.
-
-### Fixed
 
 - **Gallery uploads produced images nothing could display (#602).** Manual
   uploads on `/admin/gallery` went to the `content` blob container. Every
@@ -10203,8 +10197,6 @@ This project has not cut a tagged release; entries are grouped under
   its documents are deliberately **not** dropped here: that is an apply that
   destroys data, so it is recorded as its own owner decision in TODO.md
   rather than riding on the next timer apply.
-
-### Fixed
 
 - **The editorconfig findings that are real: one BOM, six missing final
   newlines, and one of them was being regenerated (#588).** `.editorconfig`
