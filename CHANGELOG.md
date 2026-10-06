@@ -3527,6 +3527,29 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Admin Portal on a phone: an off-canvas menu with every label readable,
+  a document title on every admin route, and the live counts in the link
+  names (estate review 2026-10-06, findings AP-F1, AP-F2, AP-F3; owner
+  decision that day).** The admin shell rendered a 64 px icon rail that
+  could not be dismissed, so a 375 px phone had about 263 px for the page
+  and 71 px with the rail expanded, and the rail's labels were `title`
+  tooltips, which touch never shows. No admin page set a document title, so
+  the tab, the history entries and the route announcer carried whatever the
+  public site set last (WCAG 2.4.2). The badge counts were `aria-label`s on
+  spans with no role, which screen readers do not reliably announce. Now:
+  below `md` the rail is not rendered; a slim top bar carries a menu button
+  that opens a Radix dialog drawer (focus trapped, Escape closes it) with
+  every group and label visible, and any link in it closes it. From `md` up
+  the rail is as it was. `PageHeader` sets `document.title` to the page's
+  title, and `AdminLayout` sets a registry fallback on every route, so the
+  announcer reads the new page's name. A link with a count is named
+  "Review Queue, 3 waiting" and the badge is `aria-hidden`. The content
+  column is `max-w-5xl` with `p-4` on phones (`max-w-2xl` throttled the
+  dense pages on a laptop). The two sub-12 px faded labels in the shell and
+  the page eyebrow are 12 px at the full muted token. Tests: the link name
+  carries the count, the title follows the route, the rail is hidden below
+  `md`, the drawer opens labelled and closes on navigation.
+
 - **The lab host now pages the owner: heartbeat absence, root disk past 85%,
   a watched unit failing, and the labs agent going offline (estate review
   2026-10-06, finding LAB-2; owner decision that day).** Until now the Arc

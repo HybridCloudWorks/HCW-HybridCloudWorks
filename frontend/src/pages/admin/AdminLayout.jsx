@@ -1,9 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { Outlet, NavLink, useNavigate } from 'react-router';
-import { ArrowLeft, ChevronLeft, ChevronRight, LogOut } from 'lucide-react';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router';
+import { ArrowLeft, ChevronLeft, ChevronRight, LogOut, Menu } from 'lucide-react';
 import { signOutUser } from '@/lib/entraAuth';
-import { NAV_GROUPS } from '@/config/adminNav';
+import { NAV_GROUPS, navItemFor } from '@/config/adminNav';
 import useDashboardCounts from '@/hooks/useDashboardCounts';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
 
 // The menu is the navigation registry (config/adminNav.js, ADR 0033 §3):
 // groups, items, routes and the one-line description each item shows on
@@ -13,21 +20,40 @@ import useDashboardCounts from '@/hooks/useDashboardCounts';
 // Re-exported so the nav-order tests and the dashboard read the same list.
 export { NAV_GROUPS };
 
+/** The document title an admin page carries when it sets none of its own. */
+export const ADMIN_TITLE_SUFFIX = 'ContentForge';
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function NavItem({ to, icon: Icon, label, description, end, badgeKey, counts, collapsed }) {
+function NavItem({
+  to,
+  icon: Icon,
+  label,
+  description,
+  end,
+  badgeKey,
+  counts,
+  collapsed,
+  onNavigate,
+}) {
   const count = badgeKey ? (counts?.[badgeKey] ?? 0) : 0;
+  const shown = count > 99 ? '99+' : String(count);
   // The description is the tooltip. Collapsed, the label joins it, because
   // the icon alone is what a new user cannot read.
   const tooltip = collapsed ? `${label} — ${description}` : description;
+  // The count is part of the link's name ("Review Queue, 3 waiting"), not a
+  // label on a span: a span with no role is not reliably announced (estate
+  // review 2026-10-06, AP-F2), and the badge itself is then decoration.
+  const name = count > 0 ? `${label}, ${count} waiting` : label;
 
   return (
     <NavLink
       to={to}
       end={end}
       title={tooltip}
-      aria-label={label}
+      aria-label={name}
       aria-description={description}
+      onClick={onNavigate}
       className={({ isActive }) =>
         `group relative flex items-center rounded-lg text-sm font-medium transition-all duration-150 ${
           collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5'
@@ -44,23 +70,86 @@ function NavItem({ to, icon: Icon, label, description, end, badgeKey, counts, co
           <span className="flex-1 truncate">{label}</span>
           {count > 0 && (
             <span
-              className="ml-auto shrink-0 min-w-5 h-5 rounded-full bg-amber-500 text-white text-[10px] font-bold flex items-center justify-center px-1.5"
-              aria-label={`${count} waiting`}
+              className="ml-auto shrink-0 min-w-5 h-5 rounded-full bg-amber-500 text-white text-xs font-bold flex items-center justify-center px-1.5"
+              aria-hidden="true"
             >
-              {count > 99 ? '99+' : count}
+              {shown}
             </span>
           )}
         </>
       )}
       {collapsed && count > 0 && (
         <span
-          className="absolute -top-1 -right-1 min-w-4 h-4 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center px-0.5"
-          aria-label={`${count} waiting`}
+          className="absolute -top-1 -right-1 min-w-4 h-4 rounded-full bg-amber-500 text-white text-[11px] font-bold flex items-center justify-center px-0.5"
+          aria-hidden="true"
         >
-          {count > 99 ? '99+' : count}
+          {shown}
         </span>
       )}
     </NavLink>
+  );
+}
+
+/** The groups and their items, as the rail and the drawer both render them. */
+function NavGroups({ counts, collapsed, onNavigate }) {
+  return (
+    <>
+      {NAV_GROUPS.map((group, index) => (
+        <div key={group.id} className="space-y-0.5">
+          {!collapsed && index > 0 && (
+            <p
+              className="px-3 pb-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground select-none"
+              title={group.description}
+            >
+              {group.label}
+            </p>
+          )}
+          {collapsed && index > 0 && (
+            <div className="h-px bg-border/50 mx-1 mb-2 mt-1" role="separator" />
+          )}
+          {group.items.map((item) => (
+            <NavItem
+              key={item.to}
+              {...item}
+              counts={counts}
+              collapsed={collapsed}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Back to Site and Sign Out, as the rail and the drawer both render them. */
+function ShellFooter({ collapsed, onSignOut, onNavigate }) {
+  return (
+    <div className="border-t border-border px-2 py-3 space-y-0.5 shrink-0">
+      <NavLink
+        to="/"
+        title="Back to Site"
+        aria-label="Back to Site"
+        onClick={onNavigate}
+        className={`flex items-center rounded-lg text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${
+          collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2'
+        }`}
+      >
+        <ArrowLeft className="h-4 w-4 shrink-0" />
+        {!collapsed && <span className="text-sm font-medium">Back to Site</span>}
+      </NavLink>
+      <button
+        onClick={onSignOut}
+        title="Sign Out"
+        aria-label="Sign Out"
+        className={`w-full flex items-center rounded-lg text-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors ${
+          collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2'
+        }`}
+      >
+        <LogOut className="h-4 w-4 shrink-0" />
+        {!collapsed && <span className="font-medium">Sign Out</span>}
+      </button>
+    </div>
   );
 }
 
@@ -68,12 +157,15 @@ function NavItem({ to, icon: Icon, label, description, end, badgeKey, counts, co
 
 export default function AdminLayout() {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    if (window.innerWidth < 768) return true;
+    if (typeof window === 'undefined') return false;
     const saved = window.localStorage?.getItem('contentforge-sidebar-collapsed');
     return saved === null ? false : saved === 'true';
   });
+  // The phone drawer. Every link in it closes it on click (onNavigate), so
+  // a tap on a menu item lands on the page rather than on the menu over it.
+  const [drawerOpen, setDrawerOpen] = useState(false);
   // One snapshot for every badge, re-read on each route change so a page the
   // user just left (approve, publish, reject) is reflected in the menu.
   const { counts } = useDashboardCounts({ refetchOnNavigate: true });
@@ -86,6 +178,15 @@ export default function AdminLayout() {
     }
   }, [isSidebarCollapsed]);
 
+  // Every admin route has a title (WCAG 2.4.2; estate review 2026-10-06,
+  // AP-F3). PageHeader sets the page's own; this is the fallback for a route
+  // without one, from the registry's label, so the tab, the history entry and
+  // the route announcer (ScrollToTop) never carry the previous page's name.
+  useEffect(() => {
+    const item = navItemFor(pathname);
+    document.title = item ? `${item.label} · ${ADMIN_TITLE_SUFFIX}` : ADMIN_TITLE_SUFFIX;
+  }, [pathname]);
+
   const handleSignOut = async () => {
     try {
       await signOutUser();
@@ -94,6 +195,8 @@ export default function AdminLayout() {
       console.error('Sign-out error:', err);
     }
   };
+
+  const closeDrawer = () => setDrawerOpen(false);
 
   // FULL VIEWPORT HEIGHT below, not `calc(100vh-4rem)`. That 4rem was
   // reserving room for the site header — and App.jsx renders it as
@@ -107,14 +210,59 @@ export default function AdminLayout() {
   // the screen. `dvh`, not `vh`: on mobile browsers `100vh` is the height with
   // the toolbar hidden, which would push Sign Out under the toolbar.
   //
+  // TWO SHELLS, ONE REGISTRY (estate review 2026-10-06, AP-F1). Below `md`
+  // the rail is not rendered at all: a 64 px column that cannot be dismissed
+  // left a 375 px phone about 263 px for the page, and expanding it to read
+  // the labels left 71 px. The phone gets a slim top bar and an off-canvas
+  // drawer (a Radix dialog, so focus is trapped and Escape closes it) with
+  // every label visible. From `md` up the rail is as it was.
+  //
   // `#admin-main` is a div, not a `<main>`: App.jsx already wraps every route
   // in `<main id="main-content">`, and two nested main landmarks is one too
   // many. ScrollToTop resets this container's scroll on route change.
   return (
-    <div className="h-dvh overflow-hidden flex bg-background">
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
+    <div className="h-dvh overflow-hidden flex flex-col md:flex-row bg-background">
+      {/* ── Phone top bar + drawer (below md) ───────────────────────────── */}
+      <div className="md:hidden flex items-center justify-between gap-2 border-b border-border bg-card px-3 py-2 shrink-0">
+        <div className="min-w-0">
+          <p className="text-sm font-bold tracking-tight leading-5">ContentForge</p>
+        </div>
+        <Dialog open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <DialogTrigger asChild>
+            <button
+              type="button"
+              className="rounded-md p-2 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              aria-label="Open menu"
+            >
+              <Menu className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </DialogTrigger>
+          <DialogContent
+            aria-label="ContentForge menu"
+            className="left-0 top-0 h-dvh w-72 max-w-[85vw] translate-x-0 translate-y-0 rounded-none border-r p-0 gap-0 flex flex-col data-[state=open]:slide-in-from-left data-[state=closed]:slide-out-to-left data-[state=open]:zoom-in-100 data-[state=closed]:zoom-out-100 sm:rounded-none"
+          >
+            <div className="border-b border-border px-4 py-3 min-h-14 shrink-0">
+              <DialogTitle className="text-sm font-bold tracking-tight leading-5">
+                ContentForge
+              </DialogTitle>
+              <DialogDescription className="text-xs leading-4 text-muted-foreground">
+                Influencer CMS
+              </DialogDescription>
+            </div>
+            <nav
+              className="flex-1 min-h-0 overflow-y-auto py-3 px-2 space-y-4"
+              aria-label="ContentForge menu"
+            >
+              <NavGroups counts={counts} collapsed={false} onNavigate={closeDrawer} />
+            </nav>
+            <ShellFooter collapsed={false} onSignOut={handleSignOut} onNavigate={closeDrawer} />
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* ── Sidebar (md and up) ─────────────────────────────────────────── */}
       <aside
-        className={`sticky top-0 h-dvh border-r border-border bg-card flex flex-col shrink-0 transition-all duration-200 ${
+        className={`hidden md:flex sticky top-0 h-dvh border-r border-border bg-card flex-col shrink-0 transition-all duration-200 ${
           isSidebarCollapsed ? 'w-16' : 'w-64'
         }`}
       >
@@ -129,7 +277,7 @@ export default function AdminLayout() {
           {!isSidebarCollapsed && (
             <div className="min-w-0">
               <p className="text-sm font-bold tracking-tight leading-5">ContentForge</p>
-              <p className="text-[10px] leading-4 text-muted-foreground">Influencer CMS</p>
+              <p className="text-xs leading-4 text-muted-foreground">Influencer CMS</p>
             </div>
           )}
           <button
@@ -151,56 +299,18 @@ export default function AdminLayout() {
           className="flex-1 min-h-0 overflow-y-auto py-3 px-2 space-y-4"
           aria-label="ContentForge"
         >
-          {NAV_GROUPS.map((group, index) => (
-            <div key={group.id} className="space-y-0.5">
-              {!isSidebarCollapsed && index > 0 && (
-                <p
-                  className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50 select-none"
-                  title={group.description}
-                >
-                  {group.label}
-                </p>
-              )}
-              {isSidebarCollapsed && index > 0 && (
-                <div className="h-px bg-border/50 mx-1 mb-2 mt-1" role="separator" />
-              )}
-              {group.items.map((item) => (
-                <NavItem key={item.to} {...item} counts={counts} collapsed={isSidebarCollapsed} />
-              ))}
-            </div>
-          ))}
+          <NavGroups counts={counts} collapsed={isSidebarCollapsed} />
         </nav>
 
-        {/* Footer */}
-        <div className="border-t border-border px-2 py-3 space-y-0.5 shrink-0">
-          <NavLink
-            to="/"
-            title="Back to Site"
-            aria-label="Back to Site"
-            className={`flex items-center rounded-lg text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${
-              isSidebarCollapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2'
-            }`}
-          >
-            <ArrowLeft className="h-4 w-4 shrink-0" />
-            {!isSidebarCollapsed && <span className="text-sm font-medium">Back to Site</span>}
-          </NavLink>
-          <button
-            onClick={handleSignOut}
-            title="Sign Out"
-            aria-label="Sign Out"
-            className={`w-full flex items-center rounded-lg text-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors ${
-              isSidebarCollapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2'
-            }`}
-          >
-            <LogOut className="h-4 w-4 shrink-0" />
-            {!isSidebarCollapsed && <span className="font-medium">Sign Out</span>}
-          </button>
-        </div>
+        <ShellFooter collapsed={isSidebarCollapsed} onSignOut={handleSignOut} />
       </aside>
 
       {/* ── Main content ─────────────────────────────────────────────────── */}
+      {/* `max-w-5xl`, not `max-w-2xl` (AP-F1): 672 px throttled the dense
+          pages (Queue, Published, Integrations) on a laptop; a page that is
+          prose narrows itself. Side padding steps down on phones. */}
       <div id="admin-main" className="flex-1 min-w-0 overflow-y-auto">
-        <div className="max-w-2xl mx-auto p-6">
+        <div className="max-w-5xl mx-auto p-4 md:p-6">
           <Outlet />
         </div>
       </div>
