@@ -1,0 +1,167 @@
+# Lab supply chain — are the lab host's pins behind upstream, and do the lab
+# images carry known vulnerabilities? (estate review 2026-10-06, LAB-3)
+#
+# Everything the lab host runs is pinned and held, and the lab images are
+# pinned by digest where they are consumed, which is right for a host that
+# runs untrusted code. The cost was that nothing noticed when a pin fell
+# behind: a runc or containerd advisory after the pin date stayed unpatched
+# until a human happened to look, and the published images were never
+# scanned again after the build that attested them. Dependabot cannot read
+# Ansible group_vars or a digest in a JS module.
+#
+# Weekly, this job:
+#   1. runs scripts/lab-pins-upstream.mjs, which asks each publisher for its
+#      newest stable version and compares it to the pin (exit 1 behind, 2
+#      when a source could not be read);
+#   2. scans the two published lab image digests the host actually runs —
+#      read from vps-agent/lib/capabilities.js and the Coder template, not
+#      from a tag — with Trivy for HIGH and CRITICAL vulnerabilities with a
+#      fix available;
+#   3. opens one issue (or comments on the open one) with both results when
+#      either says something is due. A clean week is a green run and nothing
+#      else.
+#
+# It bumps nothing. Every bump here needs a checksum or digest read from the
+# publisher and reviewed beside the version; the issue is the prompt, and
+# lab-host/README.md "Bumping a pin" is the procedure.
+name: Lab supply chain
+
+on:
+  schedule:
+    # Tuesdays 06:45 UTC, off the top of the hour and away from the other
+    # scheduled jobs.
+    - cron: '45 6 * * 2'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: lab-supply-chain
+  cancel-in-progress: false
+
+env:
+  # Pinned release binary with its checksum held HERE, not fetched from the
+  # release that serves the tarball (T-755; same as iac-validate.yml). Update
+  # both values in one commit.
+  TRIVY_VERSION: 0.69.3
+  TRIVY_SHA256: 1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75
+
+jobs:
+  check:
+    name: Pins against upstream, images against the vulnerability database
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # No npm ci: the checker imports node: built-ins only.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      - name: Pins against upstream
+        id: pins
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          node scripts/lab-pins-upstream.mjs --summary "${RUNNER_TEMP}/pins.md"
+          code=$?
+          echo "exit=${code}" >> "$GITHUB_OUTPUT"
+          cat "${RUNNER_TEMP}/pins.md" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Install Trivy (pinned release binary)
+        run: |
+          set -euo pipefail
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          tarball="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          curl -sSfL -o "/tmp/${tarball}" "${base}/${tarball}"
+          echo "${TRIVY_SHA256}  ${tarball}" > /tmp/trivy_expected.txt
+          (cd /tmp && sha256sum -c trivy_expected.txt)
+          tar -xzf "/tmp/${tarball}" -C /tmp trivy
+          install -m 0755 /tmp/trivy /usr/local/bin/trivy
+          trivy --version
+
+      # The digests the host runs, read from where they are consumed. A tag
+      # would scan whatever was pushed last; the digest scans what runs.
+      - name: Scan the published lab images the host runs
+        id: scan
+        run: |
+          set -uo pipefail
+          runner=$(grep -oE "ghcr\.io/hybridcloudworks/hcw-lab-runner:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}" vps-agent/lib/capabilities.js | head -1)
+          full_digest=$(grep -oE 'image_digest\s*=\s*"sha256:[0-9a-f]{64}"' lab-host/coder/templates/hcw-lab/main.tf | grep -oE 'sha256:[0-9a-f]{64}')
+          full="ghcr.io/hybridcloudworks/hcw-lab@${full_digest}"
+          test -n "$runner" && test -n "$full_digest"
+          echo "## Lab images against the vulnerability database" > "${RUNNER_TEMP}/scan.md"
+          echo >> "${RUNNER_TEMP}/scan.md"
+          failed=0
+          for image in "$runner" "$full"; do
+            echo "### \`${image}\`" >> "${RUNNER_TEMP}/scan.md"
+            echo >> "${RUNNER_TEMP}/scan.md"
+            echo '```' >> "${RUNNER_TEMP}/scan.md"
+            if trivy image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --format table "$image" >> "${RUNNER_TEMP}/scan.md" 2>&1; then
+              echo "no HIGH or CRITICAL vulnerability with a fix available" >> "${RUNNER_TEMP}/scan.md"
+            else
+              failed=1
+            fi
+            echo '```' >> "${RUNNER_TEMP}/scan.md"
+            echo >> "${RUNNER_TEMP}/scan.md"
+          done
+          cat "${RUNNER_TEMP}/scan.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "failed=${failed}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      # One issue, kept current: created when none is open, commented on when
+      # one is. Nothing when both checks are clean.
+      - name: Open or update the issue when something is due
+        if: steps.pins.outputs.exit != '0' || steps.scan.outputs.failed == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PINS_EXIT: ${{ steps.pins.outputs.exit }}
+          SCAN_FAILED: ${{ steps.scan.outputs.failed }}
+        run: |
+          set -euo pipefail
+          title="Lab supply chain: pins behind upstream or image vulnerabilities"
+          {
+            echo "Weekly check, run ${RUN_URL}, $(date -u +%Y-%m-%d)."
+            echo
+            case "${PINS_EXIT}" in
+              0) echo "**Pins:** every lab host pin is current." ;;
+              1) echo "**Pins:** at least one lab host pin is behind upstream (table below). Bump per lab-host/README.md \"Bumping a pin\"; containerd carries runc, so that row first." ;;
+              *) echo "**Pins:** at least one source could not be read, so the pin check did not evaluate (table below)." ;;
+            esac
+            echo
+            cat "${RUNNER_TEMP}/pins.md"
+            echo
+            if [ "${SCAN_FAILED}" = "1" ]; then
+              echo "**Images:** a published lab image carries a HIGH or CRITICAL vulnerability with a fix available. Bump the base image or the tool in lab-image/versions.env and push; publish-lab-image.yml rebuilds and the consumers' digests then need their pin."
+            else
+              echo "**Images:** no HIGH or CRITICAL vulnerability with a fix available."
+            fi
+            echo
+            cat "${RUNNER_TEMP}/scan.md"
+          } > "${RUNNER_TEMP}/issue.md"
+          existing=$(gh issue list --repo "$REPO" --state open --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body-file "${RUNNER_TEMP}/issue.md"
+            echo "Commented on #${existing}."
+          else
+            gh issue create --repo "$REPO" --title "$title" --body-file "${RUNNER_TEMP}/issue.md"
+          fi
+
+      - name: Fail the run when the pin check could not evaluate
+        if: steps.pins.outputs.exit == '2'
+        run: |
+          echo "::error::At least one upstream source could not be read; the pin check did not evaluate. See the summary."
+          exit 1

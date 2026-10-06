@@ -3527,6 +3527,34 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The lab host's pins and the lab images are checked against upstream
+  every week, and a pin that falls behind or an image with a fixable HIGH
+  or CRITICAL vulnerability opens an issue (estate review 2026-10-06,
+  finding LAB-3; owner decision that day).** Everything on the host is
+  pinned and held — Docker Engine and containerd (which carries runc),
+  Caddy and its Cloudflare module, Coder, PostgreSQL, Portainer, Vault,
+  node_exporter, Node.js — and nothing noticed when a pin fell behind;
+  Dependabot cannot read Ansible group_vars or a digest in a JS module, and
+  the published lab images were never scanned after the build that attested
+  them. New `scripts/lab-pins-upstream.mjs` reads the ten pins from
+  `lab-host/ansible/group_vars/all.yml`, asks each publisher for its newest
+  stable version (the Docker apt index, GitHub releases and tags, the
+  HashiCorp index, Docker Hub, nodejs.org) and exits 0 current, 1 behind, 2
+  when a source could not be read, which is "not evaluated", not "fine".
+  New `.github/workflows/lab-supply-chain.yml` runs it every Tuesday, scans
+  the two published image digests the host actually runs (read from
+  `vps-agent/lib/capabilities.js` and the Coder template, never a tag) with
+  the pinned Trivy for HIGH and CRITICAL vulnerabilities with a fix, and
+  opens one issue, or comments on the open one, when either says something
+  is due; a clean week is a green run. It bumps nothing: every bump needs a
+  checksum or digest read from the publisher and reviewed beside the
+  version, and `lab-host/README.md` "Bumping a pin" is the procedure.
+  Dependabot gains a `docker` entry for `lab-image/`, the one thing it can
+  watch there (the base image digest on the `FROM` lines). The first local
+  run found Docker Engine, Caddy and Coder behind upstream, which is the
+  signal that was missing. **Owner step:** none to arm it; the first run is
+  Tuesday, or dispatch it from the Actions tab, and work the issue it opens.
+
 - **The browser suites run on every pull request, and the admin spec can
   fail (estate review 2026-10-06, finding QA-1; owner decision that day).**
   No workflow ran Playwright: the hydration (6 tests), console-error (17
