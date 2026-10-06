@@ -45,24 +45,42 @@ const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 /** Default body cap: enough for any article page, far below the host's memory. */
 export const DEFAULT_MAX_BODY_BYTES = 8 * 1024 * 1024;
 
+/** Dotted-quad IPv4 as an unsigned 32-bit number, or null when it is not one. */
+function ipv4ToInt(ip) {
+  const parts = String(ip).split('.');
+  if (parts.length !== 4) return null;
+  let n = 0;
+  for (const part of parts) {
+    if (!/^\d{1,3}$/.test(part)) return null;
+    const octet = Number(part);
+    if (octet > 255) return null;
+    n = n * 256 + octet;
+  }
+  return n;
+}
+
+/**
+ * The IPv4 ranges this app never fetches from, as inclusive [first, last]
+ * pairs. A table rather than a chain of comparisons so each refused range
+ * reads as one line with its reason, and adding one is adding a row.
+ */
+const REFUSED_IPV4_RANGES = [
+  ['0.0.0.0', '0.255.255.255', 'this network'],
+  ['10.0.0.0', '10.255.255.255', 'RFC 1918'],
+  ['100.64.0.0', '100.127.255.255', 'carrier-grade NAT (RFC 6598)'],
+  ['127.0.0.0', '127.255.255.255', 'loopback'],
+  ['168.63.129.16', '168.63.129.16', 'Azure platform (WireServer, plain HTTP)'],
+  ['169.254.0.0', '169.254.255.255', 'link-local, including the cloud metadata endpoint'],
+  ['172.16.0.0', '172.31.255.255', 'RFC 1918'],
+  ['192.168.0.0', '192.168.255.255', 'RFC 1918'],
+  ['224.0.0.0', '255.255.255.255', 'multicast, reserved, broadcast'],
+].map(([first, last, reason]) => ({ first: ipv4ToInt(first), last: ipv4ToInt(last), reason }));
+
 /** True for an IPv4 address this app must never fetch from. */
 export function isPrivateIp(ip) {
-  const parts = String(ip).split('.').map(Number);
-  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) {
-    return false;
-  }
-  const [a, b, c, d] = parts;
-  return (
-    a === 0 || // "this" network
-    a === 10 || // RFC 1918
-    a === 127 || // loopback
-    (a === 100 && b >= 64 && b <= 127) || // carrier-grade NAT (RFC 6598)
-    (a === 169 && b === 254) || // link-local, including the cloud metadata endpoint
-    (a === 172 && b >= 16 && b <= 31) || // RFC 1918
-    (a === 192 && b === 168) || // RFC 1918
-    (a === 168 && b === 63 && c === 129 && d === 16) || // Azure platform (WireServer)
-    a >= 224 // multicast, reserved, broadcast
-  );
+  const n = ipv4ToInt(ip);
+  if (n === null) return false;
+  return REFUSED_IPV4_RANGES.some(({ first, last }) => n >= first && n <= last);
 }
 
 /** A guard refusal: `refused: true` so a caller can tell "must not fetch this"
