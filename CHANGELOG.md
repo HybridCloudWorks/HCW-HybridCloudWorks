@@ -3488,6 +3488,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Cloudflare DNS records: `ignore_changes = [include_shadow_metadata]` on
+  every `cloudflare_dns_record` in `infra/` and `infra-lab/` (owner decision
+  2026-10-06: stay on provider 5.27.0).** Provider 5.26.0 surfaced the
+  `include_shadow_metadata` request parameter as a record attribute with a
+  static default, so every pre-existing record planned `null → false`, the
+  forced write came back with a new `modified_on`, and the `hcw-azure` apply
+  after #879 failed with "Provider produced inconsistent result after apply"
+  on `docs_pages` and `azure_functions` (upstream #7387, #7396). Ignoring the
+  attribute removes the spurious update; the records were written with
+  identical content and both hostnames answered 200 throughout.
+
 - **Ambassador sub-programs: a cleared parent stays cleared, a program with
   children takes no parent, and a malformed chain shows rather than hides
   (#881 review).** The seed backfill treated an explicit `parentProgramId:
