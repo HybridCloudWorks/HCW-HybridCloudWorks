@@ -319,11 +319,17 @@ dashboard rather than by Terraform, so its secret key never enters state.
 Initial planning targets are cost-conscious rather than mission-critical:
 
 - public content remains available from the edge during backend failures;
-- single primary Azure region;
-- zone-aware Functions, Cosmos DB, and ZRS storage where supported;
-- target recovery time objective: four hours;
-- target recovery point objective: one hour for mutable editorial state;
-- continuous Cosmos backup plus tested restore procedure;
+- single primary Azure region, single zone: Cosmos zone redundancy and
+  Function App zone redundancy were declined on cost, and storage is
+  geo-redundant (RA-GRS content, GRS host) rather than zone-redundant
+  ([ADR 0011](../decisions/0011-single-region-recovery.md), amendment of
+  2026-10-06);
+- target recovery time objective: eight hours;
+- target recovery point objective: twenty-four hours for mutable editorial
+  state (owner decision 2026-08-30, #231; [ADR 0028 §6](../decisions/0028-cosmos-out-of-account-export.md));
+- continuous Cosmos backup, a nightly out-of-account export, and a restore
+  runbook whose first drill is approved and not yet run
+  ([runbook](../runbooks/cosmos-restore.md));
 - Blob versioning and short soft-delete retention;
 - immutable deployment artifacts and known-good rollback packages;
 - queue-based retries and poison handling for side effects;

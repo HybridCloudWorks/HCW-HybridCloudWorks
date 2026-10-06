@@ -3527,6 +3527,32 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **One recovery objective pair everywhere, the as-built zone posture
+  written down, a regional-loss procedure, and the first restore drill
+  approved (estate review 2026-10-06, finding PLAT-1; owner decision that
+  day).** ADR 0011 said RTO four hours / RPO one hour with mandatory
+  quarterly drills and a zone-aware, ZRS posture; ADR 0028 and `TODO.md`
+  said RTO 8 hours / RPO 24 hours and that no drill was wanted; the
+  architecture page repeated the July numbers; the restore runbook's header
+  still said "not yet armed" a month after the exporter's first run. ADR
+  0011 now carries an amendment: the 2026-08-30 pair (8 h / 24 h) supersedes
+  the July targets; Cosmos, the Function App and storage are single-zone
+  with geo-redundant storage, each declined on cost; the 2026-09-09
+  no-drill decision is recorded and superseded by the 2026-10-06 approval
+  to run the drill once, then quarterly. The architecture page's
+  reliability model and the Well-Architected rows say the same. The
+  restore runbook's header reflects the exporter running since 2026-09-09
+  and the drill being due, and gains "A regional loss": what survives
+  (RA-GRS exports, code, state, the owner's secret copies), what does not,
+  and the order a restore into a second region would run in, stated as
+  untested and outside the 8-hour objective. `TODO.md`'s accepted-risk row
+  records the approval and deletes itself when the Drills table has a row.
+  **Owner step:** run the drill (`docs/runbooks/cosmos-restore.md`, "The
+  drill"); success is one dated row in its Drills table with measured RPO
+  and RTO.
+
+### Fixed
+
 - **Security: the deploy identity trusts the production environment only;
   its ref-form federated credentials and its unused Cosmos data-plane grants
   are gone (estate review 2026-10-06, finding SEC-2; owner decision that
