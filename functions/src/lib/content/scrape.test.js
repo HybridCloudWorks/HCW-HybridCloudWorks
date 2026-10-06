@@ -17,9 +17,14 @@ const page = `<html><head>
 const ok = (text, status = 200) => ({
   ok: status < 400,
   status,
+  headers: { get: () => null },
   text: async () => text,
   json: async () => JSON.parse(text),
 });
+
+// The SSRF guard resolves every host before fetching; tests name a public
+// address so no real DNS lookup happens.
+const resolve = async () => ({ address: '93.184.216.34' });
 
 describe('extractArticle / markdown', () => {
   it('picks the article block, strips nav/footer, resolves image urls', () => {
@@ -54,7 +59,7 @@ describe('extractPublishedDate', () => {
 describe('scrapeArticle', () => {
   it('returns the direct-html shape with the full page kept for date extraction', async () => {
     const fetch = vi.fn(async () => ok(page));
-    const r = await scrapeArticle('https://site.test/post', { fetch, env: {}, now: () => 0 });
+    const r = await scrapeArticle('https://site.test/post', { fetch, env: {}, now: () => 0, resolve });
     expect(r).toMatchObject({ success: true, scrapeMode: 'direct_html', error: null });
     expect(r.html).toBe(page);
     expect(r.markdown).toContain('# Title');
@@ -69,6 +74,7 @@ describe('scrapeArticle', () => {
       fetch: failing,
       env: {},
       now: () => 0,
+      resolve,
     });
     expect(r).toMatchObject({ success: false, scrapeMode: 'failed', error: 'Status code 403' });
     expect(failing).toHaveBeenCalledTimes(1);
@@ -80,16 +86,60 @@ describe('scrapeArticle', () => {
       fetch: withReader,
       env: { CONTENTFORGE_SCRAPE_FALLBACK_ENABLED: 'true' },
       now: () => 0,
+      resolve,
     });
     expect(r2).toMatchObject({ success: true, scrapeMode: 'reader_fallback' });
     expect(withReader.mock.calls[1][0]).toBe('https://r.jina.ai/http://site.test/post');
+  });
+
+  it('refuses a private, link-local or localhost target before any fetch, and the fallbacks never see it', async () => {
+    const fetch = vi.fn(async () => ok(page));
+    for (const [url, address] of [
+      ['http://10.0.0.5/admin', '10.0.0.5'],
+      ['http://169.254.169.254/metadata/instance', '169.254.169.254'],
+      ['https://kb.example/internal', '192.168.1.20'],
+    ]) {
+      const r = await scrapeArticle(url, {
+        fetch,
+        env: { CONTENTFORGE_SCRAPE_FALLBACK_ENABLED: 'true' },
+        now: () => 0,
+        resolve: async () => ({ address }),
+      });
+      expect(r.success).toBe(false);
+      expect(r.scrapeFailureReason).toMatch(/Private IP/);
+    }
+    const r = await scrapeArticle('http://localhost:7071/api/health', { fetch, env: {}, now: () => 0, resolve });
+    expect(r.success).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('follows a redirect only to a public host, and refuses one onto the private network', async () => {
+    const redirect = (location) => ({ ok: false, status: 302, headers: { get: (k) => (k === 'location' ? location : null) }, text: async () => '' });
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(redirect('https://moved.test/post'))
+      .mockResolvedValueOnce(ok(page));
+    const r = await scrapeArticle('https://site.test/post', { fetch, env: {}, now: () => 0, resolve });
+    expect(r.success).toBe(true);
+    expect(fetch.mock.calls[1][0]).toBe('https://moved.test/post');
+
+    const bounce = vi.fn(async () => redirect('http://10.0.0.5/internal'));
+    const r2 = await scrapeArticle('https://site.test/post', {
+      fetch: bounce,
+      env: {},
+      now: () => 0,
+      resolve: async (host) => ({ address: host === 'site.test' ? '93.184.216.34' : '10.0.0.5' }),
+    });
+    expect(r2.success).toBe(false);
+    expect(r2.scrapeFailureReason).toMatch(/Private IP/);
+    expect(bounce).toHaveBeenCalledTimes(1);
   });
 
   it('a TLS error is a failure, never a bypass', async () => {
     const fetch = vi.fn(async () => {
       throw Object.assign(new Error('certificate has expired'), { code: 'CERT_HAS_EXPIRED' });
     });
-    const r = await scrapeArticle('https://site.test/post', { fetch, env: {}, now: () => 0 });
+    const r = await scrapeArticle('https://site.test/post', { fetch, env: {}, now: () => 0, resolve });
     expect(r.success).toBe(false);
     expect(r.scrapeFailureReason).toMatch(/certificate/);
   });

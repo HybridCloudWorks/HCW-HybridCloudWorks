@@ -23,6 +23,7 @@ import { scrapeArticle } from './scrape.js';
 import { normalizeSupportingDocuments, MAX_SUPPORTING_DOCUMENTS } from './drafting.js';
 import { generateSlug } from '../rss/feeds.js';
 import { AFTER_MODEL_MARGIN_MS, startBudgetClock } from '../ai/time-budget.js';
+import { guardedFetch } from '../http/guarded-fetch.js';
 
 /** Beyond the primary URL, at most this many extra KB articles are scraped —
  * each is a network fetch plus markdown extraction inside the HTTP budget. */
@@ -89,13 +90,13 @@ export function inferProviderFromUrl(url = '') {
  * `BAD_URL` before any network touch, `SCRAPE_FAILED` with the scraper's own
  * reason after — so callers can map to 400 vs 422 without string-matching.
  */
-export async function scrapeToSource(url, { scrape = scrapeArticle, env, log } = {}) {
+export async function scrapeToSource(url, { scrape = scrapeArticle, env, log, resolve } = {}) {
   if (!isHttpUrl(url)) {
     const err = new Error('A valid http(s) URL is required.');
     err.code = 'BAD_URL';
     throw err;
   }
-  const scraped = await scrape(String(url).trim(), { env, log });
+  const scraped = await scrape(String(url).trim(), { env, log, resolve });
   if (!scraped?.success || !String(scraped.markdown || '').trim()) {
     const err = new Error(`Could not extract the article: ${scraped?.error || 'empty result'}`);
     err.code = 'SCRAPE_FAILED';
@@ -116,23 +117,30 @@ export async function scrapeToSource(url, { scrape = scrapeArticle, env, log } =
  * (PDF → base64 inlineData, text → textContent). Returns null on any
  * failure — a KB reference the model does not see degrades the draft, it
  * does not fail it. */
-async function fetchDocumentUrl(url, { fetchImpl = globalThis.fetch, log = {} } = {}) {
+async function fetchDocumentUrl(url, { fetchImpl = globalThis.fetch, resolve, log = {} } = {}) {
   if (!isHttpUrl(url)) return null;
   try {
-    const response = await fetchImpl(url, {
-      signal: AbortSignal.timeout(DOCUMENT_FETCH_TIMEOUT_MS),
+    // The URL is the caller's. guardedFetch refuses private, link-local and
+    // loopback targets (and re-checks every redirect) before any byte is read
+    // back into the draft (2026-10-06 review, AP-B2).
+    // The byte cap and the deadline both live in the guard, and the deadline
+    // covers the body: a document origin that sends headers and then stalls
+    // is cut off, not waited on.
+    const { response, buffer, text } = await guardedFetch(url, {
+      fetch: fetchImpl,
+      resolve,
+      timeoutMs: DOCUMENT_FETCH_TIMEOUT_MS,
+      maxBytes: DOCUMENT_FETCH_LIMIT_BYTES,
     });
     if (!response.ok) return null;
     const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
     const name = new URL(url).pathname.split('/').filter(Boolean).at(-1) || url;
     if (contentType.includes('application/pdf')) {
-      const buffer = Buffer.from(await response.arrayBuffer());
-      if (buffer.byteLength > DOCUMENT_FETCH_LIMIT_BYTES) return null;
       return { name, mimeType: 'application/pdf', base64Data: buffer.toString('base64') };
     }
-    const text = await response.text();
-    if (!text.trim()) return null;
-    return { name, textContent: text.slice(0, 18000) };
+    const content = text();
+    if (!content.trim()) return null;
+    return { name, textContent: content.slice(0, 18000) };
   } catch (error) {
     log.warn?.(`[draft-from-url] document fetch failed for ${url}: ${error.message}`);
     return null;
@@ -155,10 +163,18 @@ async function fetchDocumentUrl(url, { fetchImpl = globalThis.fetch, log = {} } 
  * @param {{ generateDraft: Function }} deps.drafter
  * @param {(url: string, opts?: object) => Promise<object>} [deps.scrape]
  * @param {typeof fetch} [deps.fetch]
+ * @param {Function} [deps.resolve] - DNS resolver for the SSRF guard; tests only
  * @param {Record<string,string|undefined>} [deps.env]
  * @param {{ log?: Function, warn?: Function }} [deps.log]
  */
-export function createUrlDrafter({ drafter, scrape = scrapeArticle, fetch: fetchImpl, env, log = {} }) {
+export function createUrlDrafter({
+  drafter,
+  scrape = scrapeArticle,
+  fetch: fetchImpl,
+  resolve,
+  env,
+  log = {},
+}) {
   async function draftFromUrl({
     url,
     urls = [],
@@ -172,7 +188,7 @@ export function createUrlDrafter({ drafter, scrape = scrapeArticle, fetch: fetch
   } = {}, { budgetMs = null } = {}) {
     const budgetLeft = startBudgetClock(budgetMs);
     const primary = String(url || (Array.isArray(urls) ? urls[0] : '') || '').trim();
-    const source = await scrapeToSource(primary, { scrape, env, log });
+    const source = await scrapeToSource(primary, { scrape, env, log, resolve });
 
     // Supporting material, in trust order, capped at the drafter's ceiling:
     // explicit uploads first, then the caller's current draft, then fetched
@@ -186,7 +202,7 @@ export function createUrlDrafter({ drafter, scrape = scrapeArticle, fetch: fetch
       MAX_SUPPORTING_DOCUMENTS
     )) {
       if (documents.length >= MAX_SUPPORTING_DOCUMENTS) break;
-      const fetched = await fetchDocumentUrl(documentUrl, { fetchImpl, log });
+      const fetched = await fetchDocumentUrl(documentUrl, { fetchImpl, resolve, log });
       if (fetched) documents.push(fetched);
     }
     const extraUrls = (Array.isArray(urls) ? urls : [])
@@ -196,7 +212,7 @@ export function createUrlDrafter({ drafter, scrape = scrapeArticle, fetch: fetch
     for (const extraUrl of extraUrls) {
       if (documents.length >= MAX_SUPPORTING_DOCUMENTS) break;
       try {
-        const extra = await scrapeToSource(extraUrl, { scrape, env, log });
+        const extra = await scrapeToSource(extraUrl, { scrape, env, log, resolve });
         documents.push({
           name: `KB article: ${extra.title || extraUrl}`,
           textContent: extra.markdown,

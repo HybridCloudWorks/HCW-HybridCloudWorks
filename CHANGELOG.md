@@ -3527,6 +3527,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Security: the article scraper and the supporting-document fetch now go
+  through one SSRF guard (estate review 2026-10-06, finding AP-B2).**
+  `generateArticleDraft` and the `forge-from-url` job fetched whatever URL the
+  editor named with a bare `fetch` that followed redirects, and the page (or
+  18 KB of a "KB document") came back into the draft or the source document.
+  From the integration subnet that is a request-forgery primitive:
+  `http://10.0.0.5/`, the metadata address, or a public host that redirects
+  onto either. The guard the image fetcher has carried since T-734 is lifted
+  into `functions/src/lib/http/guarded-fetch.js` — http(s) only, `localhost`
+  refused by name, the host resolved to IPv4 and refused when loopback,
+  link-local or RFC 1918, redirects followed by hand with every hop
+  re-checked, a deadline per hop — and `content/scrape.js` (the page itself)
+  and `content/draft-from-url.js` (each `documentUrls` entry) fetch through
+  it. A refused URL ends the scrape rather than being handed to the reader
+  or headless fallback, which would only fetch the same forbidden target from
+  their side. `triggers/fetch-image.js` re-exports `isPrivateIp` and
+  `validateFetchUrl` from the new module, so its importers and tests keep
+  their names. Copilot's review of #889 tightened the guard four ways, all
+  taken: Azure's platform address `168.63.129.16` (WireServer, plain HTTP),
+  carrier-grade NAT and the multicast/reserved ranges are refused with the
+  rest; the connection is pinned to the address the guard validated, through
+  an undici `Agent` whose lookup answers only that address (undici becomes a
+  declared dependency; it was already in the tree under cheerio), so a
+  rebinding host cannot pass the check with one record and connect with
+  another, and `fetch-image.js` pins the same way; an IPv6 literal, and a
+  name the IPv4 lookup cannot resolve, are refusals rather than fall-through
+  to the reader; and the deadline now covers the body, which is read under
+  it and under a byte cap inside the guard (`{ response, buffer, text }`
+  comes back, not a live Response), so a document origin that sends headers
+  and then stalls is cut off. Tests: the guard's own suite (every refused
+  range including the Azure address, IPv6 literals, unresolvable names,
+  pinned lookup in both callback shapes, a rebinding host, relative and
+  private-bound redirects with re-pinning, redirect limit, streamed and
+  declared body caps, a hung socket and a stalled body), scraper cases
+  proving no fetch and no fallback on a refused target, and a drafter case
+  proving no `documentUrls` byte is read from a private, link-local or
+  localhost address or across a redirect onto one.
+
+### Fixed
+
 - **Cloudflare DNS records: `ignore_changes = [include_shadow_metadata]` on
   every `cloudflare_dns_record` in `infra/` and `infra-lab/` (owner decision
   2026-10-06: stay on provider 5.27.0).** Provider 5.26.0 surfaced the
