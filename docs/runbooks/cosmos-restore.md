@@ -1,14 +1,14 @@
 # Cosmos restore — the drill that proves RPO 24 h / RTO 8 h
 
-> **Status: exporter merged, not yet armed; no drill run yet.** The exporter
-> (`cosmosExportScheduler` and the `cosmos-export-container` job,
-> `functions/src/lib/backup/`) is inert until `FEATURE_FLAG_COSMOS_EXPORT` is
-> `true` (or `1`), which Terraform writes from the `cosmos_export_enabled`
-> workspace variable; the private `cosmos-export` container, its 35-day
-> lifecycle rule and the two missing-run alert rules are the Terraform half of
-> issue #231. The Drills table at the end is empty until the first drill is
-> run. This page records what was **restored** and how long it took, not what
-> was configured.
+> **Status: exporter armed and running since 2026-09-09; no drill run yet.**
+> The exporter (`cosmosExportScheduler` and the `cosmos-export-container`
+> job, `functions/src/lib/backup/`) runs while `FEATURE_FLAG_COSMOS_EXPORT`
+> is `true`, which Terraform writes from the `cosmos_export_enabled`
+> workspace variable; its first run completed 2026-09-09 03:00 UTC and the
+> daily missing-run alert is live. The first drill was declined on 2026-09-09
+> and approved on 2026-10-06 (estate review, finding PLAT-1): it is due, and
+> the Drills table at the end is empty until it has run. This page records
+> what was **restored** and how long it took, not what was configured.
 
 The design is [ADR 0028](../decisions/0028-cosmos-out-of-account-export.md):
 every Sunday the Function App exports every included container in full, every
@@ -297,8 +297,57 @@ account. Then republish snapshots and let the ingest timers refill the caches.
 Deleted-in-the-last-week documents must be re-deleted by hand from the admin
 portal; the audit rows say which.
 
+## A regional loss
+
+Nothing on this page rehearses one, and the objectives above do not cover
+one: continuous backup restores into the same region, and the drill restores
+into a scratch account in the same region. This section says what exists and
+the order it would be used in, so the first regional incident starts from a
+list rather than a blank page. It is untested, and the honest estimate is that
+it does not fit inside the 8-hour RTO.
+
+What survives a regional loss:
+
+- The exports. `stsiteprodcus01` is RA-GRS, so the `cosmos-export` container
+  is readable from the paired region at once (the secondary endpoint) and
+  writable after an account failover.
+- The code and the configuration: this repository, HCP Terraform state, and
+  every Key Vault *reference* in `infra/`.
+- The owner's copies of the secret values (the password manager; Key Vault
+  itself is single-region and its backups restore only into the same
+  geography).
+
+What does not: the Cosmos account and its continuous backup, the Function
+App, the Key Vault, Log Analytics, and the Static Web App's deployment.
+
+The order:
+
+1. **Decide.** A regional outage that Azure expects to resolve in hours is
+   waited out; the site's public pages stay up from the edge (ADR 0011). A
+   restore elsewhere is for a loss Azure is not going to reverse.
+2. **Storage.** Initiate the account failover for `stsiteprodcus01` so the
+   exports and media become primary in the paired region. Read the export
+   manifest from the secondary endpoint first; the failover takes time and
+   the dry run (§2 above) needs only reads.
+3. **Compute and data, in a new region.** `infra/` names every resource with
+   `region_abbreviation` (default `cus`), so a second region is a second set
+   of names, not a rename: set the region variables in the workspace, apply,
+   and treat the result as a fresh estate. The Cosmos account it creates is
+   the restore target: steps 3 and 4 of the drill, into that account, from
+   the exports.
+4. **Secrets.** Re-seed every Key Vault value from the owner's copies through
+   the API Keys page or the seeding window; the required-inputs standard
+   lists each name. The origin secret must change in its three places together.
+5. **Edge.** Repoint the Cloudflare records for the API and the site at the
+   new hostnames; the Static Web App is redeployed by the frontend workflow.
+6. **Verify** with §5 above (public reads against the restored account) and
+   `scripts/smoke-deployed.mjs`.
+
+Record what it took in the Drills table with the note `regional`, even when it
+was real rather than rehearsed.
+
 ## Drills
 
 | Date | Applied runs | Documents | Elapsed | RPO met | RTO met | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | — | No drill yet. The first one is due once the exporter is armed and a Sunday has passed |
+| — | — | — | — | — | — | No drill yet. Approved 2026-10-06 (estate review, PLAT-1); the exporter has been armed since 2026-09-09, so the first one is due now |

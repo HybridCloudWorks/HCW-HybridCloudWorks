@@ -28,8 +28,8 @@ window, and make asynchronous side effects repeatable without duplication.
 | Control | Target design | Verification signal | Status |
 | --- | --- | --- | --- |
 | Static failure isolation | Public pages and data are materialized into the frontend artifact | API/Cosmos outage drill leaves public pages readable | Planned |
-| Zone resilience | Flex Consumption, Cosmos zone support, and ZRS Storage where regionally supported | Resource configuration plus zone-failure service evidence | Planned |
-| Data recovery | Cosmos continuous backup; Blob versioning and soft delete | Quarterly restore exercise records RTO/RPO | Planned |
+| Zone resilience | Declined on cost: Cosmos and the Function App are single-zone, storage is geo-redundant (RA-GRS content, GRS host), not zone-redundant (ADR 0011 amendment 2026-10-06) | Resource configuration; no zone-failure evidence sought | Decided against |
+| Data recovery | Cosmos continuous backup (30 days) plus the nightly out-of-account export (ADR 0028); Blob versioning and soft delete | The restore drill records RTO/RPO (8 h / 24 h); first drill approved 2026-10-06, not yet run | In place, unproven |
 | Retry safety | Idempotency keys, conditional state transitions, bounded retry, poison queues | Duplicate-delivery tests cause one external effect | Planned |
 | Deployment recovery | Immutable artifacts and known-good rollback package | Rollback drill and post-rollback smoke results | Planned |
 | Dependency resilience | Timeouts, circuit/fallback behavior, non-AI degradation | Fault injection for AI and third-party APIs | Planned |
