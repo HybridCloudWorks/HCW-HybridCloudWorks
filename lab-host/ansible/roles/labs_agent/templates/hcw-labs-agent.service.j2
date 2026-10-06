@@ -1,6 +1,8 @@
 # {{ ansible_managed }}
 [Unit]
 Description=HCW Labs VPS agent (vps-agent)
+# When Restart= gives up, say so where Azure can hear it (LAB-2).
+OnFailure=hcw-unit-failed@%n.service
 Documentation=https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/vps-agent
 After=network-online.target docker.service
 Wants=network-online.target

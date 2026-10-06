@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+#
+# The failure notifier (LAB-2, estate review 2026-10-06). A watched unit names
+# this one in `OnFailure=hcw-unit-failed@%n.service`; when it enters the
+# failed state, systemd starts this instance with the unit's name as %i, and
+# the one line it logs goes to the daemon facility at err, which the Arc data
+# collection rule ships to Log Analytics and `alert-lab-unit-failed` reads.
+# Nothing else: no mail, no retry, no network — the host's own job is to say
+# it, and Azure's job is to page.
+[Unit]
+Description=Report that %i failed, to syslog, for the lab alert
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/logger -t hcw-unit-failed -p daemon.err "unit %i entered the failed state on %H"
+DynamicUser=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true

@@ -3527,6 +3527,38 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The lab host now pages the owner: heartbeat absence, root disk past 85%,
+  a watched unit failing, and the labs agent going offline (estate review
+  2026-10-06, finding LAB-2; owner decision that day).** Until now the Arc
+  data collection rule shipped heartbeat and auth syslog only, node_exporter
+  listened on loopback for a scrape that never came, `checkAgentHealth`
+  marked an agent offline in Cosmos and told nobody, and the backup timer
+  failed silently — the public status card said "unreachable" before the
+  owner knew. `infra/lab-hybrid.tf` adds four host counters (CPU, memory,
+  root disk used and free, 60 s) and the `daemon`/`syslog`/`kern`/`cron`/
+  `user` facilities at Warning and above to `dcr-lab-hybrid-prod-cus`
+  (kilobytes a day against the cap), and three scheduled-query rules in
+  `rg-mgmt-plat-prod-cus` on the existing action group:
+  `alert-lab-heartbeat` (no Heartbeat row in 30 min, stateful, severity 1),
+  `alert-lab-disk` (root past 85%, hourly) and `alert-lab-unit-failed` (a
+  `hcw-unit-failed` syslog line in the last hour). The lab-host `hardening`
+  role installs `hcw-unit-failed@.service`, a template unit that logs one
+  line at `daemon.err` naming the unit that failed, and the Coder backup,
+  labs agent, Caddy and Vault units name it in `OnFailure=`. The
+  `checkAgentHealth` timer takes the shared Telegram notifier and sends one
+  message (per the notifier's 15-minute cooldown) when it marks an agent
+  offline, naming the agent, host and last heartbeat; the mark never
+  depends on the message. `scripts/assert-expected-plan.mjs` declares the
+  three creates; the DCR change is an in-place update the plan shows beside
+  them. The alerting runbook's table carries the three rules; the lab
+  architecture page's control-plane row is now `live`. **Owner steps:**
+  confirm the `hcw-azure` run (3 to add, 1 to change: the DCR), re-run
+  `bootstrap.sh` on the host so the notifier and the four `OnFailure=` lines
+  land, and expect the Telegram message within five minutes of stopping
+  `hcw-labs-agent` once the Functions deploy carries this. The verifier
+  workflow reads the web resource group only, so these three are listed by
+  `az monitor scheduled-query list -g rg-mgmt-plat-prod-cus` instead
+  (PLAT-4).
 - **Security: the Terraform run identity's role-assignment right is
   constrained, so a run can assign what `infra/` needs and never make itself
   Owner or read the vault (estate review 2026-10-06, finding SEC-1; owner

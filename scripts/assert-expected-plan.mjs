@@ -187,6 +187,26 @@ const baseAddress = (address) => address.replace(/\[[^\]]*\]$/, '');
  * has applied. "Declaring an intended change" in the header has the rest.
  */
 export const DECLARED = [
+  // LAB-2 (estate review 2026-10-06): three lab alert rules in the
+  // Management resource group. The DCR they read from is updated in place in
+  // the same plan (two streams and three data sources added); that update is
+  // a nested-block change this file cannot declare by path, so the plan
+  // reports it — read it beside these three.
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_heartbeat_missing',
+    action: 'create',
+    reason: 'LAB-2: Heartbeat absence on the lab host pages the owner',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_disk_used',
+    action: 'create',
+    reason: 'LAB-2: root filesystem past 85% on the lab host',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_unit_failed',
+    action: 'create',
+    reason: 'LAB-2: a watched systemd unit on the lab host failed',
+  },
   // SEC-2 (estate review 2026-10-06): the deploy identity's two ref-form
   // federated credentials and its two container-scoped Cosmos data-plane
   // grants, none with a consumer. Four destroys, nothing created.

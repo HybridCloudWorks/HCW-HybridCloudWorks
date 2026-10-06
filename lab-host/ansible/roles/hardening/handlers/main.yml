@@ -13,3 +13,7 @@
   ansible.builtin.systemd_service:
     name: fail2ban
     state: restarted
+
+- name: Reload systemd for the failure notifier
+  ansible.builtin.systemd_service:
+    daemon_reload: true

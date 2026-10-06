@@ -4,6 +4,9 @@ Description=Nightly pg_dump of Coder's PostgreSQL ({{ coder_backup_keep_days }} 
 Documentation=https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-host
 After=docker.service
 Requires=docker.service
+# A failed dump is one syslog line and an Azure alert, not a silent gap in
+# /var/backups/coder (LAB-2). The notifier is the hardening role's.
+OnFailure=hcw-unit-failed@%n.service
 
 [Service]
 Type=oneshot

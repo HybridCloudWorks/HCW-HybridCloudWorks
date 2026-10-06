@@ -252,7 +252,13 @@ timer('refreshPlaudToken', 'REFRESH_PLAUD_TOKEN', '0 0 */12 * * *', (context) =>
 );
 
 timer('checkAgentHealth', 'CHECK_AGENT_HEALTH', '0 */5 * * * *', (context) =>
-  createAgentHealthCheck({ store, log: context }).run()
+  // The notifier is how the owner hears that the lab closed (LAB-2); the
+  // mark itself never depends on it.
+  createAgentHealthCheck({
+    store,
+    notifier: createNotifier({ store, log: context }),
+    log: context,
+  }).run()
 );
 
 // ── AI ───────────────────────────────────────────────────────────────────────

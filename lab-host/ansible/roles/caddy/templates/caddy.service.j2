@@ -1,6 +1,8 @@
 # {{ ansible_managed }}
 [Unit]
 Description=Caddy
+# A Caddy that stays down is every lab name dark; one syslog line, one alert (LAB-2).
+OnFailure=hcw-unit-failed@%n.service
 Documentation=https://caddyserver.com/docs/
 After=network.target network-online.target
 Requires=network-online.target
