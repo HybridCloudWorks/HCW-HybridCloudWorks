@@ -151,6 +151,17 @@ resource "cloudflare_dns_record" "azure_functions" {
   proxied = true
   ttl     = 1
   comment = "Azure Functions API endpoint"
+
+  # include_shadow_metadata is a request query parameter the provider surfaces
+  # as an attribute with a static default since 5.26.0; left alone it plans
+  # null -> false on every existing record and the forced PUT fails
+  # "inconsistent result after apply: .modified_on" (cloudflare/
+  # terraform-provider-cloudflare #7387, #7396; seen here 2026-10-06 on 5.27.0).
+  # Ignoring it is the provider's documented workaround and changes nothing
+  # about the record. Drop it when a release removes the default.
+  lifecycle {
+    ignore_changes = [include_shadow_metadata]
+  }
 }
 
 # Documentation site on GitHub Pages (issue #360): docs.<domain> is a CNAME to
@@ -174,6 +185,17 @@ resource "cloudflare_dns_record" "docs_pages" {
   proxied = false
   ttl     = 300
   comment = "GitHub Pages documentation site"
+
+  # include_shadow_metadata is a request query parameter the provider surfaces
+  # as an attribute with a static default since 5.26.0; left alone it plans
+  # null -> false on every existing record and the forced PUT fails
+  # "inconsistent result after apply: .modified_on" (cloudflare/
+  # terraform-provider-cloudflare #7387, #7396; seen here 2026-10-06 on 5.27.0).
+  # Ignoring it is the provider's documented workaround and changes nothing
+  # about the record. Drop it when a release removes the default.
+  lifecycle {
+    ignore_changes = [include_shadow_metadata]
+  }
 }
 
 # The rename is a change of resource ADDRESS, so without these Terraform would
@@ -278,6 +300,17 @@ resource "cloudflare_dns_record" "azure_functions_domain_verification" {
   type    = "TXT"
   ttl     = 300
   comment = "Azure custom-domain ownership proof for the Functions origin"
+
+  # include_shadow_metadata is a request query parameter the provider surfaces
+  # as an attribute with a static default since 5.26.0; left alone it plans
+  # null -> false on every existing record and the forced PUT fails
+  # "inconsistent result after apply: .modified_on" (cloudflare/
+  # terraform-provider-cloudflare #7387, #7396; seen here 2026-10-06 on 5.27.0).
+  # Ignoring it is the provider's documented workaround and changes nothing
+  # about the record. Drop it when a release removes the default.
+  lifecycle {
+    ignore_changes = [include_shadow_metadata]
+  }
 }
 
 resource "azurerm_app_service_custom_hostname_binding" "api" {

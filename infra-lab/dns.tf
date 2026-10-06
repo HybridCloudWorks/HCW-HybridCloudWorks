@@ -47,7 +47,15 @@ resource "cloudflare_dns_record" "lab" {
   ttl     = 300
   comment = "HCW lab host (Hostinger VPS), managed by infra-lab"
 
+  # include_shadow_metadata is a request query parameter the provider surfaces
+  # as an attribute with a static default since 5.26.0; left alone it plans
+  # null -> false on every existing record and the forced PUT fails
+  # "inconsistent result after apply: .modified_on" (cloudflare/
+  # terraform-provider-cloudflare #7387, #7396; seen here 2026-10-06 on 5.27.0).
+  # Ignoring it is the provider's documented workaround and changes nothing
+  # about the record. Drop it when a release removes the default.
   lifecycle {
+    ignore_changes = [include_shadow_metadata]
     # The provider sets ipv4_address to "" when the API lists no IPv4 address.
     # Fail the plan with a reason rather than send Cloudflare an empty A record.
     precondition {
@@ -67,4 +75,15 @@ resource "cloudflare_dns_record" "lab_alias" {
   proxied = false
   ttl     = 300
   comment = "HCW lab host alias, managed by infra-lab"
+
+  # include_shadow_metadata is a request query parameter the provider surfaces
+  # as an attribute with a static default since 5.26.0; left alone it plans
+  # null -> false on every existing record and the forced PUT fails
+  # "inconsistent result after apply: .modified_on" (cloudflare/
+  # terraform-provider-cloudflare #7387, #7396; seen here 2026-10-06 on 5.27.0).
+  # Ignoring it is the provider's documented workaround and changes nothing
+  # about the record. Drop it when a release removes the default.
+  lifecycle {
+    ignore_changes = [include_shadow_metadata]
+  }
 }
