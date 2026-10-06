@@ -8,6 +8,7 @@
   "scripts": {
     "start": "func start",
     "build": "echo 'No build step required'",
+    "lint": "eslint src",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage --testTimeout=30000 --hookTimeout=60000",
     "deploy": "echo \"Use the deploy-functions workflow, or: func azure functionapp publish $(terraform -chdir=../infra output -raw function_app_name)\" && exit 1"
@@ -32,6 +33,8 @@
   },
   "devDependencies": {
     "@vitest/coverage-v8": "^5.0.2",
+    "eslint": "^10.12.0",
+    "globals": "^17.13.0",
     "vitest": "^5.0.0"
   },
   "private": true,

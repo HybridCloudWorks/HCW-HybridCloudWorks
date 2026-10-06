@@ -73,7 +73,7 @@ export function assertSafePath(path) {
   // request line or a header into the outbound call. Written as escapes:
   // the first version embedded the raw bytes, which works but makes the
   // file read as binary to git and grep.
-  // eslint-disable-next-line no-control-regex
+   
   if (/[\u0000-\u001f\u007f]/.test(value)) {
     throw new Error('path must not contain control characters');
   }

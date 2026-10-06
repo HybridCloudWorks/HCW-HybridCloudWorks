@@ -485,7 +485,7 @@ function normalizeNewsletterContent(body, value) {
  */
 function signupText(raw, field, maxLength) {
   if (typeof raw !== 'string') fail(`${field} must be a string`);
-  // eslint-disable-next-line no-control-regex
+   
   const text = raw.replace(/[\s\u0000-\u001f\u007f]+/g, ' ').trim();
   if (text.length > maxLength) fail(`${field} must be at most ${maxLength} characters`);
   return text;

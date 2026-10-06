@@ -56,6 +56,7 @@ import { createBlogListingsScrape } from '../lib/timers/blog-listings.js';
 import { createPodcastIngest, createPodcastParser } from '../lib/timers/podcasts.js';
 import { createNewsletterAutoBuild } from '../lib/timers/newsletter-autobuild.js';
 import { createReminderCheck } from '../lib/timers/reminders.js';
+import { createNotifier } from '../lib/notify.js';
 import { logDisabledSkip, timerEnabled } from '../lib/timers/flag-gate.js';
 
 /**
@@ -162,10 +163,9 @@ timer('buildWeeklyNewsletter', 'BUILD_WEEKLY_NEWSLETTER', '0 0 13 * * 1', async 
   // days into Drafts and pings Telegram with the link. NEVER SENDS: approval
   // stays a manual press on the Drafts tab. Same builder wiring as the
   // build-newsletter-issue job (forge-jobs.js).
-  const [{ createIssueBuilder }, { createDrafter }, { createNotifier }, ai] = await Promise.all([
+  const [{ createIssueBuilder }, { createDrafter }, ai] = await Promise.all([
     import('../lib/newsletter/issue.js'),
     import('../lib/content/drafting.js'),
-    import('../lib/notify.js'),
     import('../lib/ai/router.js'),
   ]);
   return createNewsletterAutoBuild({
