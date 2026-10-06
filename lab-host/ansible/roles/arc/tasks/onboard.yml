@@ -195,25 +195,33 @@
 # incoming connections (SSH over Arc, Windows Admin Center) are off: the
 # owner reaches the host over sshd with a key. Each setting is read first and
 # written only when it differs, so the play reports changed truthfully.
-- name: Read the Arc agent's configuration
+- name: Read the Arc agent's extension allowlist
   ansible.builtin.command:
     argv:
       - "{{ arc_azcmagent_path }}"
       - config
-      - list
-      - --json
-  register: arc_config_list
+      - get
+      - extensions.allowlist
+  register: arc_allowlist_get
   changed_when: false
   when: not ansible_check_mode
 
-- name: Record the Arc agent's lockdown state
-  ansible.builtin.set_fact:
-    arc_lockdown_current: >-
-      {{ dict((arc_config_list.stdout | from_json)
-              | map(attribute='name')
-              | zip((arc_config_list.stdout | from_json) | map(attribute='value'))) }}
+- name: Read whether incoming connections through Arc are enabled
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - config
+      - get
+      - incomingconnections.enabled
+  register: arc_incoming_get
+  changed_when: false
   when: not ansible_check_mode
 
+# Each set runs only when `config get`'s plain text does not already carry
+# the value, so a run is a change and a second run changes nothing. Plain
+# text on purpose: the first version read the whole configuration as JSON
+# and assumed a list of name/value objects, which it is not, and the play
+# stopped here on the owner's first re-run (2026-10-06).
 - name: Allow only the Azure Monitor Agent extension
   ansible.builtin.command:
     argv:
@@ -222,11 +230,10 @@
       - set
       - extensions.allowlist
       - "{{ arc_extensions_allowlist }}"
-  # Runs only when the stored value differs, so a run is a change.
   changed_when: true
   when:
     - not ansible_check_mode
-    - (arc_lockdown_current['extensions.allowlist'] | default('')) != arc_extensions_allowlist
+    - arc_extensions_allowlist not in arc_allowlist_get.stdout
 
 - name: Turn off incoming connections through Arc
   ansible.builtin.command:
@@ -239,4 +246,4 @@
   changed_when: true
   when:
     - not ansible_check_mode
-    - (arc_lockdown_current['incomingconnections.enabled'] | default('true') | string | lower) != 'false'
+    - "'false' not in (arc_incoming_get.stdout | lower)"

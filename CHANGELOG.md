@@ -3539,6 +3539,15 @@ This project has not cut a tagged release; entries are grouped under
   the `hcw-azure` run (3 to change); the heartbeat alert then resolves on
   its next evaluation.
 
+- **Arc lockdown tasks read each setting with `config get` (LAB-6
+  follow-up, 2026-10-06).** The first version parsed `azcmagent config list
+  --json` as a list of name/value objects, which it is not, and the owner's
+  first `bootstrap.sh` re-run stopped in the `arc` role before the coder,
+  labs_agent and later roles ran, so #900's proxy and unit changes never
+  reached the host. The two settings are now read one at a time and compared
+  as plain text. **Owner step:** re-run `bootstrap.sh`; success is
+  `failed=0`, then `coder-docker-proxy` in `docker ps`.
+
 - **Lab host: the Coder server no longer holds the Docker socket, the
   agent's install and unit are tightened, the Arc agent is locked down, and
   ADR 0032's false detection claim is corrected (estate review 2026-10-06,
