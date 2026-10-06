@@ -182,10 +182,17 @@ Write-Host 'Condition:'
 Write-Host "  $condition"
 Write-Host ''
 
-$assignments = @(Invoke-AzJson @(
-  'role', 'assignment', 'list', '--assignee', $PrincipalId, '--all',
-  '--role', $RoleName, '-o', 'json'
-))
+# No --role beside --all: az 2.x resolves a role NAME against a scope it does
+# not have when --all is given and crashes with "No value for given
+# attribute" (seen on the owner's first run, 2026-10-06). Every assignment
+# of the identity is read and the role is filtered here.
+function Get-RbacAdminAssignments {
+  param([string] $Principal)
+  $all = @(Invoke-AzJson @('role', 'assignment', 'list', '--assignee', $Principal, '--all', '-o', 'json'))
+  return @($all | Where-Object { $_.roleDefinitionName -eq $RoleName })
+}
+
+$assignments = Get-RbacAdminAssignments -Principal $PrincipalId
 if ($assignments.Count -eq 0) {
   throw "The identity holds no '$RoleName' assignment. Run scripts/bootstrap-terraform-oidc.ps1 first."
 }
@@ -217,10 +224,7 @@ foreach ($a in $assignments) {
 
 Write-Host ''
 Write-Host "Verification ($RoleName rows for the identity; every row should show a condition):"
-$after = @(Invoke-AzJson @(
-  'role', 'assignment', 'list', '--assignee', $PrincipalId, '--all',
-  '--role', $RoleName, '-o', 'json'
-))
+$after = Get-RbacAdminAssignments -Principal $PrincipalId
 foreach ($a in $after) {
   $has = if ($a.PSObject.Properties['condition'] -and $a.condition) { 'condition present' } else { 'NO CONDITION' }
   Write-Host "  $($a.scope)  $has"
