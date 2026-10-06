@@ -229,14 +229,14 @@
 - name: Reduce the two readings to comparable values
   ansible.builtin.set_fact:
     arc_allowlist_current: >-
-      {{ (arc_allowlist_get.stdout | regex_replace('^[^:\r\n]*:', '')
+      {{ ((arc_allowlist_get.stdout_lines | first | default('')) | regex_replace('^[^:]*:', '')
           | regex_replace('[\[\]"\s]', '')).split(',')
          | reject('eq', '') | sort }}
     arc_allowlist_wanted: >-
       {{ (arc_extensions_allowlist | regex_replace('\s', '')).split(',')
          | reject('eq', '') | sort }}
     arc_incoming_current: >-
-      {{ arc_incoming_get.stdout | regex_replace('^[^:\r\n]*:', '') | trim | lower }}
+      {{ (arc_incoming_get.stdout_lines | first | default('')) | regex_replace('^[^:]*:', '') | trim | lower }}
   when: not ansible_check_mode
 
 - name: Allow only the Azure Monitor Agent extension
