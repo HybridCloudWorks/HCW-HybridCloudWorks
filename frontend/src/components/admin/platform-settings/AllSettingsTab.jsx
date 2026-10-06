@@ -82,6 +82,15 @@ export const SETTINGS_INDEX = Object.freeze([
     history: true,
   },
   {
+    id: 'reminders',
+    label: 'Reminders',
+    storedAt: 'admin_config/reminders',
+    editedIn: 'Platform Settings → Reminders',
+    readBy: 'The daily reminder check, which says each dated reminder on Telegram.',
+    href: '/admin/platform?tab=reminders',
+    history: true,
+  },
+  {
     id: 'newsletter-settings',
     label: 'Newsletter settings',
     storedAt: 'admin_config/newsletter_settings',

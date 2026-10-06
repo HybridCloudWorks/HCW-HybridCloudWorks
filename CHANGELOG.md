@@ -19,6 +19,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Reminders on Telegram: a sheet under Platform Settings and a daily
+  check (owner, 2026-10-06).** Dated things not to forget — a token that
+  expires, a re-verification, a renewal — had been living in session notes.
+  Platform Settings → Reminders now holds them as one `admin_config`
+  document (`reminders`, the seventh platform setting, with Change history
+  like the rest), and the new `sendReminders` timer (13:00 UTC, flag
+  `SEND_REMINDERS`) says each one on Telegram once within its days-before
+  window, once on the day, and weekly while overdue, until it is marked
+  done. A stage is stamped only when the message was sent, so an
+  unconfigured bot means a retry tomorrow, not a reminder counted as said.
+  **Owner steps:** add `SEND_REMINDERS` to `enabled_timers` on the
+  `hcw-azure` workspace and confirm the run (1 to change); then add the
+  first rows at https://hybridcloudworks.com/admin/platform?tab=reminders.
+- **The owner hears on Telegram when a lab agent stops cleanly (LAB-2
+  follow-up, 2026-10-06).** `systemctl stop` sends SIGTERM and the agent
+  heartbeats `offline` itself, so the health timer never had a stale agent
+  to mark and its message never fired; the owner's first test produced no
+  message for exactly this reason. The heartbeat now sends the same message
+  on that transition, with the same source, so a stop and the timer's own
+  mark are one message within the cooldown.
 - **Forge Studio Queue: one document per entry, so a favourites export
   fits, and a remove on every row (owner, 2026-10-06).** The first cut kept
   the whole queue in one `admin_config` document capped at 200 entries, and

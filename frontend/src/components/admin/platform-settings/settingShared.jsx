@@ -55,8 +55,8 @@ export const PODCAST_PROVIDERS = Object.freeze([
 ]);
 
 /**
- * Every setting a Change history row can name, as a person reads it. The
- * first seven are the server's platform-settings registry; `integrations` is
+ * Every setting a Change history row can name, as a person reads it. All but
+ * the last are the server's platform-settings registry; `integrations` is
  * the Sessionize speaker id, saved on the Integrations page and written to
  * the same history (ADR 0033 Platform).
  */
@@ -68,6 +68,7 @@ export const SETTING_LABELS = Object.freeze({
   'podcast-voices': 'Podcast voices',
   'newsletter-settings': 'Newsletter settings',
   'content-taxonomy': 'Content types & idea origins',
+  reminders: 'Reminders',
   integrations: 'Sessionize speaker id (Integrations)',
 });
 

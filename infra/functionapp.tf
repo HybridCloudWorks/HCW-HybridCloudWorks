@@ -95,6 +95,11 @@ locals {
     # provider is re-measured weekly. Writes ai_providers status and ai_usage
     # rows only; a fraction of a cent a week across the paid providers.
     PROBE_AI_PROVIDERS = "probeAiProviders — weekly Monday 06:15 UTC, runs the AI Engine Test against every AI provider with a key and records the latency on its card"
+    # Owner request 2026-10-06: the reminders sheet under Platform Settings,
+    # said on Telegram ahead of each date, on the day, and weekly while
+    # overdue until marked done. Reads one admin_config document and writes
+    # its stamps back; nothing else.
+    SEND_REMINDERS = "sendReminders — daily 13:00 UTC, says each due reminder from Platform Settings → Reminders on Telegram"
   }
 
   timer_flags = {

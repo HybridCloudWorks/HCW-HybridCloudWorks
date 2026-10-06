@@ -775,7 +775,7 @@ describe('newsletter settings', () => {
 });
 
 describe('presentSetting', () => {
-  it('names the six settings and nothing else — the Listen & Learn voice left for AI Engine → Tasks (ADR 0034 slice 5)', () => {
+  it('names the seven settings and nothing else — the Listen & Learn voice left for AI Engine → Tasks (ADR 0034 slice 5); reminders joined 2026-10-06', () => {
     expect(PLATFORM_SETTING_NAMES).toEqual([
       'default-heroes',
       'social-autopost',
@@ -783,6 +783,7 @@ describe('presentSetting', () => {
       'podcast-voices',
       'newsletter-settings',
       'content-taxonomy',
+      'reminders',
     ]);
   });
 

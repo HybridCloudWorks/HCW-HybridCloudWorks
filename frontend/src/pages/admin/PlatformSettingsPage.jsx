@@ -9,6 +9,7 @@
  *   Content types      what an item becomes and how it became an idea (ADR 0033)
  *   Social automation  autoposting to Publer on a live publish
  *   Audio              podcast feeds and the Listen & Learn voice
+ *   Reminders          dated things not to forget, said on Telegram by the daily check
  *   Change history     every save, who made it and what it recorded — including
  *                      the Sessionize speaker id saved on Integrations
  *
@@ -32,6 +33,7 @@ import ContentDefaultsTab from '@/components/admin/platform-settings/ContentDefa
 import SocialAutomationTab from '@/components/admin/platform-settings/SocialAutomationTab';
 import AudioTab from '@/components/admin/platform-settings/AudioTab';
 import ChangeHistoryTab from '@/components/admin/platform-settings/ChangeHistoryTab';
+import RemindersTab from '@/components/admin/platform-settings/RemindersTab';
 import TaxonomyTab from '@/components/admin/platform-settings/TaxonomyTab';
 import HubTabs from '@/components/admin/HubTabs';
 
@@ -41,6 +43,7 @@ export const TABS = Object.freeze([
   { id: 'taxonomy', label: 'Content types & origins', Component: TaxonomyTab },
   { id: 'social', label: 'Social automation', Component: SocialAutomationTab },
   { id: 'audio', label: 'Audio', Component: AudioTab },
+  { id: 'reminders', label: 'Reminders', Component: RemindersTab },
   { id: 'history', label: 'Change history', Component: ChangeHistoryTab },
 ]);
 

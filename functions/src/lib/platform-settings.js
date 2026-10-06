@@ -16,6 +16,8 @@
  *                             and lib/newsletter/issue.js (content: sections, window, intro)
  *                             and lib/newsletter/signup-config.js (the public signup box)
  *                             (to be edited from the Mailing List page, not Platform settings)
+ *   reminders               → admin_config/reminders               read by timers/reminders.js, daily, which says
+ *                             each dated reminder on Telegram (owner, 2026-10-06; lib/reminders/settings.js)
  *
  * Every write is normalized to EXACTLY the shape its consumer reads — the
  * whole point of a screen over a hand-seeded document is that the shape can
@@ -72,6 +74,13 @@ import {
   defaultTaxonomy,
   normalizeContentTaxonomy,
 } from './cms/taxonomy.js';
+import {
+  REMINDERS_CONFIG_ID,
+  RemindersValidationError,
+  emptyReminders,
+  normalizeReminders,
+  summarizeReminders,
+} from './reminders/settings.js';
 
 const json = (status, body) => ({
   status,
@@ -634,6 +643,20 @@ export const PLATFORM_SETTINGS = Object.freeze({
     },
     empty: defaultTaxonomy,
   }),
+  // The owner's dated reminders, said on Telegram by the daily sendReminders
+  // timer (owner request 2026-10-06). The timer's own stamps round-trip here.
+  reminders: Object.freeze({
+    docId: REMINDERS_CONFIG_ID,
+    normalize: (body) => {
+      try {
+        return normalizeReminders(body);
+      } catch (error) {
+        if (error instanceof RemindersValidationError) fail(error.message);
+        throw error;
+      }
+    },
+    empty: emptyReminders,
+  }),
 });
 
 export const PLATFORM_SETTING_NAMES = Object.freeze(Object.keys(PLATFORM_SETTINGS));
@@ -869,6 +892,8 @@ const AUDIT_SUMMARIES = Object.freeze({
     // An id, not content: which design the email uses.
     templateId: value.templateId || null,
   }),
+  // Counts and the next date; titles and notes are content.
+  reminders: summarizeReminders,
 });
 
 /** What the audit row records: counts, never contents. */

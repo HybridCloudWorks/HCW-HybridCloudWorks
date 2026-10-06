@@ -37,18 +37,21 @@ export const SOURCE_DISPLAY_NAMES = Object.freeze({
   cleanupSoftDeletedContent: 'the deleted-content cleanup job',
   workflow_alerts: 'the workflow alert monitor',
   seed: 'the content seeder',
+  lab_agent_offline: 'the lab agent watch',
 });
 
 export function formatTelegramText({ title, message, severity, source }) {
   // Dynamic prefixed sources — 'forge_ready:{contentId}' (per-post cooldown,
-  // lib/triggers/forge-ready-notify.js) and 'job_failed:{type}' (per-job-type
-  // cooldown, lib/job-failure-notify.js) — display as their prefix's name
+  // lib/triggers/forge-ready-notify.js), 'job_failed:{type}' (per-job-type
+  // cooldown, lib/job-failure-notify.js) and 'reminder:{id}' (per-reminder
+  // cooldown, lib/timers/reminders.js) — display as their prefix's name
   // rather than the raw key.
   const raw = String(source || '');
   let displayName = SOURCE_DISPLAY_NAMES[source] || source;
   if (!SOURCE_DISPLAY_NAMES[source]) {
     if (raw.startsWith('forge_ready:')) displayName = 'ContentForge';
     else if (raw.startsWith('job_failed:')) displayName = 'the job worker';
+    else if (raw.startsWith('reminder:')) displayName = 'the reminders sheet';
   }
   return `${severityPrefix(severity)} ${title}\n\n${message}\n\nReported by ${displayName}.`;
 }
