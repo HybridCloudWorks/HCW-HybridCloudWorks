@@ -665,6 +665,177 @@ describe('AI feature switches', () => {
   });
 });
 
+describe('MCP key-to-host binding, routing privilege and config audit (AP-B1, 2026-10-06)', () => {
+  const firecrawl = {
+    id: 'firecrawl',
+    url: 'https://mcp.firecrawl.dev/sse',
+    apiKeyEnvVar: 'FIRECRAWL_API_KEY',
+    enabled: true,
+    createdAt: '2026-01-01T00:00:00Z',
+  };
+  const editorOnlyGuard = {
+    requireRole: vi.fn(async (_request, minimum) =>
+      minimum === 'super_admin'
+        ? { user: null, role: null, error: { status: 403, body: '{"error":"Requires super_admin or higher"}' } }
+        : { user: { oid: 'editor-1', email: 'editor@example.test' }, role: 'editor', error: null }
+    ),
+  };
+  const auditRows = (store) =>
+    store.upsertDoc.mock.calls.filter(([c]) => c === 'admin_audit_logs').map(([, d]) => d);
+
+  it('PUT refuses a shared integration key at a host it is not bound to, before any write or elevation', async () => {
+    const store = makeStore();
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'exfil' },
+        body: { url: 'https://attacker.example/', apiKeyEnvVar: 'VPS_API_TOKEN', enabled: true },
+      }),
+      context
+    );
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/VPS_API_TOKEN may only be sent to localhost/);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(allowGuard.requireRole).not.toHaveBeenCalledWith(expect.anything(), 'super_admin');
+  });
+
+  it('PATCH moving the URL of a server that holds a shared key is checked against the stored key', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ ...firecrawl })) });
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.patchConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'firecrawl' },
+        body: { url: 'https://attacker.example/sse' },
+      }),
+      context
+    );
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.body).error).toMatch(/FIRECRAWL_API_KEY may only be sent to/);
+    expect(store.patchDoc).not.toHaveBeenCalled();
+
+    // And the other half: a shared key placed on a server at the wrong host.
+    const store2 = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'custom', url: 'https://custom.example/mcp', apiKeyEnvVar: null })),
+    });
+    const h2 = createAdminIntegrationHandlers({ guard: allowGuard, store: store2, ...fixed });
+    const res2 = await h2.patchConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'custom' }, body: { apiKeyEnvVar: 'REPLICATE_API_KEY' } }),
+      context
+    );
+    expect(res2.status).toBe(400);
+    expect(store2.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('a write that moves where a credential is sent needs super_admin; an editor toggle, rename or token store does not', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ ...firecrawl })) });
+    const h = createAdminIntegrationHandlers({ guard: editorOnlyGuard, store, ...fixed });
+
+    const toggle = await h.patchConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'firecrawl' }, body: { enabled: false, name: 'FC' } }),
+      context
+    );
+    expect(toggle.status).toBe(200);
+    const token = await h.patchConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'firecrawl' }, body: { oauthToken: 't' } }),
+      context
+    );
+    expect(token.status).toBe(200);
+    // A round-trip PUT that restates the same URL and key is not a move.
+    const sameRoute = await h.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'firecrawl' },
+        body: { ...firecrawl, enabled: false },
+      }),
+      context
+    );
+    expect(sameRoute.status).toBe(200);
+
+    const move = await h.patchConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'firecrawl' }, body: { url: 'https://api.firecrawl.dev/mcp' } }),
+      context
+    );
+    expect(move.status).toBe(403);
+    const rekey = await h.patchConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'firecrawl' }, body: { apiKeyEnvVar: 'MCP_FC' } }),
+      context
+    );
+    expect(rekey.status).toBe(403);
+    // A new server is a routing decision from the first byte.
+    const emptyStore = makeStore();
+    const h2 = createAdminIntegrationHandlers({ guard: editorOnlyGuard, store: emptyStore, ...fixed });
+    const created = await h2.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'brand-new' },
+        body: { url: 'https://new.example/mcp', enabled: true },
+      }),
+      context
+    );
+    expect(created.status).toBe(403);
+    expect(emptyStore.upsertDoc).not.toHaveBeenCalled();
+    // ai_providers writes are not credential routing.
+    const provider = await h2.putConfig(
+      makeRequest({ params: { collection: 'ai-providers', id: 'vertex' }, body: { enabled: true } }),
+      context
+    );
+    expect(provider.status).toBe(200);
+  });
+
+  it('every config write leaves an ai_config_updated row naming the actor, the fields and the routing before and after, never a token', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ ...firecrawl, oauthToken: 'STORED-SECRET' })) });
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    await h.patchConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'firecrawl' },
+        body: { enabled: false, oauthToken: 'NEW-SECRET' },
+      }),
+      context
+    );
+    await h.putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'firecrawl' },
+        body: { ...firecrawl, url: 'https://api.firecrawl.dev/mcp' },
+      }),
+      context
+    );
+    await h.deleteConfig(makeRequest({ params: { collection: 'mcp-servers', id: 'firecrawl' } }), context);
+    const rows = auditRows(store);
+    expect(rows.map((r) => r.details.operation)).toEqual(['patch', 'put', 'delete']);
+    expect(rows[0]).toMatchObject({
+      id: 'fixed-uuid',
+      action: 'ai_config_updated',
+      userId: 'u1',
+      timestamp: '2026-08-06T12:00:00.000Z',
+      details: {
+        collection: 'mcp_servers',
+        documentId: 'firecrawl',
+        fields: ['enabled'],
+        before: { url: 'https://mcp.firecrawl.dev/sse', apiKeyEnvVar: 'FIRECRAWL_API_KEY' },
+        after: { url: 'https://mcp.firecrawl.dev/sse', apiKeyEnvVar: 'FIRECRAWL_API_KEY' },
+      },
+    });
+    expect(rows[1].details.after.url).toBe('https://api.firecrawl.dev/mcp');
+    expect(rows[2].details.after).toBeNull();
+    expect(JSON.stringify(rows)).not.toMatch(/SECRET/);
+  });
+
+  it('a config write still answers 200 when the audit row fails, because the save already took', async () => {
+    const store = makeStore({
+      upsertDoc: vi.fn(async (container, d) => {
+        if (container === 'admin_audit_logs') throw new Error('audit down');
+        return d;
+      }),
+    });
+    const warn = vi.fn();
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const res = await h.putConfig(
+      makeRequest({ params: { collection: 'ai-providers', id: 'vertex' }, body: { enabled: true } }),
+      { ...context, warn }
+    );
+    expect(res.status).toBe(200);
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/audit row failed/));
+  });
+});
+
 describe('partial MCP/AI config updates never disturb a stored secret', () => {
   // `oauthToken` on mcp_servers is the only secret VALUE these two collections
   // store — an ai_providers document holds `apiKeyEnvVar`, the NAME of a
@@ -775,7 +946,7 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
       }),
       context
     );
-    const saved = store.upsertDoc.mock.calls[0][1];
+    const saved = store.upsertDoc.mock.calls.find(([c]) => c === 'mcp_servers')[1];
     expect(saved.oauthToken).toBe('stored-tok');
     expect(saved.oauthRefreshToken).toBe('stored-ref');
     expect(saved).not.toHaveProperty('hasOauthRefreshToken');
@@ -845,7 +1016,7 @@ describe('partial MCP/AI config updates never disturb a stored secret', () => {
       context
     );
 
-    const saved = store.upsertDoc.mock.calls[0][1];
+    const saved = store.upsertDoc.mock.calls.find(([c]) => c === 'mcp_servers')[1];
     expect(saved.oauthToken).toBe('stored-tok');
     expect(saved).not.toHaveProperty('hasOauthToken');
     expect(saved.createdAt).toBe('2026-01-01T00:00:00.000Z'); // not reset by the replace
@@ -1269,6 +1440,7 @@ describe('MCP server writes are checked (ADR 0033, security finding)', () => {
       context
     );
     expect(res.status).toBe(200);
-    expect(store.upsertDoc).toHaveBeenCalledTimes(1);
+    // One document write; the second upsert is the audit row (AP-B1).
+    expect(store.upsertDoc.mock.calls.filter(([c]) => c === 'mcp_servers')).toHaveLength(1);
   });
 });

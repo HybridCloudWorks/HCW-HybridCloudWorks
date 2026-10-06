@@ -11,12 +11,16 @@
  *     rules to someday block it; here list/get responses actually strip
  *     `oauthToken` — writes accept it, reads never return it.
  *   - Every mcp_servers write passes the URL and key-name checks of
- *     ai/mcp-policy.js (ADR 0033, security finding).
+ *     ai/mcp-policy.js (ADR 0033, security finding), and since the 2026-10-06
+ *     review (AP-B1) the key-to-host binding: a shared integration key may
+ *     only be named on a server at its vendor's host, a write that moves
+ *     where a credential is sent needs `super_admin`, and every write here
+ *     leaves an `admin_audit_logs` row.
  *
  * Each handler body is a module-level function over `ctx` (guard, store, now,
  * aiConfigChanged); the factory at the bottom only wires them.
  */
-import { validateMcpApiKeyEnvVar, validateMcpUrl } from '../ai/mcp.js';
+import { validateMcpKeyBinding, validateMcpUrl } from '../ai/mcp.js';
 import { json, LIST_WINDOW, validBody } from '../http/admin-handler.js';
 
 /** Route-segment → container allowlist for the client-id config collections. */
@@ -45,11 +49,20 @@ const readableDoc = (container, doc) => (container === 'mcp_servers' ? stripOAut
  * server saved before the allowlist still goes through; the next Sync or
  * call refuses the bad field with the same sentence.
  */
-function mcpWriteError(fields) {
+function mcpWriteError(fields, existing = null) {
+  const touchesUrl = Object.prototype.hasOwnProperty.call(fields, 'url');
+  const touchesKey = Object.prototype.hasOwnProperty.call(fields, 'apiKeyEnvVar');
   try {
-    if (Object.prototype.hasOwnProperty.call(fields, 'url')) validateMcpUrl(fields.url);
-    if (Object.prototype.hasOwnProperty.call(fields, 'apiKeyEnvVar')) {
-      validateMcpApiKeyEnvVar(fields.apiKeyEnvVar);
+    if (touchesUrl) validateMcpUrl(fields.url);
+    // The key-to-host binding (AP-B1) is a property of the pair, so a PATCH
+    // that moves one half is checked against the stored other half: a URL
+    // change on a server holding a shared key, or a shared key placed on a
+    // server at the wrong host, is refused either way.
+    if (touchesUrl || touchesKey) {
+      validateMcpKeyBinding({
+        url: touchesUrl ? fields.url : existing?.url,
+        apiKeyEnvVar: touchesKey ? fields.apiKeyEnvVar : existing?.apiKeyEnvVar,
+      });
     }
   } catch (error) {
     return error.message;
@@ -58,8 +71,59 @@ function mcpWriteError(fields) {
 }
 
 /** The write checks for this container: the error sentence, or null. */
-const writeError = (container, fields) =>
-  container === 'mcp_servers' ? mcpWriteError(fields) : null;
+const writeError = (container, fields, existing = null) =>
+  container === 'mcp_servers' ? mcpWriteError(fields, existing) : null;
+
+/**
+ * Whether a write on `mcp_servers` moves where a credential is sent (AP-B1):
+ * a new server, a URL change, or a key-name change. Flipping `enabled`,
+ * renaming, reordering or storing an OAuth token on an existing server is
+ * not that. Writes that are need `super_admin`, the same role that seeds the
+ * keys themselves (admin-secrets.js), because routing a stored key is the
+ * other half of that decision.
+ */
+function movesCredentialRouting(container, fields, existing) {
+  if (container !== 'mcp_servers') return false;
+  if (!existing) return true;
+  const changed = (key) =>
+    Object.prototype.hasOwnProperty.call(fields, key) &&
+    String(fields[key] ?? '').trim() !== String(existing[key] ?? '').trim();
+  return changed('url') || changed('apiKeyEnvVar');
+}
+
+/** The `admin_audit_logs.action` every ai_providers / mcp_servers write records. */
+export const CONFIG_AUDIT_ACTION = 'ai_config_updated';
+
+/** The audit row for a config write: field names, and the routing values
+ * (a URL and a setting NAME, neither a secret) before and after. Best
+ * effort, like every audit writer here: the save has landed. */
+async function auditConfigWrite(ctx, context, { container, id, user, existing, fields, action }) {
+  try {
+    const routing = (doc) => ({ url: doc?.url ?? null, apiKeyEnvVar: doc?.apiKeyEnvVar ?? null });
+    await ctx.store.upsertDoc('admin_audit_logs', {
+      id: ctx.uuid(),
+      action: CONFIG_AUDIT_ACTION,
+      userId: user?.oid || user?.sub || null,
+      userName: user?.name || null,
+      userEmail: user?.email || user?.preferred_username || null,
+      timestamp: ctx.now().toISOString(),
+      details: {
+        collection: container,
+        documentId: id,
+        operation: action,
+        fields: Object.keys(fields || {}).filter(
+          (k) => !['oauthToken', 'oauthRefreshToken'].includes(k)
+        ),
+        before: existing ? routing(existing) : null,
+        after: action === 'delete' ? null : routing({ ...existing, ...fields }),
+      },
+    });
+  } catch (auditError) {
+    context.warn?.(
+      `${action} ${container}/${id} saved but the audit row failed: ${auditError?.message || auditError}`
+    );
+  }
+}
 
 /**
  * putConfig is a full replace, and reads never return `oauthToken`
@@ -87,22 +151,23 @@ function carryForwardTokens(doc, incoming, existing) {
  * the boolean into the stored document, where it would then shadow the real
  * value on the next read.
  */
-function putDocumentOf(container, body) {
+function putDocumentOf(container, body, existing = null) {
   const { hasOauthToken: _ignored, hasOauthRefreshToken: _ignored2, ...incoming } = body;
-  const problem = writeError(container, incoming);
+  const problem = writeError(container, incoming, existing);
   return problem ? { error: problem } : { incoming };
 }
 
-/** Route id and checked body of a PUT: `{ id, incoming }` or `{ error }` holding the response. */
-async function prepareConfigPut(container, request) {
+/** Route id, stored document and checked body of a PUT: `{ id, existing, incoming }` or `{ error }` holding the response. */
+async function prepareConfigPut(store, container, request) {
   const id = String(request.params.id || '').trim();
   if (!id) return { error: json(400, { error: 'id required' }) };
   const body = validBody(await request.json().catch(() => null));
   if (!body) return { error: json(400, { error: 'Body must be a JSON object' }) };
-  const checked = putDocumentOf(container, body);
+  const existing = await store.readDoc(container, id, id);
+  const checked = putDocumentOf(container, body, existing);
   return checked.error
     ? { error: json(400, { error: checked.error }) }
-    : { id, incoming: checked.incoming };
+    : { id, existing, incoming: checked.incoming };
 }
 
 /**
@@ -116,7 +181,7 @@ async function prepareConfigPut(container, request) {
  * real value — it is simply a stale copy of a secret's state, written into
  * the document, that a later revoke would not clear.
  */
-function patchUpdatesOf(container, body) {
+function patchUpdatesOf(container, body, existing = null) {
   const {
     id: _ignored,
     hasOauthToken: _readArtefact,
@@ -126,7 +191,7 @@ function patchUpdatesOf(container, body) {
   if (Object.keys(updates).length === 0) {
     return { error: 'Body must contain at least one updatable field' };
   }
-  const problem = writeError(container, updates);
+  const problem = writeError(container, updates, existing);
   return problem ? { error: problem } : { updates };
 }
 
@@ -140,10 +205,10 @@ async function prepareConfigPatch(store, container, request) {
   }
   const existing = await store.readDoc(container, id, id);
   if (!existing) return { error: json(404, { error: `${container} ${id} not found` }) };
-  const checked = patchUpdatesOf(container, body);
+  const checked = patchUpdatesOf(container, body, existing);
   return checked.error
     ? { error: json(400, { error: checked.error }) }
-    : { id, updates: checked.updates };
+    : { id, existing, updates: checked.updates };
 }
 
 /** GET /api/cms/{ai-providers|mcp-servers} — order asc; tokens stripped. */
@@ -171,11 +236,15 @@ async function putConfig(ctx, request, context) {
   const container = CONFIG_COLLECTIONS[request.params.collection];
   if (!container) return json(404, { error: 'Unknown collection' });
   try {
-    const prepared = await prepareConfigPut(container, request);
+    const prepared = await prepareConfigPut(ctx.store, container, request);
     if (prepared.error) return prepared.error;
-    const { id, incoming } = prepared;
+    const { id, existing, incoming } = prepared;
 
-    const existing = await ctx.store.readDoc(container, id, id);
+    if (movesCredentialRouting(container, incoming, existing)) {
+      const elevated = await ctx.guard.requireRole(request, 'super_admin');
+      if (elevated.error) return elevated.error;
+    }
+
     const nowIso = ctx.now().toISOString();
     const doc = {
       ...incoming,
@@ -186,6 +255,14 @@ async function putConfig(ctx, request, context) {
     if (container === 'mcp_servers') carryForwardTokens(doc, incoming, existing);
     await ctx.store.upsertDoc(container, doc);
     if (container === 'ai_providers') ctx.aiConfigChanged();
+    await auditConfigWrite(ctx, context, {
+      container,
+      id,
+      user: auth.user,
+      existing,
+      fields: incoming,
+      action: 'put',
+    });
     return json(200, { success: true, id, item: readableDoc(container, doc) });
   } catch (error) {
     context.error(`putConfig(${container}) failed:`, error);
@@ -202,11 +279,23 @@ async function patchConfig(ctx, request, context) {
   try {
     const prepared = await prepareConfigPatch(ctx.store, container, request);
     if (prepared.error) return prepared.error;
+    if (movesCredentialRouting(container, prepared.updates, prepared.existing)) {
+      const elevated = await ctx.guard.requireRole(request, 'super_admin');
+      if (elevated.error) return elevated.error;
+    }
     const updated = await ctx.store.patchDoc(container, prepared.id, {
       ...prepared.updates,
       updatedAt: ctx.now().toISOString(),
     });
     if (container === 'ai_providers') ctx.aiConfigChanged();
+    await auditConfigWrite(ctx, context, {
+      container,
+      id: prepared.id,
+      user: auth.user,
+      existing: prepared.existing,
+      fields: prepared.updates,
+      action: 'patch',
+    });
     return json(200, { success: true, item: readableDoc(container, updated) });
   } catch (error) {
     context.error(`patchConfig(${container}) failed:`, error);
@@ -223,8 +312,17 @@ async function deleteConfig(ctx, request, context) {
   try {
     const id = String(request.params.id || '').trim();
     if (!id) return json(400, { error: 'id required' });
+    const existing = await ctx.store.readDoc(container, id, id).catch(() => null);
     await ctx.store.deleteDoc(container, id);
     if (container === 'ai_providers') ctx.aiConfigChanged();
+    await auditConfigWrite(ctx, context, {
+      container,
+      id,
+      user: auth.user,
+      existing,
+      fields: {},
+      action: 'delete',
+    });
     return json(200, { success: true });
   } catch (error) {
     context.error(`deleteConfig(${container}) failed:`, error);

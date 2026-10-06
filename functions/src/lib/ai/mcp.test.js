@@ -5,6 +5,8 @@ import {
   resolveMcpAuthHeaders,
   validateMcpUrl,
   validateMcpApiKeyEnvVar,
+  validateMcpKeyBinding,
+  INTEGRATION_KEY_HOSTS,
   KNOWN_INTEGRATION_KEY_NAMES,
 } from './mcp.js';
 
@@ -81,9 +83,52 @@ describe('MCP secret and URL helpers', () => {
     expect(
       resolveMcpAuthHeaders({
         apiKeyEnvVar: 'FIRECRAWL_API_KEY',
+        url: 'https://mcp.firecrawl.dev/sse',
         env: { FIRECRAWL_API_KEY: 'fc' },
       })
     ).toEqual({ Authorization: 'Bearer fc' });
+  });
+
+  it('binds each shared integration key to its vendor host, and MCP_* keys to none (AP-B1)', () => {
+    // Every shared key has a binding, and every seeded host is in it.
+    for (const name of KNOWN_INTEGRATION_KEY_NAMES) {
+      expect(INTEGRATION_KEY_HOSTS[name].length).toBeGreaterThan(0);
+    }
+    expect(
+      validateMcpKeyBinding({ url: 'https://mcp.firecrawl.dev/sse', apiKeyEnvVar: 'FIRECRAWL_API_KEY' })
+    ).toBe('FIRECRAWL_API_KEY');
+    expect(
+      validateMcpKeyBinding({ url: 'https://MCP.Replicate.com/sse', apiKeyEnvVar: 'REPLICATE_API_KEY' })
+    ).toBe('REPLICATE_API_KEY');
+    expect(validateMcpKeyBinding({ url: 'http://localhost:8100', apiKeyEnvVar: 'VPS_API_TOKEN' })).toBe(
+      'VPS_API_TOKEN'
+    );
+    // The finding: a shared key named on a server at any other host.
+    expect(() =>
+      validateMcpKeyBinding({ url: 'https://attacker.example/mcp', apiKeyEnvVar: 'VPS_API_TOKEN' })
+    ).toThrow(/VPS_API_TOKEN may only be sent to localhost/);
+    expect(() =>
+      validateMcpKeyBinding({ url: 'https://firecrawl.dev.attacker.example/', apiKeyEnvVar: 'FIRECRAWL_API_KEY' })
+    ).toThrow(/may only be sent to mcp\.firecrawl\.dev/);
+    expect(() => validateMcpKeyBinding({ url: undefined, apiKeyEnvVar: 'REPLICATE_API_KEY' })).toThrow(
+      /may only be sent to/
+    );
+    // A per-server MCP_* secret and no key at all bind to no host.
+    expect(validateMcpKeyBinding({ url: 'https://anything.example/', apiKeyEnvVar: 'MCP_CUSTOM' })).toBe(
+      'MCP_CUSTOM'
+    );
+    expect(validateMcpKeyBinding({ url: 'https://anything.example/', apiKeyEnvVar: null })).toBeNull();
+  });
+
+  it('resolves no bearer for a shared key at an unbound host, or with no URL at all (AP-B1)', () => {
+    const env = { FIRECRAWL_API_KEY: 'fc', VPS_API_TOKEN: 'vps' };
+    expect(
+      resolveMcpAuthHeaders({ apiKeyEnvVar: 'VPS_API_TOKEN', url: 'https://attacker.example/', env })
+    ).toEqual({});
+    expect(resolveMcpAuthHeaders({ apiKeyEnvVar: 'FIRECRAWL_API_KEY', env })).toEqual({});
+    expect(
+      resolveMcpAuthHeaders({ apiKeyEnvVar: 'MCP_CUSTOM', url: 'https://anything.example/', env: { MCP_CUSTOM: 'k' } })
+    ).toEqual({ Authorization: 'Bearer k' });
   });
 
   it('prefers the stored OAuth token over the App Setting', () => {
@@ -168,6 +213,38 @@ describe('syncMcpTools', () => {
       lastTested: '2026-08-24T12:00:00.000Z',
       lastError: null,
     });
+  });
+
+  it('refuses to sync a server that names a shared key at an unbound host, without calling it (AP-B1)', async () => {
+    const server = {
+      id: 'rogue',
+      url: 'https://attacker.example/mcp',
+      transport: 'http',
+      apiKeyEnvVar: 'VPS_API_TOKEN',
+      enabled: true,
+    };
+    const store = makeStore(server);
+    const fetch = vi.fn();
+    const handlers = createMcpHandlers({
+      guard: allowGuard,
+      store,
+      env: { VPS_API_TOKEN: 'the-lab-token' },
+      fetch,
+      now: fixedNow,
+    });
+    const result = await handlers.syncMcpTools(request({ serverId: 'rogue' }), context);
+    const body = JSON.parse(result.body);
+    expect(body.ok).toBe(false);
+    expect(body.error).toMatch(/VPS_API_TOKEN may only be sent to/);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(result.body).not.toContain('the-lab-token');
+
+    const proxied = await handlers.mcpProxy(
+      request({ serverId: 'rogue', tool: 'anything', arguments: {} }),
+      context
+    );
+    expect(JSON.parse(proxied.body).ok).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('records a server-side error without exposing a credential', async () => {

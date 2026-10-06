@@ -36,6 +36,52 @@ export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
 ]);
 
 /**
+ * Where each shared integration key may be sent (estate review 2026-10-06,
+ * finding AP-B1). The allowlist above stopped an editor naming the Cosmos
+ * connection string, but it still let the three keys the seeded servers use
+ * be routed anywhere: save a server at `https://attacker.example/` with
+ * `apiKeyEnvVar: "VPS_API_TOKEN"`, press Sync, and the lab-host token
+ * arrives as a bearer. So each shared key is bound to the hosts its vendor
+ * actually serves from, and a server naming the key at any other host is
+ * refused at save time and again at call time. `MCP_*` settings are
+ * per-server secrets the owner creates for one server, so they bind to no
+ * host. `[::1]` is spelled as `URL.hostname` returns it.
+ */
+export const INTEGRATION_KEY_HOSTS = Object.freeze({
+  FIRECRAWL_API_KEY: Object.freeze(['mcp.firecrawl.dev', 'api.firecrawl.dev']),
+  REPLICATE_API_KEY: Object.freeze(['mcp.replicate.com', 'api.replicate.com']),
+  VPS_API_TOKEN: Object.freeze(['localhost', '127.0.0.1', '[::1]']),
+});
+
+/**
+ * The hostname of a URL, lower-cased, or null when it does not parse. Used
+ * for the binding check only; `validateMcpUrl` is the URL rule.
+ */
+function hostOf(url) {
+  try {
+    return new URL(String(url || '').trim()).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Refuse a shared integration key at a host it is not bound to. Returns the
+ * key name (or null for no key); throws with the binding in the message.
+ * A server with an `MCP_*` key, or no key, passes for any URL.
+ */
+export function validateMcpKeyBinding({ url, apiKeyEnvVar }) {
+  const keyName = validateMcpApiKeyEnvVar(apiKeyEnvVar);
+  const hosts = keyName ? INTEGRATION_KEY_HOSTS[keyName] : null;
+  if (!hosts) return keyName;
+  const host = hostOf(url);
+  if (host && hosts.includes(host)) return keyName;
+  throw new Error(
+    `${keyName} may only be sent to ${hosts.join(', ')}; "${host || String(url || '')}" is not one of them`
+  );
+}
+
+/**
  * Validate the name of the app setting a server reads its key from. Empty
  * (no key, or OAuth) is fine and returns null; a name outside the allowlist
  * throws with the rule in the message.
@@ -55,15 +101,21 @@ export function validateMcpApiKeyEnvVar(value) {
   );
 }
 
-/** Resolve OAuth first, then the configured Azure Function App setting. */
-export function resolveMcpAuthHeaders({ oauthToken, apiKeyEnvVar, env = process.env }) {
+/**
+ * Resolve OAuth first, then the configured Azure Function App setting. The
+ * server's `url` is part of the decision since AP-B1: a shared integration
+ * key resolves to no header unless the URL's host is one the key is bound
+ * to, so a document that slipped past save-time (written before the
+ * binding, or by hand) still sends nothing.
+ */
+export function resolveMcpAuthHeaders({ oauthToken, apiKeyEnvVar, url, env = process.env }) {
   const stored = typeof oauthToken === 'string' ? oauthToken.replace(/^﻿/, '').trim() : '';
   // A disallowed name resolves to no header, never to the setting it names:
   // the save-time check is the first line, this is the one that holds for a
   // document written before the allowlist existed.
   let keyName = null;
   try {
-    keyName = validateMcpApiKeyEnvVar(apiKeyEnvVar);
+    keyName = validateMcpKeyBinding({ url, apiKeyEnvVar });
   } catch {
     keyName = null;
   }
