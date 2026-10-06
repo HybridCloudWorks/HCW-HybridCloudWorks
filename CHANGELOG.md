@@ -19,6 +19,23 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Forge Studio Queue: one document per entry, so a favourites export
+  fits, and a remove on every row (owner, 2026-10-06).** The first cut kept
+  the whole queue in one `admin_config` document capped at 200 entries, and
+  the owner's first real import was a browser favourites export of several
+  hundred links. Entries are now documents of their own (`docType
+  forge_queue_item`, the same partition), the caps are 2,000 URLs per add
+  and 5,000 in the queue, and every edit, Save and job outcome is an
+  independent ETag-guarded write — no byte budget, no bulk-edit race with a
+  finishing job. An entry's id is its URL's hash, so the URL is the identity
+  and two adds (or an add and the migration) meeting on one URL is a 409
+  read as skipped; a Save claims the entry before writing its job, so two
+  Saves on one entry start one job. Mutations answer only the entries they
+  changed and the page merges them. The old document is migrated into
+  entries and emptied on the first read after deploy. On the Queue tab every row has its own ×, the
+  header gains Remove selected (n), and the detected list under From a URL
+  shows its first 200 rows and adds every one.
+
 - **Forge Studio: From a URL takes many URLs and .html files, and a Forge
   Studio Queue completes them singly or in bulk (owner request 2026-10-06).**
   The Source URL box accepts one URL or many (one per line, or a block of

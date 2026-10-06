@@ -6,7 +6,16 @@
  * brief rides on the job); "Save for later" applies them and stops there.
  */
 import React, { useMemo, useState } from 'react';
-import { CheckSquare, ExternalLink, Flame, Loader2, RefreshCw, Square, Trash2 } from 'lucide-react';
+import {
+  CheckSquare,
+  ExternalLink,
+  Flame,
+  Loader2,
+  RefreshCw,
+  Square,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -215,7 +224,7 @@ function QueueFields({ form, setField, many }) {
 }
 
 /** One row of the queue: its checkbox, URL, fields summary, status and the open link when forged. */
-function QueueRow({ entry, selected, onToggle, onOpenDocument }) {
+function QueueRow({ entry, selected, onToggle, onOpenDocument, onRemove, busy }) {
   const status = statusOf(entry);
   const Box = selected ? CheckSquare : Square;
   return (
@@ -261,6 +270,17 @@ function QueueRow({ entry, selected, onToggle, onOpenDocument }) {
         >
           Open <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
         </Button>
+      )}
+      {entry.status !== 'forging' && (
+        <button
+          type="button"
+          aria-label={`Remove ${shortUrl(entry.url)}`}
+          className="mt-0.5 text-destructive disabled:opacity-50"
+          onClick={() => onRemove(entry.id)}
+          disabled={busy}
+        >
+          <X className="h-4 w-4" aria-hidden="true" />
+        </button>
       )}
     </li>
   );
@@ -339,6 +359,14 @@ function QueueList({ queue, selection, onOpenDocument }) {
   const { items } = queue;
   const busy = Boolean(queue.busy);
   const forgingCount = items.filter((entry) => entry.status === 'forging').length;
+  const removable = selection.chosen.filter(editable).map((entry) => entry.id);
+  const removeOne = async (id) => {
+    await queue.remove([id]);
+  };
+  const removeSelected = async () => {
+    const gone = await queue.remove(removable);
+    if (gone) selection.clear();
+  };
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -382,6 +410,17 @@ function QueueList({ queue, selection, onOpenDocument }) {
             >
               Clear selection
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="destructive"
+              onClick={removeSelected}
+              disabled={busy || !removable.length}
+              className="gap-1"
+            >
+              <Trash2 className="h-3.5 w-3.5" aria-hidden="true" /> Remove selected
+              {removable.length ? ` (${removable.length})` : ''}
+            </Button>
           </div>
         </div>
       </CardHeader>
@@ -402,6 +441,8 @@ function QueueList({ queue, selection, onOpenDocument }) {
               selected={selection.selected.has(entry.id)}
               onToggle={selection.toggle}
               onOpenDocument={onOpenDocument}
+              onRemove={removeOne}
+              busy={busy}
             />
           ))}
         </ul>

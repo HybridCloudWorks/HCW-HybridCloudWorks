@@ -101,6 +101,8 @@ describe('mergeDetected', () => {
     const capped = mergeDetected([], many);
     expect(capped.urls).toHaveLength(MAX_URLS_PER_IMPORT);
     expect(capped.dropped).toBe(5);
+    // A favourites export of several hundred fits in one import.
+    expect(MAX_URLS_PER_IMPORT).toBeGreaterThanOrEqual(2000);
   });
 });
 
