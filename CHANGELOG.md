@@ -3854,6 +3854,15 @@ This project has not cut a tagged release; entries are grouped under
   script now prints them as `[ok]` and continues; `-ChooseTargets` brings the
   picker back, which then lists only `sub-*` subscriptions unless
   `-ShowAllSubscriptions` is given.
+- **`Set-TerraformRbacCondition.ps1` conditions every target subscription,
+  not the one the CLI happens to point at.** `az role assignment list
+  --all` reads one subscription, so run from the bootstrap (whose context is
+  the identity's home) it saw Management alone, printed "every row should
+  show a condition" over one row, and on 2026-10-07 left connectivity's RBAC
+  Administrator unconditioned. The script now takes
+  `-TargetSubscriptionIds`, reads each with `--subscription` stated,
+  defaults to the tenant's `sub-app-*`, `sub-plat-mgmt-*` and
+  `sub-plat-conn-*` subscriptions, and the bootstrap passes its own targets.
 - **`bootstrap-terraform-oidc.ps1` no longer replaces a federated credential
   whose subject differs without being told to.** On 2026-10-07 the
   `hcw-azure` workspace was found in HCP Terraform's `Default Project` while
