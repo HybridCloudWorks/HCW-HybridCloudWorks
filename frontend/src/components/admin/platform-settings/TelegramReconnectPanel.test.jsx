@@ -101,7 +101,8 @@ describe('TelegramReconnectPanel', () => {
     );
     expect(steps).toHaveLength(3);
     expect(steps[0].textContent).toMatch(/Scan the code/);
-    expect(steps[0].textContent).toMatch(/full-size button on the code's corner/);
+    expect(steps[0].textContent).toMatch(/Open full size icon on the code's corner/);
+    expect(steps[0].textContent).not.toMatch(/button/);
     expect(steps[0].textContent).not.toMatch(/small one/);
     expect(steps[1].textContent).toMatch(/press Start/);
     expect(steps[1].textContent).toMatch(/Unblock or Restart/);

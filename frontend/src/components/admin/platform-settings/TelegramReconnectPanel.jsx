@@ -122,8 +122,8 @@ export default function TelegramReconnectPanel({ children = null }) {
           <li>
             Scan the code with the phone&apos;s camera, or open{' '}
             <span className="font-medium text-foreground">{BOT_HANDLE}</span> by searching for it in
-            Telegram. On a laptop, the full-size button on the code&apos;s corner makes it easier to
-            scan.
+            Telegram. On a laptop, the Open full size icon on the code&apos;s corner makes it easier
+            to scan.
           </li>
           <li>
             In the bot&apos;s chat, press <span className="font-medium text-foreground">Start</span>
