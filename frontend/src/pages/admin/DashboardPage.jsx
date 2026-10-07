@@ -366,7 +366,13 @@ function DashboardExplore() {
           What each part of the menu is for. Hover any menu item for the same sentence.
         </p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {/* `grid-cols-1`, not the implicit column (AP-F1). An implicit track is
+          sized to its content, and each item's one-line, truncated description
+          made that the full sentence: on a Pixel 5 the cards were 675 px wide
+          in a 393 px column and the dashboard scrolled sideways. An explicit
+          column is `minmax(0, 1fr)`, so the description truncates as meant.
+          e2e/admin-authenticated.spec.js holds the line on a phone. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
         {groups.map((group) => (
           <Card key={group.id} className="h-full">
             <CardHeader className="pb-2">

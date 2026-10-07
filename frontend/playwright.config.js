@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { STUB_BUILD_ENV } from './e2e/fixtures/stub-build-env.js';
 
 /**
  * Read environment variables from file.
@@ -68,6 +69,11 @@ export default defineConfig({
     ? undefined
     : {
         command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
+        // The placeholder identity the signed-in admin spec runs against
+        // (e2e/fixtures/stub-build-env.js), the same values the CI e2e job's
+        // Build step sets. A local frontend/.env is read after these by
+        // vite.config.js and wins, so build without one for this suite.
+        env: { ...STUB_BUILD_ENV },
         url: 'http://127.0.0.1:4173',
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,

@@ -158,6 +158,54 @@ describe('onAuthStateChanged — the callback must always fire', () => {
   });
 });
 
+/**
+ * A silent token renewal is not a sign-in (QA-1, 2026-10-07). useAdminAuth
+ * re-runs the admin check on every callback, and the check acquires a token; so
+ * a callback per ACQUIRE_TOKEN_SUCCESS was a loop that, on any `unknown`
+ * answer, never ended. The browser journey (e2e/admin-authenticated.spec.js)
+ * measured about a thousand status calls in six seconds before this.
+ */
+describe('onAuthStateChanged — only a change of account is news', () => {
+  async function subscribed() {
+    const { onAuthStateChanged } = await freshModule();
+    const callback = vi.fn();
+    onAuthStateChanged(callback);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledTimes(1));
+    const [[onEvent]] = mocks.addEventCallback.mock.calls;
+    return { callback, onEvent };
+  }
+
+  it('stays quiet when a token is renewed for the account already signed in', async () => {
+    const { callback, onEvent } = await subscribed();
+    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: { account: { ...ACCOUNT } } });
+    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: { account: { ...ACCOUNT } } });
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a token that arrives for a different account', async () => {
+    const { callback, onEvent } = await subscribed();
+    const other = { localAccountId: 'oid-2', username: 'b@example.com', name: 'B' };
+    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: { account: other } });
+    expect(callback).toHaveBeenCalledTimes(2);
+    expect(callback.mock.calls[1][0]).toMatchObject({ uid: 'oid-2' });
+    expect(mocks.setActiveAccount).toHaveBeenLastCalledWith(other);
+  });
+
+  it('reports a sign-in even for the same account', async () => {
+    const { callback, onEvent } = await subscribed();
+    onEvent({ eventType: 'msal:loginSuccess', payload: { account: { ...ACCOUNT } } });
+    expect(callback).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports the first token when no account was active yet', async () => {
+    mocks.getActiveAccount.mockReturnValue(null);
+    mocks.getAllAccounts.mockReturnValue([]);
+    const { callback, onEvent } = await subscribed();
+    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: { account: ACCOUNT } });
+    expect(callback).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'oid-1' }));
+  });
+});
+
 describe('initializeAuth — a failure must not be memoised', () => {
   it('retries after a rejection instead of replaying it forever', async () => {
     mocks.initialize.mockRejectedValueOnce(new Error('transient'));

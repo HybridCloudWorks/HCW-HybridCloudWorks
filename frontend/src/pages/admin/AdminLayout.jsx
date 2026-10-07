@@ -25,6 +25,73 @@ export const ADMIN_TITLE_SUFFIX = 'ContentForge';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * The collapsed rail's label, shown beside the icon on hover and on focus
+ * (estate review 2026-10-06, AP-F2).
+ *
+ * Collapsed, the rail is icons only, and the label used to live in a `title`
+ * attribute: a tooltip that never appears on touch, appears to a keyboard user
+ * in no browser, and waits a second for a mouse. This is a visible label
+ * instead, carrying the text the link's name starts with.
+ *
+ * FIXED, NOT ABSOLUTE. The nav list is a vertical scroll container, and a
+ * scroll container clips sideways too (`overflow-y: auto` computes
+ * `overflow-x` to auto), so a label positioned against the link would be cut
+ * off at the rail's 64 px edge. Fixed positioning at the link's own box escapes
+ * the clip; nothing between here and the viewport is transformed, so the box
+ * is the viewport's. e2e/admin-authenticated.spec.js checks this in a real
+ * browser, which jsdom cannot.
+ *
+ * It sits flush against the link, its gap is padding inside it, and it is the
+ * link's own descendant, so moving the pointer onto it keeps it open (WCAG
+ * 1.4.13, hoverable). Escape dismisses it without moving focus (dismissible).
+ */
+function useRailLabel(enabled) {
+  const [state, setState] = useState({ hover: false, focus: false, top: 0, left: 0 });
+  const show = (key) => (event) => {
+    const box = event.currentTarget.getBoundingClientRect();
+    setState((s) => ({ ...s, [key]: true, top: box.top + box.height / 2, left: box.right }));
+  };
+  const hide = (key) => () => setState((s) => ({ ...s, [key]: false }));
+  const handlers = enabled
+    ? {
+        onMouseEnter: show('hover'),
+        onMouseLeave: hide('hover'),
+        onFocus: show('focus'),
+        onBlur: hide('focus'),
+        onKeyDown: (event) => {
+          if (event.key === 'Escape') setState((s) => ({ ...s, hover: false, focus: false }));
+        },
+      }
+    : {};
+  return {
+    handlers,
+    open: enabled && (state.hover || state.focus),
+    top: state.top,
+    left: state.left,
+  };
+}
+
+/**
+ * The label itself. `aria-hidden` because the link's name already carries this
+ * text (the name starts with it, WCAG 2.5.3); announcing it twice helps nobody.
+ */
+function RailLabel({ rail, children }) {
+  if (!rail.open) return null;
+  return (
+    <span
+      aria-hidden="true"
+      data-rail-label=""
+      className="fixed z-50 -translate-y-1/2 pl-2"
+      style={{ top: rail.top, left: rail.left }}
+    >
+      <span className="block whitespace-nowrap rounded-md border border-border bg-popover px-2.5 py-1.5 text-xs font-medium text-popover-foreground shadow-md">
+        {children}
+      </span>
+    </span>
+  );
+}
+
 function NavItem({
   to,
   icon: Icon,
@@ -38,9 +105,10 @@ function NavItem({
 }) {
   const count = badgeKey ? (counts?.[badgeKey] ?? 0) : 0;
   const shown = count > 99 ? '99+' : String(count);
-  // The description is the tooltip. Collapsed, the label joins it, because
-  // the icon alone is what a new user cannot read.
-  const tooltip = collapsed ? `${label} — ${description}` : description;
+  // The description is the tooltip. Collapsed, the label is no longer folded
+  // into it: it is shown beside the icon instead (RailLabel), because a title
+  // attribute is what a touch or keyboard user never sees (AP-F2).
+  const rail = useRailLabel(collapsed);
   // The count is part of the link's name ("Review Queue, 3 waiting"), not a
   // label on a span: a span with no role is not reliably announced (estate
   // review 2026-10-06, AP-F2), and the badge itself is then decoration.
@@ -50,10 +118,11 @@ function NavItem({
     <NavLink
       to={to}
       end={end}
-      title={tooltip}
+      title={description}
       aria-label={name}
       aria-description={description}
       onClick={onNavigate}
+      {...rail.handlers}
       className={({ isActive }) =>
         `group relative flex items-center rounded-lg text-sm font-medium transition-all duration-150 ${
           collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5'
@@ -86,6 +155,7 @@ function NavItem({
           {shown}
         </span>
       )}
+      <RailLabel rail={rail}>{label}</RailLabel>
     </NavLink>
   );
 }
@@ -124,6 +194,8 @@ function NavGroups({ counts, collapsed, onNavigate }) {
 
 /** Back to Site and Sign Out, as the rail and the drawer both render them. */
 function ShellFooter({ collapsed, onSignOut, onNavigate }) {
+  const backRail = useRailLabel(collapsed);
+  const signOutRail = useRailLabel(collapsed);
   return (
     <div className="border-t border-border px-2 py-3 space-y-0.5 shrink-0">
       <NavLink
@@ -131,23 +203,27 @@ function ShellFooter({ collapsed, onSignOut, onNavigate }) {
         title="Back to Site"
         aria-label="Back to Site"
         onClick={onNavigate}
+        {...backRail.handlers}
         className={`flex items-center rounded-lg text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${
           collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2'
         }`}
       >
         <ArrowLeft className="h-4 w-4 shrink-0" />
         {!collapsed && <span className="text-sm font-medium">Back to Site</span>}
+        <RailLabel rail={backRail}>Back to Site</RailLabel>
       </NavLink>
       <button
         onClick={onSignOut}
         title="Sign Out"
         aria-label="Sign Out"
+        {...signOutRail.handlers}
         className={`w-full flex items-center rounded-lg text-sm text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors ${
           collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2'
         }`}
       >
         <LogOut className="h-4 w-4 shrink-0" />
         {!collapsed && <span className="font-medium">Sign Out</span>}
+        <RailLabel rail={signOutRail}>Sign Out</RailLabel>
       </button>
     </div>
   );

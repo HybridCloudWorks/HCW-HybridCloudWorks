@@ -5,7 +5,7 @@
  * owner made on 2026-10-03, so the next edit to the array is a visible one.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 
 vi.mock('@/lib/api', () => ({
@@ -224,6 +224,52 @@ describe('the admin sidebar', () => {
     const queue = await screen.findByRole('link', { name: 'Review Queue, 3 waiting' });
     expect(within(queue).getByText('3')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('link', { name: 'Labs' })).toBeInTheDocument();
+  });
+
+  it('shows a collapsed item its label on hover and on focus, under the name it announces (AP-F2)', async () => {
+    stored['contentforge-sidebar-collapsed'] = 'true';
+    const { container } = renderAdmin();
+    const rail = within(container.querySelector('aside'));
+    const queue = await rail.findByRole('link', { name: 'Review Queue, 3 waiting' });
+
+    // Icon only until asked, and the label is no longer hidden in a title,
+    // which a touch or keyboard user never sees.
+    expect(within(queue).queryByText('Review Queue')).not.toBeInTheDocument();
+    expect(queue.getAttribute('title')).not.toContain('Review Queue');
+
+    // Hover: a visible label, whose text is where the link's name starts.
+    fireEvent.mouseEnter(queue);
+    const label = within(queue).getByText('Review Queue');
+    expect(label).toBeVisible();
+    expect(queue).toHaveAccessibleName(new RegExp(`^${label.textContent}`));
+    // Fixed, so the nav's scroll container cannot clip it at the rail's edge.
+    expect(label.closest('[data-rail-label]').className).toMatch(/(^|\s)fixed(\s|$)/);
+    fireEvent.mouseLeave(queue);
+    expect(within(queue).queryByText('Review Queue')).not.toBeInTheDocument();
+
+    // Focus: the same label, for a keyboard; Escape dismisses it in place.
+    act(() => queue.focus());
+    expect(within(queue).getByText('Review Queue')).toBeVisible();
+    fireEvent.keyDown(queue, { key: 'Escape' });
+    expect(within(queue).queryByText('Review Queue')).not.toBeInTheDocument();
+    expect(queue).toHaveFocus();
+    act(() => queue.blur());
+
+    // The footer's icon-only controls get the same treatment.
+    const signOut = rail.getByRole('button', { name: 'Sign Out' });
+    fireEvent.mouseEnter(signOut);
+    expect(within(signOut).getByText('Sign Out')).toBeVisible();
+  });
+
+  it('adds no hover label to the expanded rail, where the label is already text', async () => {
+    const { container } = renderAdmin();
+    const queue = await within(container.querySelector('aside')).findByRole('link', {
+      name: 'Review Queue, 3 waiting',
+    });
+    fireEvent.mouseEnter(queue);
+    act(() => queue.focus());
+    expect(container.querySelector('[data-rail-label]')).toBeNull();
+    expect(within(queue).getAllByText('Review Queue')).toHaveLength(1);
   });
 
   it('sets a document title for every admin route from the registry (AP-F3)', () => {

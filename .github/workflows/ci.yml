@@ -242,6 +242,13 @@ jobs:
   # two specs need the deployed site, which is the post-deploy probe the
   # review's PLAT-5 item describes for deploy-azure-frontend.yml. The
   # contrast spec (66 axe runs) stays out until its runtime is measured.
+  #
+  # The admin journey signed in (admin-authenticated.spec.js, 2026-10-07)
+  # runs here too, against the placeholder identity the Build step sets:
+  # the callback landing on the route asked for, the denial and
+  # configuration cards, one re-authentication on an expired token, and the
+  # Pixel 5 drawer on four admin routes. All three specs together took 100 s
+  # on one worker locally; the acceptance is a job under eight minutes.
   e2e:
     name: e2e (playwright, not required)
     runs-on: ubuntu-26.04
@@ -269,8 +276,23 @@ jobs:
         working-directory: frontend
         run: npx playwright install --with-deps chromium
 
+      # Placeholder identity and API settings, so the signed-in admin journey
+      # (e2e/admin-authenticated.spec.js) can run with no tenant and no
+      # secret: GUIDs no directory issued, an `api://` resource that does not
+      # exist, and the same-origin `/api` base. They are ordinary build
+      # variables, not a test switch; the spec's fixture answers
+      # login.microsoftonline.com and `/api` with page.route(), so nothing
+      # leaves the runner. This step and playwright.config.js's local
+      # webServer are the only places they are set (one list, in
+      # e2e/fixtures/stub-build-env.js, which this must match); no deploy
+      # builds with them. QA-1, AP-F1.
       - name: Build
         working-directory: frontend
+        env:
+          VITE_ENTRA_CLIENT_ID: e2e00000-0000-4000-8000-00000000c11e
+          VITE_ENTRA_TENANT_ID: e2e00000-0000-4000-8000-0000000071d0
+          VITE_ENTRA_API_SCOPE: api://e2e-hcw-api/access_as_admin
+          VITE_AZURE_FUNCTIONS_URL: /api
         run: npm run build
 
       # The preview server is started here rather than by Playwright's
@@ -297,7 +319,7 @@ jobs:
         env:
           TEST_BASE_URL: http://127.0.0.1:4173
           CI: 'true'
-        run: npx playwright test --project=chromium --project=mobile-chrome hydration.spec.js contentforge.spec.js
+        run: npx playwright test --project=chromium --project=mobile-chrome hydration.spec.js contentforge.spec.js admin-authenticated.spec.js
 
       - name: Upload the report on failure
         if: failure()
