@@ -57,7 +57,8 @@ This project has not cut a tagged release; entries are grouped under
   table in `docs/runbooks/cosmos-restore.md` (row format now defined there:
   date, RTO measured, RPO measured, who, applied runs, documents, notes),
   exits 1 when the newest dated row is more than 100 days old or there is
-  none and 2 when a Date cell is not a real past date, and new
+  none and 2 when a Date cell is not a real past date or a dated row
+  leaves any cell but Notes empty (a date alone is not a drill), and new
   `.github/workflows/check-drill-age.yml` runs it every Monday and opens or
   comments on one issue. The table is empty, so its first run fails on
   purpose. *LAB-6:* the `arc` role sets `guestconfiguration.enabled false`

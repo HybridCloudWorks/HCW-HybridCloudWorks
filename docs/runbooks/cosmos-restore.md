@@ -371,7 +371,10 @@ runs `scripts/check-drill-age.mjs` over this table and fails, opening an
 issue or commenting on the open one, when the newest dated row is more than
 100 days old or there is none: a quarter plus ten days' grace. A Date cell it
 cannot read as a real, past calendar date fails the check too, so a typo
-cannot pass as a drill. Run it locally the same way:
+cannot pass as a drill, and so does a dated row with any cell but Notes left
+empty or `—`: a date alone is not evidence of a drill. Keep the columns
+exactly as headed below; the check reads them by name. Run it locally the
+same way:
 
 ```powershell
 node scripts/check-drill-age.mjs

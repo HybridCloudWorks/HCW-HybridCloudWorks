@@ -676,20 +676,44 @@ function Get-SubscriptionSlot {
 # left alone.
 $assignableScopes = @($TargetSubscriptionIds | ForEach-Object { "/subscriptions/$_" } | Sort-Object)
 $wantedActions = @($grants.subscriptionRole.Actions | Sort-Object)
-$existingRole = @(@(Invoke-Az @(
-      'role', 'definition', 'list', '--name', $scopeRoleName, '--custom-role-only', 'true', '-o', 'json'
-    ) -AllowFailure) | Where-Object { $_ })
+# Every read in this step fails closed. Invoke-Az -AllowFailure returns $null
+# both for "nothing there" and for a call that failed (throttled, denied,
+# timed out), and reading the second as the first would create a duplicate
+# definition or a duplicate assignment (review of #984; T-703 is the same
+# trap in the elevation read-back above).
+function Stop-OnUnreadable {
+  param([string] $What)
+  if (Test-LastAzFailed) {
+    Stop-WithGuidance "Could not read $What, so this step stops rather than guess." @(
+      'Nothing after this point was changed. Check the sign-in and your rights',
+      '(az account show), then re-run; the script skips what already exists.'
+    )
+  }
+}
+
+$roleList = Invoke-Az @(
+  'role', 'definition', 'list', '--name', $scopeRoleName, '--custom-role-only', 'true', '-o', 'json'
+) -AllowFailure
+Stop-OnUnreadable -What "the custom role definitions named '$scopeRoleName'"
+$existingRole = @(@($roleList) | Where-Object { $_ })
 if ($existingRole.Count -gt 1) {
   Stop-WithGuidance "More than one custom role is named '$scopeRoleName'." @(
     'Delete the extra definition, then re-run. List them with:',
     "az role definition list --name `"$scopeRoleName`" --custom-role-only true -o table"
   )
 }
+# The whole permission shape, not only actions and scopes: one permission
+# block, no notActions, no data actions. A definition that drifted by hand
+# (an extra block, a data action) is rewritten, never reported as matching
+# (review of #984).
 $roleMatches = $false
 if ($existingRole.Count -eq 1) {
-  $heldActions = @($existingRole[0].permissions[0].actions | Sort-Object)
+  $permissions = @($existingRole[0].permissions)
+  $heldActions = @($permissions | ForEach-Object { $_.actions } | Where-Object { $_ } | Sort-Object)
+  $heldOther = @($permissions | ForEach-Object { @($_.notActions) + @($_.dataActions) + @($_.notDataActions) } | Where-Object { $_ })
   $heldScopes = @($existingRole[0].assignableScopes | Sort-Object)
-  $roleMatches = (($heldActions -join ',') -eq ($wantedActions -join ',')) -and
+  $roleMatches = ($permissions.Count -eq 1) -and ($heldOther.Count -eq 0) -and
+                 (($heldActions -join ',') -eq ($wantedActions -join ',')) -and
                  (($heldScopes -join ',').ToLowerInvariant() -eq ($assignableScopes -join ',').ToLowerInvariant())
 }
 if ($roleMatches) {
@@ -770,6 +794,7 @@ foreach ($id in $TargetSubscriptionIds) {
     'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $scope,
     '--subscription', $id, '-o', 'json'
   ) -AllowFailure
+  Stop-OnUnreadable -What "the identity's role assignments on $label"
   $heldNames = @($held | Where-Object { $_.scope -eq $scope } | ForEach-Object { $_.roleDefinitionName })
 
   foreach ($role in $subscriptionRoles) {
@@ -791,6 +816,7 @@ foreach ($id in $TargetSubscriptionIds) {
   foreach ($group in $groups) {
     $groupScope = "$scope/resourceGroups/$group"
     $exists = Invoke-Az @('group', 'exists', '-n', $group, '--subscription', $id) -AllowFailure
+    Stop-OnUnreadable -What "whether $label/$group exists"
     if ($exists -ne $true) {
       # Expected on a fresh estate before the first apply, and for a group
       # added to infra/ but not yet applied. Not an error: re-run after the
@@ -802,7 +828,8 @@ foreach ($id in $TargetSubscriptionIds) {
       'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $groupScope,
       '--subscription', $id, '-o', 'json'
     ) -AllowFailure
-    $groupHeldNames = @($groupHeld | Where-Object { $_.scope -eq $groupScope } | ForEach-Object { $_.roleDefinitionName })
+    Stop-OnUnreadable -What "the identity's role assignments on $label/$group"
+    $groupHeldNames =@($groupHeld | Where-Object { $_.scope -eq $groupScope } | ForEach-Object { $_.roleDefinitionName })
     if ($groupHeldNames -contains 'Contributor') {
       Write-Ok "$label/$group — Contributor"
     } elseif ($PSCmdlet.ShouldProcess("$IdentityName on $label/$group", 'assign Contributor at resource-group scope')) {

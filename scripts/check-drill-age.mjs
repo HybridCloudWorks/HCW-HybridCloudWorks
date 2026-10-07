@@ -15,10 +15,12 @@
  *   0  the newest drill is at most 100 days old (a quarter plus ten days);
  *   1  it is older, or there is no dated row at all;
  *   2  the table could not be read: no `## Drills` heading, no table under
- *      it with a `Date` column first, or a Date cell that is neither a
- *      placeholder (`—`) nor a real, past calendar date. A typo is "cannot
- *      evaluate", never "no drill" and never "fine", for the reason
- *      .claude/CLAUDE.md gives: a check that cannot run has not run.
+ *      it with the runbook's columns (COLUMNS below), a Date cell that is
+ *      neither a placeholder (`—`) nor a real, past calendar date, or a
+ *      dated row with an empty cell other than Notes. A date alone is not a
+ *      drill. A typo is "cannot evaluate", never "no drill" and never
+ *      "fine", for the reason .claude/CLAUDE.md gives: a check that cannot
+ *      run has not run.
  *
  * Fenced code blocks are skipped, so the example row the runbook shows
  * inside one is never read as a drill.
@@ -42,6 +44,14 @@ const DAY_MS = 86_400_000;
 
 /** Cells that mark a row as "no drill yet" rather than a drill. */
 const PLACEHOLDERS = new Set(['', '—', '–', '-']);
+
+/**
+ * The Drills table's columns, in order, as the runbook defines them. A dated
+ * row must fill every one but Notes: a date alone is not evidence of a drill,
+ * and the check must not go green on one (review of #984).
+ */
+export const COLUMNS = ['Date', 'RTO measured', 'RPO measured', 'Who', 'Applied runs', 'Documents', 'Notes'];
+const OPTIONAL = new Set(['Notes']);
 
 /** A table problem the script cannot evaluate past: exit 2. */
 export class DrillTableError extends Error {}
@@ -86,6 +96,10 @@ export function drillRows(markdown) {
   const section = drillSection(markdown);
   const header = section.findIndex((line, i) => isDateHeader(line, section[i + 1]));
   if (header === -1) throw new DrillTableError('no table with "Date" as its first column under "## Drills"');
+  const columns = cells(section[header]);
+  if (columns.join('|') !== COLUMNS.join('|')) {
+    throw new DrillTableError(`the Drills table's columns are "${columns.join(' | ')}", not "${COLUMNS.join(' | ')}"`);
+  }
 
   const rows = [];
   for (const line of section.slice(header + 2)) {
@@ -111,12 +125,12 @@ export function todayUtc(now = new Date()) {
   return now.toISOString().slice(0, 10);
 }
 
-/**
- * The verdict for a runbook's text on a given day.
- *
- * Returns { status: 'current' | 'stale' | 'none', newest, ageDays, drills }.
- * Throws DrillTableError for a table it cannot read.
- */
+/** What a dated row is missing: a wrong cell count, or an empty required cell. */
+export function missingEvidence(row) {
+  if (row.length !== COLUMNS.length) return [`${row.length} cell(s) where ${COLUMNS.length} are expected`];
+  return COLUMNS.filter((name, i) => !OPTIONAL.has(name) && PLACEHOLDERS.has(row[i])).map((name) => `no ${name}`);
+}
+
 /** A row's drill date, null for a placeholder; throws for anything else unreadable. */
 function rowDate({ line, cells: row }, today, todayMs) {
   const first = row[0] ?? '';
@@ -128,9 +142,19 @@ function rowDate({ line, cells: row }, today, todayMs) {
   if (ms > todayMs) {
     throw new DrillTableError(`Date cell "${first}" is after today (${today}): ${line.trim()}`);
   }
+  const missing = missingEvidence(row);
+  if (missing.length > 0) {
+    throw new DrillTableError(`the ${first} row is not a complete drill record (${missing.join(', ')}): ${line.trim()}`);
+  }
   return { text: first, ms };
 }
 
+/**
+ * The verdict for a runbook's text on a given day.
+ *
+ * Returns { status: 'current' | 'stale' | 'none', newest, ageDays, drills }.
+ * Throws DrillTableError for a table it cannot read.
+ */
 export function evaluate(markdown, { today, maxAgeDays = MAX_AGE_DAYS } = {}) {
   const todayMs = parseDate(today);
   if (todayMs === null) throw new DrillTableError(`--today "${today}" is not a YYYY-MM-DD date`);

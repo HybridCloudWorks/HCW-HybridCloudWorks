@@ -6,11 +6,13 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   DrillTableError,
+  COLUMNS,
   MAX_AGE_DAYS,
   RUNBOOK,
   cells,
   drillRows,
   evaluate,
+  missingEvidence,
   parseArgs,
   parseDate,
   renderMarkdown,
@@ -118,6 +120,27 @@ describe('the verdict', () => {
   it('honours a different limit', () => {
     const text = runbook(['| 2026-10-01 | 02:00:00 | 10 h | x | y | 1 | z |']);
     expect(evaluate(text, { today: '2026-10-07', maxAgeDays: 5 }).status).toBe('stale');
+  });
+
+  it('cannot evaluate a dated row without its evidence, so a date alone never turns the check green', () => {
+    expect(() => evaluate(runbook(['| 2026-10-07 |']), { today: '2026-10-07' })).toThrow(/1 cell\(s\) where 7/);
+    expect(() =>
+      evaluate(runbook(['| 2026-10-07 | — | 20 h | x | y | 1 | z |']), { today: '2026-10-07' })
+    ).toThrow(/no RTO measured/);
+    expect(() =>
+      evaluate(runbook(['| 2026-10-07 | 01:00:00 |  | | y | 1 | z |']), { today: '2026-10-07' })
+    ).toThrow(/no RPO measured, no Who/);
+    // Notes is the one cell a drill may leave empty.
+    expect(evaluate(runbook(['| 2026-10-07 | 01:00:00 | 20 h | x | y | 1 | |']), { today: '2026-10-07' }).status).toBe(
+      'current'
+    );
+    expect(missingEvidence(['2026-10-07', '01:00:00', '20 h', 'x', 'y', '1', ''])).toEqual([]);
+  });
+
+  it('refuses a Drills table whose columns are not the runbook\'s', () => {
+    const text = runbook([]).replace(HEADER, '| Date | Elapsed | Notes |').replace(SEPARATOR, '| --- | --- | --- |');
+    expect(() => evaluate(text, { today: '2026-10-07' })).toThrow(/columns are "Date \| Elapsed \| Notes"/);
+    expect(HEADER).toBe(`| ${COLUMNS.join(' | ')} |`);
   });
 
   it('cannot evaluate a typo or a future date, rather than reading either as no drill', () => {
