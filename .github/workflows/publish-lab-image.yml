@@ -50,8 +50,46 @@
 #            GitHub OIDC token, with no stored credential. Set out below the
 #            job's `if`, and in docs/runbooks/docker-hub-publishing.md.
 #
+#   propose-pins, pin-pull-request
+#            after every publish (#949). The images are consumed by digest,
+#            never by tag, so a publish changes nothing a learner runs until
+#            the two consumers pin it: IMAGES.hcwLabRunner in
+#            vps-agent/lib/capabilities.js and the workspace image in
+#            lab-host/coder/templates/hcw-lab/main.tf. `propose-pins`
+#            (`contents: read`) edits both with the digests `publish` read
+#            back from GHCR, after reading each again from the registry by
+#            tag (scripts/lab-pins-upstream.mjs --bump image-digests); a
+#            disagreement fails it. `pin-pull-request` opens, or updates, the
+#            one `chore/lab-pins-image-digests` pull request with the GitHub
+#            App token the other scheduled pull requests use
+#            (scripts/open-lab-pin-pr.mjs), from the `automation` environment.
+#
 #   workflow_dispatch from a branch runs `build` only. A `latest` pushed from a
 #   branch would silently replace what learners pull.
+#
+# THE WEEKLY REBUILD (#949, LAB-3). On the schedule, `build` builds both
+# targets from main as a push would, but without the layer cache (a cached
+# apt layer is last week's packages), and then compares the Debian
+# packages in the new `full` image with those in the `full` image the Coder
+# template pins. When they differ, `publish` pushes and attests the rebuild
+# (tagged <sha>-rebuilt-<date>, so the commit's own tag keeps naming the
+# commit's own build) and the pin pull request follows; when they do not,
+# nothing is published and the run says so.
+#
+#   What a rebuild changes on its own: the packages the `full` target installs
+#   with apt from Debian (curl, git, jq, libatomic1, procps and their
+#   dependencies), which Debian patches in place, so a rebuild picks up their
+#   security fixes. That is all.
+#
+#   What it cannot change on its own: the base image, its CPython and every
+#   package in it, because every FROM is pinned by digest in the commit, and
+#   an image built from a FROM the commit does not hold would carry a
+#   provenance attestation naming a commit that did not produce it; and every
+#   tool in lab-image/versions.env, each pinned with its checksum. Those move
+#   by pull request: lab-supply-chain.yml proposes the newest base digest
+#   weekly (`chore/lab-pins-image-base`), and merging that is a push here,
+#   which rebuilds on it. The runner target installs nothing with apt, so a
+#   rebuild of it alone changes nothing a scan would see.
 #
 # Path-filtered on purpose, unlike ci.yml: this workflow is not a required
 # context on the main ruleset (a path-filtered required context is never
@@ -72,6 +110,11 @@ name: Publish lab image
 
 on:
   workflow_dispatch:
+  schedule:
+    # Tuesdays 05:20 UTC: before lab-supply-chain.yml (06:45), off the hour
+    # and away from the other scheduled jobs. The weekly rebuild; see the
+    # header for what it can and cannot change.
+    - cron: '20 5 * * 2'
   pull_request:
     paths:
       - 'lab-image/**'
@@ -80,12 +123,16 @@ on:
       - 'vps-agent/lib/capabilities.js'
       - 'frontend/src/lib/landingZone/**'
       - '.github/workflows/publish-lab-image.yml'
+  # Not vps-agent/lib/capabilities.js on push (it is on pull_request): the
+  # digest pull request edits it, and republishing on that merge would publish
+  # new digests, open another pin pull request, and so on forever. A change
+  # there changes nothing in the image, the same reason vps-agent/index.js
+  # and the builder are pull_request only.
   push:
     branches: [main]
     paths:
       - 'lab-image/**'
       - 'vps-agent/lib/docker-runner.js'
-      - 'vps-agent/lib/capabilities.js'
       - '.github/workflows/publish-lab-image.yml'
 
 permissions:
@@ -114,6 +161,9 @@ jobs:
     runs-on: ubuntu-26.04
     permissions:
       contents: read
+    # Read by `publish` on the schedule only (the weekly rebuild).
+    outputs:
+      rebuild: ${{ steps.rebuild.outputs.rebuild }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -164,6 +214,10 @@ jobs:
       # a referrer, so the pushed image stays a plain single manifest whose
       # digest is the one `docker pull` reports — the value #675 pins.
       # `cache-to` fills the Actions cache the publish job rebuilds from.
+      # `no-cache` on the weekly schedule, here and in the publish job: the
+      # `full` target's apt layer has the same instruction every week, so a
+      # cached build would reuse last week's packages and the rebuild would
+      # never change anything.
       - name: Build runner
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
@@ -172,6 +226,7 @@ jobs:
           load: true
           push: false
           provenance: false
+          no-cache: ${{ github.event_name == 'schedule' }}
           tags: hcw-lab-runner:ci
           cache-from: type=gha,scope=hcw-lab
           cache-to: type=gha,scope=hcw-lab,mode=max
@@ -184,6 +239,7 @@ jobs:
           load: true
           push: false
           provenance: false
+          no-cache: ${{ github.event_name == 'schedule' }}
           tags: hcw-lab:ci
           cache-from: type=gha,scope=hcw-lab
           cache-to: type=gha,scope=hcw-lab,mode=max
@@ -203,6 +259,37 @@ jobs:
       - name: Sandbox check
         run: node lab-image/sandbox-check.mjs hcw-lab-runner:ci
 
+      # The weekly rebuild publishes only when it changes something a learner
+      # runs: the Debian packages of the `full` image the Coder template pins,
+      # against those of the one just built. Package and version, sorted; a
+      # difference is the reason to publish, and the diff goes to the summary.
+      # Any other trigger publishes as it always has, so this runs on the
+      # schedule only.
+      - name: Did the weekly rebuild change the full image's packages?
+        id: rebuild
+        if: github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+          pinned=$(grep -oE 'image_digest\s*=\s*"sha256:[0-9a-f]{64}"' lab-host/coder/templates/hcw-lab/main.tf | grep -oE 'sha256:[0-9a-f]{64}')
+          test -n "$pinned"
+          docker pull --quiet "${FULL_IMAGE}@${pinned}" > /dev/null
+          packages() { docker run --rm --network none --user 0 --entrypoint dpkg-query "$1" -W -f '${binary:Package} ${Version}\n' | LC_ALL=C sort; }
+          packages "${FULL_IMAGE}@${pinned}" > "${RUNNER_TEMP}/packages-pinned.txt"
+          packages hcw-lab:ci > "${RUNNER_TEMP}/packages-rebuilt.txt"
+          {
+            echo "## Weekly rebuild"
+            echo
+            echo "Debian packages of \`${FULL_IMAGE}@${pinned}\` (pinned in the Coder template) against this rebuild:"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          if diff -u "${RUNNER_TEMP}/packages-pinned.txt" "${RUNNER_TEMP}/packages-rebuilt.txt" > "${RUNNER_TEMP}/packages.diff"; then
+            echo "rebuild=false" >> "$GITHUB_OUTPUT"
+            echo "The same $(wc -l < "${RUNNER_TEMP}/packages-rebuilt.txt") packages at the same versions, so nothing is published this week." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "rebuild=true" >> "$GITHUB_OUTPUT"
+            { echo '```diff'; cat "${RUNNER_TEMP}/packages.diff"; echo '```'; echo; echo "Published below, and pinned by the digest pull request that follows."; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Image sizes
         run: |
           set -euo pipefail
@@ -218,7 +305,10 @@ jobs:
   publish:
     name: Publish to GHCR
     needs: build
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'schedule' && needs.build.outputs.rebuild == 'true')
     runs-on: ubuntu-26.04
     permissions:
       contents: read
@@ -231,8 +321,10 @@ jobs:
       # artifact-metadata:write permission has been included" and "Failed to
       # create storage record" (run 36508154993, 2026-09-29).
       artifact-metadata: write
-    # What publish-dockerhub copies. Digests are not secrets.
+    # What publish-dockerhub copies and propose-pins pins. Digests are not
+    # secrets.
     outputs:
+      tag: ${{ steps.tag.outputs.tag }}
       runner-digest: ${{ steps.push-runner.outputs.digest }}
       full-digest: ${{ steps.push-full.outputs.digest }}
     steps:
@@ -240,6 +332,19 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+
+      # The commit sha, as always; a weekly rebuild of an unchanged commit
+      # gets the date beside it, so `<sha>` keeps naming the bytes the commit's
+      # own publish pushed rather than moving to a rebuild of them.
+      - name: Choose the tag
+        id: tag
+        env:
+          SHA: ${{ github.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "schedule" ]; then tag="${SHA}-rebuilt-$(date -u +%Y%m%d)"; else tag="${SHA}"; fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -265,6 +370,7 @@ jobs:
           load: true
           push: false
           provenance: false
+          no-cache: ${{ github.event_name == 'schedule' }}
           cache-from: type=gha,scope=hcw-lab
           tags: hcw-lab-runner:ci
 
@@ -276,6 +382,7 @@ jobs:
           load: true
           push: false
           provenance: false
+          no-cache: ${{ github.event_name == 'schedule' }}
           cache-from: type=gha,scope=hcw-lab
           tags: hcw-lab:ci
 
@@ -300,28 +407,28 @@ jobs:
       - name: Push runner
         id: push-runner
         env:
-          SHA: ${{ github.sha }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          docker tag hcw-lab-runner:ci "${RUNNER_IMAGE}:${SHA}"
+          docker tag hcw-lab-runner:ci "${RUNNER_IMAGE}:${TAG}"
           docker tag hcw-lab-runner:ci "${RUNNER_IMAGE}:latest"
-          docker push "${RUNNER_IMAGE}:${SHA}"
+          docker push "${RUNNER_IMAGE}:${TAG}"
           docker push "${RUNNER_IMAGE}:latest"
-          digest="$(docker buildx imagetools inspect "${RUNNER_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          digest="$(docker buildx imagetools inspect "${RUNNER_IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')"
           test -n "$digest"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Push full
         id: push-full
         env:
-          SHA: ${{ github.sha }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
-          docker tag hcw-lab:ci "${FULL_IMAGE}:${SHA}"
+          docker tag hcw-lab:ci "${FULL_IMAGE}:${TAG}"
           docker tag hcw-lab:ci "${FULL_IMAGE}:latest"
-          docker push "${FULL_IMAGE}:${SHA}"
+          docker push "${FULL_IMAGE}:${TAG}"
           docker push "${FULL_IMAGE}:latest"
-          digest="$(docker buildx imagetools inspect "${FULL_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          digest="$(docker buildx imagetools inspect "${FULL_IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')"
           test -n "$digest"
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
@@ -343,7 +450,7 @@ jobs:
         env:
           RUNNER_DIGEST: ${{ steps.push-runner.outputs.digest }}
           FULL_DIGEST: ${{ steps.push-full.outputs.digest }}
-          SHA: ${{ github.sha }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
           set -euo pipefail
           {
@@ -352,8 +459,8 @@ jobs:
             echo "Pin these as \`<tag>@<digest>\`; the tag is documentation, the digest decides."
             echo
             echo '```'
-            echo "${RUNNER_IMAGE}:${SHA}@${RUNNER_DIGEST}"
-            echo "${FULL_IMAGE}:${SHA}@${FULL_DIGEST}"
+            echo "${RUNNER_IMAGE}:${TAG}@${RUNNER_DIGEST}"
+            echo "${FULL_IMAGE}:${TAG}@${FULL_DIGEST}"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -478,31 +585,31 @@ jobs:
       # anything is attested.
       - name: Copy runner to Docker Hub
         env:
-          SHA: ${{ github.sha }}
+          TAG: ${{ needs.publish.outputs.tag }}
         run: |
           set -euo pipefail
           docker buildx imagetools create --prefer-index=false \
-            --tag "${DOCKERHUB_RUNNER_IMAGE}:${SHA}" \
+            --tag "${DOCKERHUB_RUNNER_IMAGE}:${TAG}" \
             --tag "${DOCKERHUB_RUNNER_IMAGE}:latest" \
             "${RUNNER_IMAGE}@${RUNNER_DIGEST}"
-          got="$(docker buildx imagetools inspect "${DOCKERHUB_RUNNER_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          got="$(docker buildx imagetools inspect "${DOCKERHUB_RUNNER_IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')"
           if [ "$got" != "$RUNNER_DIGEST" ]; then
-            echo "::error::${DOCKERHUB_RUNNER_IMAGE}:${SHA} is ${got} on Docker Hub, but ${RUNNER_DIGEST} on GHCR."
+            echo "::error::${DOCKERHUB_RUNNER_IMAGE}:${TAG} is ${got} on Docker Hub, but ${RUNNER_DIGEST} on GHCR."
             exit 1
           fi
 
       - name: Copy full to Docker Hub
         env:
-          SHA: ${{ github.sha }}
+          TAG: ${{ needs.publish.outputs.tag }}
         run: |
           set -euo pipefail
           docker buildx imagetools create --prefer-index=false \
-            --tag "${DOCKERHUB_FULL_IMAGE}:${SHA}" \
+            --tag "${DOCKERHUB_FULL_IMAGE}:${TAG}" \
             --tag "${DOCKERHUB_FULL_IMAGE}:latest" \
             "${FULL_IMAGE}@${FULL_DIGEST}"
-          got="$(docker buildx imagetools inspect "${DOCKERHUB_FULL_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          got="$(docker buildx imagetools inspect "${DOCKERHUB_FULL_IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')"
           if [ "$got" != "$FULL_DIGEST" ]; then
-            echo "::error::${DOCKERHUB_FULL_IMAGE}:${SHA} is ${got} on Docker Hub, but ${FULL_DIGEST} on GHCR."
+            echo "::error::${DOCKERHUB_FULL_IMAGE}:${TAG} is ${got} on Docker Hub, but ${FULL_DIGEST} on GHCR."
             exit 1
           fi
 
@@ -528,7 +635,7 @@ jobs:
 
       - name: Published digests on Docker Hub
         env:
-          SHA: ${{ github.sha }}
+          TAG: ${{ needs.publish.outputs.tag }}
         run: |
           set -euo pipefail
           {
@@ -537,7 +644,158 @@ jobs:
             echo "The same digests as GHCR, copied by digest."
             echo
             echo '```'
-            echo "${DOCKERHUB_RUNNER_IMAGE}:${SHA}@${RUNNER_DIGEST}"
-            echo "${DOCKERHUB_FULL_IMAGE}:${SHA}@${FULL_DIGEST}"
+            echo "${DOCKERHUB_RUNNER_IMAGE}:${TAG}@${RUNNER_DIGEST}"
+            echo "${DOCKERHUB_FULL_IMAGE}:${TAG}@${FULL_DIGEST}"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The consumers' digest pins, after every publish (#949): see the header.
+  # Two jobs for the reason lab-supply-chain.yml gives: the one that reads
+  # the registry holds `contents: read`, and the one that holds the App token
+  # reads nothing from the network but GitHub's API.
+  propose-pins:
+    name: Plan the consumers' digest pins
+    needs: publish
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # checkout only — this job must never be able to push
+    outputs:
+      changed: ${{ steps.patch.outputs.changed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # No npm ci: the scripts import node: built-ins only.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      # Each digest is read again from GHCR by tag and must equal what
+      # `publish` read back after its push; a note here is a disagreement, and
+      # fails the job rather than pinning either value.
+      - name: Pin the published digests
+        env:
+          TAG: ${{ needs.publish.outputs.tag }}
+          RUNNER_DIGEST: ${{ needs.publish.outputs.runner-digest }}
+          FULL_DIGEST: ${{ needs.publish.outputs.full-digest }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lab-pins"
+          node scripts/lab-pins-upstream.mjs --bump image-digests \
+            --runner "${RUNNER_IMAGE}:${TAG}@${RUNNER_DIGEST}" \
+            --full "${FULL_IMAGE}:${TAG}@${FULL_DIGEST}" \
+            --evidence "${RUNNER_TEMP}/lab-pins/evidence-image-digests.md" \
+            --notes "${RUNNER_TEMP}/lab-pins/notes-image-digests.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ -s "${RUNNER_TEMP}/lab-pins/notes-image-digests.md" ]; then
+            echo "::error::A published digest could not be confirmed on GHCR; nothing is pinned. See the summary."
+            exit 1
+          fi
+
+      - name: The patch, over the two consumer files only
+        id: patch
+        run: |
+          set -euo pipefail
+          mapfile -t paths < <(node scripts/open-lab-pin-pr.mjs --paths image-digests)
+          git diff --binary -- "${paths[@]}" > "${RUNNER_TEMP}/lab-pins/image-digests.patch"
+          if [ -s "${RUNNER_TEMP}/lab-pins/image-digests.patch" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Both consumers already pin these digests." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload the patch and evidence
+        if: steps.patch.outputs.changed == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lab-image-digests
+          path: ${{ runner.temp }}/lab-pins/
+          retention-days: 7
+          if-no-files-found: error
+
+  pin-pull-request:
+    name: Open or update the digest pull request
+    needs: propose-pins
+    if: needs.propose-pins.outputs.changed == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # `automation`, as in the other PR-opening jobs: the weekly rebuild runs
+    # on a schedule, and an approval gate would leave it waiting.
+    environment: automation
+    permissions:
+      contents: read # checkout only — this job cannot push anywhere on its own
+    steps:
+      # `persist-credentials: false`, or the push authenticates as
+      # github-actions[bot] and is refused (publish-content-manifest.yml,
+      # run 34092896715).
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      - name: Download the patch
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: lab-image-digests
+          path: ${{ runner.temp }}/lab-pins
+
+      - name: Apply the patch
+        run: git apply "${RUNNER_TEMP}/lab-pins/image-digests.patch"
+
+      # Self-arming: before the App exists this reports that it opened
+      # nothing rather than failing every publish.
+      - name: Is the App configured?
+        id: app
+        env:
+          MANIFEST_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          MANIFEST_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MANIFEST_APP_PRIVATE_KEY}" ] && [ -n "${MANIFEST_APP_ID}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::New digests were published but the App is not configured, so no pull request was opened. Set the MANIFEST_APP_ID variable and the MANIFEST_APP_PRIVATE_KEY secret (T-726)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # No `npm ci`: the minter imports only node:crypto and node:url.
+      - name: Mint an App installation token
+        id: token
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GITHUB_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          token=$(node scripts/github-app-token.mjs)
+          # Masked BEFORE it is written anywhere, including to GITHUB_OUTPUT.
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      # Stages the two consumer files by name and refuses when anything else
+      # changed; one branch, one open pull request.
+      - name: Push the branch and open or update the pull request
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: node scripts/open-lab-pin-pr.mjs --set image-digests --evidence "${RUNNER_TEMP}/lab-pins/evidence-image-digests.md" --notes "${RUNNER_TEMP}/lab-pins/notes-image-digests.md"
+
+      # The token lives an hour; the work above takes seconds. `always()`, so
+      # a failed push still cleans up.
+      - name: Revoke the installation token
+        if: always() && steps.token.outputs.token != ''
+        env:
+          GITHUB_APP_TOKEN: ${{ steps.token.outputs.token }}
+        run: node scripts/github-app-token.mjs --revoke

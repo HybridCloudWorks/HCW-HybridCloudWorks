@@ -1,0 +1,21 @@
+# {{ ansible_managed }}
+#
+# The daily held-package report (LAB-3, #949): {{ hardening_held_report_script_path }}
+# logs one line per held package apt could upgrade. A failed run is a line from
+# the failure notifier (LAB-2), so a report that stopped working is not silence.
+[Unit]
+Description=Report held packages that apt could upgrade, to syslog
+Documentation=https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-host/ansible/roles/hardening
+After=apt-daily.service
+OnFailure=hcw-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+ExecStart={{ hardening_held_report_script_path }}
+# Reading the package lists and the dpkg database needs no privilege.
+DynamicUser=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+Nice=10

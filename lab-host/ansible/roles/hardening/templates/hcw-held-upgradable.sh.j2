@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# {{ ansible_managed }}
+#
+# Which held packages could move? (estate review 2026-10-06, LAB-3; #949)
+#
+# Docker Engine, containerd (which carries runc), buildx, compose, Node.js
+# and the Arc agent are pinned and held by the roles that install them, so
+# unattended-upgrades never moves them and a fix for any of them waits for a
+# pin bump and a bootstrap.sh run. This says, once a day, which of them the
+# host's own package lists offer something newer for: one line per held
+# package with an upgrade waiting, to the daemon facility at warning, which
+# the Arc data collection rule ships to Log Analytics; and one line at notice
+# when there is none, which stays on the host
+# (journalctl -t {{ hardening_held_report_tag }}).
+#
+# It reads, it changes nothing: `apt list --upgradable` reads the lists that
+# apt-daily.timer refreshes, and the age of those lists is in the notice line.
+# Nothing here updates them, so this never contends with unattended-upgrades
+# for apt's locks. What to do about a line is in docs/runbooks/labs-host.md,
+# "Runtime advisories". A failure of apt-mark or apt ends the run non-zero,
+# and the unit's OnFailure= reports that.
+set -euo pipefail
+
+tag='{{ hardening_held_report_tag }}'
+{% raw %}
+say() { logger -t "${tag}" -p "daemon.$1" -- "$2"; }
+
+held_text="$(apt-mark showhold | LC_ALL=C sort -u)"
+held=()
+if [ -n "${held_text}" ]; then mapfile -t held <<< "${held_text}"; fi
+
+# `name/suite candidate arch [upgradable from: installed]`, one per package.
+upgradable="$(LC_ALL=C apt list --upgradable 2> /dev/null)"
+
+lists='unknown'
+newest_list="$(find /var/lib/apt/lists -maxdepth 1 -name '*InRelease' -printf '%T@ %p\n' 2> /dev/null | LC_ALL=C sort -n | tail -n 1 | cut -d' ' -f2- || true)"
+if [ -n "${newest_list}" ]; then lists="$(date -u -r "${newest_list}" +%Y-%m-%dT%H:%MZ)"; fi
+
+reported=0
+for package in "${held[@]}"; do
+  line="$(awk -F/ -v p="${package}" '$1 == p { print; exit }' <<< "${upgradable}")"
+  [ -n "${line}" ] || continue
+  candidate="$(awk '{ print $2 }' <<< "${line}")"
+  installed="$(sed -n 's/.*\[upgradable from: \(.*\)\]$/\1/p' <<< "${line}")"
+  say warning "held package ${package} is upgradable: installed ${installed:-unknown}, candidate ${candidate}. It moves only by a pin bump and a bootstrap.sh run (docs/runbooks/labs-host.md, Runtime advisories)."
+  reported=$((reported + 1))
+done
+
+if [ "${reported}" -eq 0 ]; then
+  say notice "no held package is upgradable: ${#held[@]} held (${held[*]:-none}); package lists from ${lists}"
+fi
+{% endraw %}

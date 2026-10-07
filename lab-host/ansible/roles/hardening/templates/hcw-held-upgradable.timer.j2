@@ -1,0 +1,13 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Run hcw-held-upgradable.service daily
+
+[Timer]
+OnCalendar={{ hardening_held_report_on_calendar }}
+# A day the host was off reports at the next boot instead of being skipped.
+Persistent=true
+RandomizedDelaySec=15m
+Unit=hcw-held-upgradable.service
+
+[Install]
+WantedBy=timers.target

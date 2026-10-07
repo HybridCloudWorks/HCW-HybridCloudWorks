@@ -486,7 +486,17 @@ and attests. Where each sum comes from:
   Update `BASE_IMAGE`, `BASE_DIGEST`, `BASE_PYTHON_VERSION` and every
   external `FROM` line in the Dockerfile together; the sandbox template's
   base is `SANDBOX_BASE_IMAGE` / `SANDBOX_BASE_DIGEST` and its one `FROM`
-  line, by the same method.
+  line, by the same method. This is automated within the release line
+  (#949): every Tuesday `.github/workflows/lab-supply-chain.yml` runs
+  `node scripts/lab-pins-upstream.mjs --bump image-base`, which reads the
+  line tag's digest twice (the registry, its bytes hashed, and the Docker
+  Hub API), takes the CPython release from the image config, requires the
+  patch tag to resolve to the same digest, and opens or updates the
+  `chore/lab-pins-image-base` pull request with all four edits and that
+  evidence. A new minor line (3.15) stays a hand bump, governed by
+  `scripts/version-floors.json`. Merging it publishes from `main`, and the
+  publish opens the `chore/lab-pins-image-digests` pull request for the
+  consumers.
 
 The provider mirror and the vendored tree are rebuilt from scratch on every
 build (neither is cached between versions), so a provider bump is a version
