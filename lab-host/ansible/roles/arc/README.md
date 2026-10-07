@@ -67,6 +67,17 @@ With `arc_enabled: true`:
 6. Reads `azcmagent show --json` again and fails unless it reports
    `Connected`. The success line reads `Connected to Azure Arc as
    arcs-lab-hybrid-prod-cus-01 in rg-lab-hybrid-prod-cus.`
+7. Locks the agent down (estate review 2026-10-06, LAB-6; ADR 0032,
+   amendments of 2026-10-06 and 2026-10-07): the extension allowlist is
+   `arc_extensions_allowlist` alone (the Azure Monitor Agent), incoming
+   connections through Arc are off, and guest configuration is off. Each
+   setting is read with `azcmagent config get` and written with `config
+   set` only when it differs, so a second run reports nothing changed.
+   These settings live on the host and cannot be changed from Azure, which
+   is the point: a Contributor on the resource group can no longer push an
+   extension or a Run Command, and a custom machine configuration policy
+   cannot rewrite them. Read back on the host with `sudo
+   /opt/azcmagent/bin/azcmagent config list`.
 
 What it does **not** do: install the Azure Monitor Agent, or associate the
 data collection rule. Both are Azure-side operations on the machine resource,
@@ -139,7 +150,8 @@ None. The agent's services are started by its package and by `connect`.
 ## Check mode
 
 Safe. The status read runs in check mode because it is read-only; connect
-and the temporary file are skipped.
+and the temporary file are skipped, and so are the lockdown reads and writes
+in step 7.
 
 ## Validated
 

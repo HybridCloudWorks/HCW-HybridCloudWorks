@@ -1,0 +1,50 @@
+{
+  "subscriptionRole": {
+    "Name": "HCW Terraform Subscription Scope",
+    "IsCustom": true,
+    "Description": "What the HCP Terraform run identity (id-plat-terraform-prod-cus-01) must do at subscription scope and nothing else: create and update the resource groups infra/ declares, keep the two subscription budgets, and register the resource providers in var.azure_resource_providers. No resourceGroups/delete: at subscription scope that verb deletes ANY resource group and everything in it, which is the blast radius scoping Contributor to the managed groups removes. Everything inside a group comes from Contributor on that group. Created, scoped and assigned by scripts/bootstrap-terraform-oidc.ps1 (estate review 2026-10-06, SEC-1).",
+    "Actions": [
+      "Microsoft.Resources/subscriptions/read",
+      "Microsoft.Resources/subscriptions/providers/read",
+      "Microsoft.Resources/subscriptions/operationresults/read",
+      "Microsoft.Resources/subscriptions/resourceGroups/read",
+      "Microsoft.Resources/subscriptions/resourceGroups/write",
+      "Microsoft.Consumption/budgets/read",
+      "Microsoft.Consumption/budgets/write",
+      "Microsoft.Consumption/budgets/delete",
+      "Microsoft.App/register/action",
+      "Microsoft.Compute/register/action",
+      "Microsoft.DocumentDB/register/action",
+      "Microsoft.GuestConfiguration/register/action",
+      "Microsoft.HybridCompute/register/action",
+      "Microsoft.HybridConnectivity/register/action",
+      "Microsoft.Insights/register/action",
+      "Microsoft.KeyVault/register/action",
+      "Microsoft.ManagedIdentity/register/action",
+      "Microsoft.Network/register/action",
+      "Microsoft.OperationalInsights/register/action",
+      "Microsoft.Storage/register/action",
+      "Microsoft.Web/register/action"
+    ],
+    "NotActions": [],
+    "DataActions": [],
+    "NotDataActions": []
+  },
+  "resourceGroups": {
+    "app": [
+      "rg-ai-site-prod-cus",
+      "rg-conn-site-prod-cus",
+      "rg-db-site-prod-cus",
+      "rg-lab-hybrid-prod-cus",
+      "rg-sec-site-prod-cus",
+      "rg-stor-site-prod-cus",
+      "rg-web-site-prod-cus"
+    ],
+    "mgmt": [
+      "rg-mgmt-plat-prod-cus"
+    ],
+    "conn": [
+      "rg-conn-hub-prod-cus"
+    ]
+  }
+}

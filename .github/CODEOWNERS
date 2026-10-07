@@ -2,6 +2,12 @@
 # Branch protection should require code-owner review for these paths.
 # Replace the individual owner with a GitHub team (e.g. @HybridCloudWorks/platform)
 # once org teams exist.
+#
+# Requiring code-owner review in the Default ruleset (20680114) is the
+# owner's switch, not this file's (estate review 2026-10-06, SEC-3). Until a
+# second reviewer exists, a person or a GitHub App, turning it on blocks
+# every pull request: the default line below makes every file owned, and
+# GitHub never counts an author's own approval.
 
 # Default: repository owner.
 * @saulpatinojr
@@ -9,7 +15,28 @@
 # Infrastructure as Code — production platform. Every change here is a
 # potential production change; require infra review.
 /infra/ @saulpatinojr
+/infra-lab/ @saulpatinojr
 /.github/workflows/ @saulpatinojr
+
+# The Terraform run identity's grants and its role-assignment condition
+# (SEC-1). These run as the owner, outside Terraform, and decide what every
+# plan and apply may do.
+/scripts/bootstrap-terraform-oidc.ps1 @saulpatinojr
+/scripts/Set-TerraformRbacCondition.ps1 @saulpatinojr
+/scripts/terraform-identity-grants.json @saulpatinojr
+
+# Authentication and authorisation: token verification, role gates, CORS,
+# the admin bootstrap route, and the browser's sign-in configuration.
+/functions/src/lib/auth/ @saulpatinojr
+/functions/src/lib/admin-identity.js @saulpatinojr
+/functions/src/functions/admin-identity-http.js @saulpatinojr
+/frontend/src/hooks/useAdminAuth.js @saulpatinojr
+/frontend/src/lib/msalConfig.js @saulpatinojr
+
+# The lab host and its agent. Code here runs as root, or with the Docker
+# daemon, which is root, on the host that runs untrusted learner workloads.
+/lab-host/ @saulpatinojr
+/vps-agent/ @saulpatinojr
 
 # Repository policy and structure enforcement.
 /scripts/validate-repository-structure.ps1 @saulpatinojr

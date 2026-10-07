@@ -193,8 +193,13 @@
 # control plane, bypassing sshd. The allowlist admits the one extension this
 # estate installs (the Azure Monitor Agent, docs/runbooks/labs-host.md), and
 # incoming connections (SSH over Arc, Windows Admin Center) are off: the
-# owner reaches the host over sshd with a key. Each setting is read first and
-# written only when it differs, so the play reports changed truthfully.
+# owner reaches the host over sshd with a key. Guest configuration is off
+# too (owner decision 2026-10-07, ADR 0032 amendment of that date):
+# Microsoft's locked-down-machine guidance disables it so a custom machine
+# configuration policy cannot rewrite the agent settings above, and it
+# avoids the per-server machine-configuration charge on an Arc server. Each
+# setting is read first and written only when it differs, so the play
+# reports changed truthfully.
 - name: Read the Arc agent's extension allowlist
   ansible.builtin.command:
     argv:
@@ -217,6 +222,17 @@
   changed_when: false
   when: not ansible_check_mode
 
+- name: Read whether guest configuration is enabled on the Arc agent
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - config
+      - get
+      - guestconfiguration.enabled
+  register: arc_guestconfig_get
+  changed_when: false
+  when: not ansible_check_mode
+
 # `config get` prints `<key> : <value>` (the same layout as `config list`)
 # or the bare value, depending on the agent version. The first output line
 # is reduced to the value, and a list value to its sorted entries with brackets, quotes and
@@ -226,7 +242,7 @@
 # test here would have accepted it; review of #909.) The first version read
 # `config list --json` and assumed a list of name/value objects, which it is
 # not, and the play stopped here on the owner's first re-run (2026-10-06).
-- name: Reduce the two readings to comparable values
+- name: Reduce the three readings to comparable values
   ansible.builtin.set_fact:
     arc_allowlist_current: >-
       {{ ((arc_allowlist_get.stdout_lines | first | default('')) | regex_replace('^[^:]*:', '')
@@ -237,6 +253,8 @@
          | reject('eq', '') | sort }}
     arc_incoming_current: >-
       {{ (arc_incoming_get.stdout_lines | first | default('')) | regex_replace('^[^:]*:', '') | trim | lower }}
+    arc_guestconfig_current: >-
+      {{ (arc_guestconfig_get.stdout_lines | first | default('')) | regex_replace('^[^:]*:', '') | trim | lower }}
   when: not ansible_check_mode
 
 - name: Allow only the Azure Monitor Agent extension
@@ -265,3 +283,16 @@
   when:
     - not ansible_check_mode
     - arc_incoming_current != 'false'
+
+- name: Turn off guest configuration on the Arc agent
+  ansible.builtin.command:
+    argv:
+      - "{{ arc_azcmagent_path }}"
+      - config
+      - set
+      - guestconfiguration.enabled
+      - "false"
+  changed_when: true
+  when:
+    - not ansible_check_mode
+    - arc_guestconfig_current != 'false'

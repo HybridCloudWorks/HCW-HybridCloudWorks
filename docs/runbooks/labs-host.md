@@ -1161,6 +1161,13 @@ policy assignment shows a compliance state"; and the labs page reads the
 machine's compliance. The script prints the variable whenever the
 assignment is missing and the run identity can write it.
 
+*2026-10-07:* guest configuration is now off on the Arc agent (owner
+decision, ADR 0032 amendment of that date; the `arc` role sets it), so the
+assignment has no agent on the host to evaluate it and cannot produce a
+compliance state. The answer above stands as written until the owner
+decides on #952 whether to keep the switch, remove the assignment, or turn
+guest configuration back on.
+
 **What success looks like.** The run ends with the two variables, the plan
 to expect and the `-Connect` line, then `Changed:` naming what it did, and
 exits 0. A second run changes nothing and says `No changes:`. If

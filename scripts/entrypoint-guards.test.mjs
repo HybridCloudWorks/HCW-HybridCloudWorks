@@ -77,6 +77,15 @@ describe('entry-point guards fire when the script is invoked directly', () => {
     expect(bad.stderr).toContain('Unknown argument: --bogus');
   });
 
+  it('check-drill-age.mjs prints usage for --help and exits 0, and 2 for an unknown flag', () => {
+    const help = run('check-drill-age.mjs', ['--help'], process.env);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain('Usage: node scripts/check-drill-age.mjs');
+    const bad = run('check-drill-age.mjs', ['--bogus'], process.env);
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toContain('Unknown argument: --bogus');
+  });
+
   it('build-content-manifest.mjs fails loudly without FUNCTION_ORIGIN', () => {
     const env = { ...process.env };
     delete env.FUNCTION_ORIGIN;

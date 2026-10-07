@@ -23,9 +23,9 @@
 
       roleAssignments/write is allowed unless the role being assigned is
         Owner, User Access Administrator, Role Based Access Control
-        Administrator, Key Vault Administrator, Key Vault Data Access
-        Administrator, Key Vault Secrets Officer, Key Vault Crypto Officer
-        or Key Vault Certificates Officer
+        Administrator, Contributor, Key Vault Administrator, Key Vault Data
+        Access Administrator, Key Vault Secrets Officer, Key Vault Crypto
+        Officer or Key Vault Certificates Officer
       — with one exception: Key Vault Secrets Officer may be assigned to a
         USER principal, which is the admin_object_ids seeding window in
         infra/keyvault.tf (a named human, for the minutes of a seed). It may
@@ -40,7 +40,17 @@
     custom HCW roles, Crypto Service Encryption User, the Storage data roles,
     Website Contributor, Reader, Log Analytics Reader, Monitoring Reader,
     Cognitive Services OpenAI User, Azure Connected Machine Onboarding, and
-    the seeding grant above. Nothing in infra/ assigns a denied role.
+    the seeding grant above. Nothing in infra/ assigns a denied role, and
+    scripts/terraform-identity-grants.test.mjs fails the build if a
+    role_definition_name in infra/ ever names one.
+
+    Contributor joined the list on 2026-10-07 (SEC-1, second half). The
+    bootstrap now grants Contributor on each resource group infra/ declares
+    and, once its second step lands, no longer on the subscription. Without
+    Contributor here a run could assign the subscription-wide grant straight
+    back to itself, or to an identity it controls, and the scoping would be
+    one role assignment deep. infra/ assigns narrower built-ins only
+    (Website Contributor, the Storage roles), never plain Contributor.
 
     Idempotent: an assignment that already carries exactly this condition is
     reported and left alone. One that carries none, or a different one, is
@@ -98,6 +108,7 @@ $DeniedOnWrite = @(
   'Owner',
   'User Access Administrator',
   'Role Based Access Control Administrator',
+  'Contributor',
   'Key Vault Administrator',
   'Key Vault Data Access Administrator',
   'Key Vault Secrets Officer',
@@ -205,21 +216,26 @@ function Get-RbacAdminAssignments {
 
 $assignments = Get-RbacAdminAssignments -Principal $PrincipalId
 
-# Recovery path: the bootstrap grants Contributor and RBAC Administrator at
-# the same subscription scopes, so a Contributor scope with no RBAC
-# Administrator beside it is a half-finished run (a delete that was not
-# followed by its create). Re-create there, with the condition, rather than
-# stopping on "run bootstrap first".
+# Recovery path: the bootstrap grants RBAC Administrator at the same
+# subscription scopes as its other subscription-scope grants, so one of those
+# with no RBAC Administrator beside it is a half-finished run (a delete that
+# was not followed by its create). Re-create there, with the condition,
+# rather than stopping on "run bootstrap first". The marker is subscription
+# Contributor until SEC-1's second step removes it, and the custom
+# "HCW Terraform Subscription Scope" role (scripts/terraform-identity-grants.json)
+# from 2026-10-07 on, so the path keeps working on both sides of that step.
+$MarkerRoles = @('Contributor', 'HCW Terraform Subscription Scope')
 $contributorScopes = @(
   Invoke-AzJson @('role', 'assignment', 'list', '--assignee', $PrincipalId, '--all', '-o', 'json') |
-    Where-Object { $_.roleDefinitionName -eq 'Contributor' -and $_.scope -match '^/subscriptions/[^/]+$' } |
-    ForEach-Object { $_.scope }
+    Where-Object { $MarkerRoles -contains $_.roleDefinitionName -and $_.scope -match '^/subscriptions/[^/]+$' } |
+    ForEach-Object { $_.scope } |
+    Select-Object -Unique
 )
 $heldScopes = @($assignments | ForEach-Object { $_.scope })
 foreach ($scope in $contributorScopes) {
   if ($heldScopes -contains $scope) { continue }
-  if (-not $PSCmdlet.ShouldProcess("$RoleName on $scope (missing beside Contributor)", 'create with the condition')) {
-    Write-Host "Would create $scope (missing beside Contributor)"
+  if (-not $PSCmdlet.ShouldProcess("$RoleName on $scope (missing beside the bootstrap's other subscription grants)", 'create with the condition')) {
+    Write-Host "Would create $scope (missing beside the bootstrap's other subscription grants)"
     continue
   }
   Invoke-AzJson @(
@@ -232,10 +248,10 @@ foreach ($scope in $contributorScopes) {
     '--condition', $condition,
     '-o', 'json'
   ) | Out-Null
-  Write-Host "created     $scope (was missing beside Contributor)"
+  Write-Host "created     $scope (was missing beside the bootstrap's other subscription grants)"
 }
 if ($assignments.Count -eq 0 -and $contributorScopes.Count -eq 0) {
-  throw "The identity holds no '$RoleName' and no subscription-scope Contributor assignment. Run scripts/bootstrap-terraform-oidc.ps1 first."
+  throw "The identity holds no '$RoleName' and no subscription-scope Contributor or 'HCW Terraform Subscription Scope' assignment. Run scripts/bootstrap-terraform-oidc.ps1 first."
 }
 
 foreach ($a in $assignments) {
