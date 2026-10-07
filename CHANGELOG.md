@@ -70,6 +70,51 @@ This project has not cut a tagged release; entries are grouped under
   script, then a plan-and-apply in `hcw-azure` showing only the permanent
   diff; the three GitHub settings pages; `bootstrap.sh` on the lab host and
   `azcmagent config list`; the drill.
+- **The admin journey, signed in, in a browser on every pull request, with no
+  tenant and no secret (estate review 2026-10-06, findings QA-1, AP-F1,
+  AP-F2).** `e2e/fixtures/entra.js` is a credential-free identity: the
+  production bundle, built with placeholder settings (GUIDs no directory
+  issued, an `api://` scope that does not exist, the same-origin `/api`
+  base; one list in `e2e/fixtures/stub-build-env.js`, set only by the `e2e`
+  job's Build step and the local Playwright web server), runs MSAL's real
+  authorization-code redirect, and `page.route()` answers
+  login.microsoftonline.com (metadata, `/authorize` echoing MSAL's state,
+  `/token` carrying its nonce) and `/api`. Nothing in the application knows
+  it is under test, and no test switch was added to it. It fails closed: a
+  request to any third host is aborted and fails the test (the icon font is
+  answered locally), a tenant or client other than the placeholder is
+  refused, and the local web server is never reused, so a bundle built with
+  real settings, from a local `.env` say, fails the run instead of sending
+  the stub's bearer to a real API.
+  `e2e/admin-authenticated.spec.js` asserts that the callback lands on the
+  route the person asked for, that a registry refusal shows "Access Denied"
+  and nothing of the admin, that an `insufficient_scope` 401 shows the
+  configuration card with the API's description and does not retry, that an
+  `invalid_token` 401 leads to exactly one re-authentication (no account
+  picker) and then the honest card, still once after a reload, and on a
+  Pixel 5 at `/admin`, `/admin/queue`, `/admin/platform` and `/admin/health`
+  that the content column is at least 340 px with the drawer closed, the
+  drawer opens from the visible menu button and closes on Escape, and
+  nothing scrolls sideways. Each test names the product change that makes
+  it fail; eleven such changes were made, rebuilt and run, and each failed
+  its test. The twelfth, dropping the callback page's pathname check before
+  its `/admin` fallback, did not: MSAL 5 returns to the start page with a
+  full navigation, so that line never runs in this flow, and the spec says
+  so rather than claiming it. The `e2e` job runs it on
+  desktop Chrome and the Pixel 5, still not a required check; the three
+  specs together took 100 s on one worker locally. The signed-out spec's
+  `/admin/platform-settings` was not a route and is now `/admin/platform`.
+  **Owner step:** promoting the job to a required check stays the two-weeks
+  green decision, about 2026-10-20.
+
+- **The collapsed admin rail shows each item's label on hover and on focus
+  (AP-F2).** Collapsed, the rail was icons with the label in a `title`
+  attribute, which touch never shows and a keyboard never triggers. Each
+  item, Back to Site and Sign Out now show a visible label beside the icon
+  on hover and on focus, carrying the text the link's name starts with;
+  Escape dismisses it. It is fixed-positioned, because the nav is a scroll
+  container and would clip anything placed against the 64 px rail; the
+  browser test checks it is painted outside the rail.
 
 - **Admin Labs → Coder tab: Coder's own dashboard, framed (owner,
   2026-10-07).** Coder's pages open only inside the site (the lab host's
@@ -3701,6 +3746,27 @@ This project has not cut a tagged release; entries are grouped under
   unestablished.
 
 ### Fixed
+
+- **The admin portal re-checked access in a loop whenever the answer was not
+  "authorized" (found by the signed-in browser journey, 2026-10-07).**
+  `onAuthStateChanged` told its subscribers about every
+  `ACQUIRE_TOKEN_SUCCESS`, MSAL emits that for every silent token renewal,
+  and `useAdminAuth` answers every callback by re-running the admin check,
+  which renews a token. An `authorized` answer is cached, so that settled
+  after a few rounds; a 401 or an unreachable API is not, so nothing did:
+  against the stubbed identity the page made about a thousand token
+  refreshes and a thousand status calls in six seconds, and in production it
+  would have done the same to Entra and the Function App until the tab
+  closed. A renewal for the account already signed in is no longer reported;
+  a sign-in or a different account still is. `entraAuth.test.js` pins both,
+  and the browser spec bounds the status calls on both 401 paths.
+
+- **The admin dashboard scrolled sideways on a phone (AP-F1).** The Explore
+  grid had an implicit column, sized to its content, and each item's
+  one-line truncated description made that the whole sentence: on a Pixel 5
+  the cards were 675 px wide in a 393 px column. The grid now declares one
+  `minmax(0, 1fr)` column below `sm`, and the browser spec checks that no
+  checked admin route scrolls sideways.
 
 - **The agent health timer threw on every run since the 17:17Z deploy, and
   that was the app-exceptions alert (2026-10-06).** `schedulers.js` called

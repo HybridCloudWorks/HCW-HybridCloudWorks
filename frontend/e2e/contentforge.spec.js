@@ -6,9 +6,8 @@ import { test, expect } from '@playwright/test';
  * Until 2026-10-06 this file held sixteen tests that could not fail: every
  * assertion short-circuited on `page.url().includes('admin')`, so a blank
  * shell, a removed auth guard or a broken route all passed (estate review,
- * finding QA-1). The build under test has no Entra configuration, so no test
- * here signs in; what it pins is the one journey every admin starts with and
- * the one an attacker would probe:
+ * finding QA-1). No test here signs in; what this file pins is the one journey
+ * every admin starts with and the one an attacker would probe:
  *
  *   - an unauthenticated visit to any admin route shows the sign-in card and
  *     NOTHING of the admin: no navigation, no page, no data;
@@ -16,11 +15,17 @@ import { test, expect } from '@playwright/test';
  *   - the admin route carries a document title (WCAG 2.4.2);
  *   - at a phone width the page does not scroll sideways (AP-F1).
  *
- * An authenticated journey needs a stubbed identity (an MSAL route fixture)
- * and is the next step, not a reason to keep a vacuous one.
+ * The signed-in journey lives in admin-authenticated.spec.js, behind the
+ * credential-free identity in fixtures/entra.js: the callback landing on the
+ * route that was asked for, the denial and configuration cards, the one
+ * automatic re-authentication on an expired token, and the Pixel 5 drawer.
+ *
+ * `/admin/platform`, not `/admin/platform-settings`: the second is not a route
+ * (the router answers it with its not-found page), and a signed-out check on it
+ * proved only that the guard wraps unknown admin paths too.
  */
 
-const ADMIN_ROUTES = ['/admin', '/admin/queue', '/admin/platform-settings', '/admin/health'];
+const ADMIN_ROUTES = ['/admin', '/admin/queue', '/admin/platform', '/admin/health'];
 
 for (const route of ADMIN_ROUTES) {
   test(`${route}: signed out, the guard shows the sign-in card and none of the admin`, async ({

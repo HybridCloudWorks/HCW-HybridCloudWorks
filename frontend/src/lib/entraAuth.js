@@ -165,6 +165,10 @@ const toUser = (account) =>
       }
     : null;
 
+/** Whether two MSAL accounts are the same signed-in identity. */
+const accountKey = (account) => account?.homeAccountId || account?.localAccountId || null;
+const sameAccount = (a, b) => accountKey(a) !== null && accountKey(a) === accountKey(b);
+
 export async function getCurrentUser() {
   await initializeAuth();
   return toUser(getMsalInstance().getActiveAccount());
@@ -241,9 +245,29 @@ export function onAuthStateChanged(callback) {
       event.eventType === EventType.LOGIN_SUCCESS ||
       event.eventType === EventType.ACQUIRE_TOKEN_SUCCESS
     ) {
-      if (event.payload?.account) {
-        msal.setActiveAccount(event.payload.account);
-        callback(toUser(event.payload.account));
+      // TWO PAYLOAD SHAPES (review of #985). MSAL 5 emits LOGIN_SUCCESS with
+      // the AccountInfo itself (StandardController: `emitEvent(LOGIN_SUCCESS,
+      // …, result.account)`) and ACQUIRE_TOKEN_SUCCESS with an
+      // AuthenticationResult that carries `.account`. Reading `.account` off
+      // both dropped every real sign-in event.
+      const account =
+        event.eventType === EventType.LOGIN_SUCCESS ? event.payload : event.payload?.account;
+      if (account?.homeAccountId || account?.localAccountId) {
+        const previous = msal.getActiveAccount();
+        msal.setActiveAccount(account);
+        // A TOKEN RENEWAL IS NOT A SIGN-IN (QA-1, found by the browser journey
+        // on 2026-10-07). MSAL emits ACQUIRE_TOKEN_SUCCESS for every silent
+        // acquisition, and `useAdminAuth` answers every callback by re-running
+        // the admin check — which acquires a token, which emitted again. While
+        // the check came back `authorized` the five-minute cache broke the
+        // cycle after a few rounds; on any `unknown` answer (a 401, the API
+        // down) nothing did: against the stubbed identity the page made about
+        // a thousand token refreshes and a thousand status calls in six
+        // seconds, and would have gone on until the tab closed. Only a change
+        // of account is news to a subscriber.
+        if (event.eventType === EventType.LOGIN_SUCCESS || !sameAccount(previous, account)) {
+          callback(toUser(account));
+        }
       }
     }
     if (event.eventType === EventType.LOGOUT_SUCCESS) {
