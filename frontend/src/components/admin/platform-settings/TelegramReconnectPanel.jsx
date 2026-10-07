@@ -30,24 +30,19 @@
  * (and nothing personal). Its modules are embossed into the background
  * rather than printed on it, and no decoder read them (jsQR, 2026-10-07),
  * so what it encodes is the owner's statement, not a decoded fact.
+ * Showing it costs nothing: the bot answers only the chat id stored in
+ * TELEGRAM_CHAT_ID (lib/telegram/bot.js) and ignores every other chat
+ * silently.
  *
- * THE SMALL CODE beneath it is the one that is known to scan: a plain
- * black-on-white QR of BOT_URL (version 3, error correction Q, eight
- * modules of quiet zone, 495 px), generated once with the qrcode package
- * outside the repository and decoded back by jsQR to exactly BOT_URL at
- * 495, 247, 165 and 123 px. At 160 px on a laptop and 45 % of the viewport
- * on a phone it reads from across a desk. At 3,119 bytes it is under Vite's
- * 4 KiB assetsInlineLimit, so the build inlines it as a data URI in this
- * page's chunk rather than emitting a file. If the bot's handle ever changes,
- * regenerate it with BOT_URL; the artwork cannot be regenerated from here.
- * Showing either code costs nothing: the bot answers only the chat id
- * stored in TELEGRAM_CHAT_ID (lib/telegram/bot.js) and ignores every other
- * chat silently.
+ * ONE CODE. #994 put a plain black-on-white code of BOT_URL beneath the
+ * artwork as the verified path; the owner removed it the same day as not
+ * needed. The handle link is the fallback when the artwork does not scan.
  *
- * WHICH CODE IS VERIFIED. The small code is the verified path to the bot;
- * the artwork is not verified to scan at all (review of #994). The artwork
- * stays first because it is the image the owner asked for, and the small
- * code's caption says when to use it.
+ * LAYOUT. Open full size is an icon in the artwork's top-right corner, so
+ * the only line under the artwork is the handle. On a laptop the column
+ * beside it runs from the artwork's top edge to that line: the steps start
+ * level with the artwork, and the Test Telegram frame is pushed to the
+ * bottom so it ends on the handle's line.
  *
  * WHY THE STEPS SAY WHAT THEY SAY. A private chat's id is the Telegram
  * user's id, so a new phone signed in to the same Telegram account needs
@@ -65,14 +60,11 @@
 import React from 'react';
 import { ExternalLink, Maximize2, QrCode } from 'lucide-react';
 import telegramBotQr from '@/assets/admin/telegram-bot-qr.png';
-import telegramBotLinkQr from '@/assets/admin/telegram-bot-link-qr.png';
 import { tabHref as integrationsTabHref } from '@/components/admin/integrations/tabs';
 
 export const BOT_HANDLE = '@agenticarchitectbot';
 export const BOT_URL = 'https://t.me/agenticarchitectbot';
 export const BOT_QR_SRC = telegramBotQr;
-export const BOT_LINK_QR_SRC = telegramBotLinkQr;
-export const BOT_LINK_QR_ALT = 'Scannable code for @agenticarchitectbot';
 export const BOT_QR_ALT = `QR code that opens the Telegram bot ${BOT_HANDLE}`;
 export const KEYS_HREF = integrationsTabHref('keys');
 
@@ -85,57 +77,41 @@ export default function TelegramReconnectPanel({ children = null }) {
       aria-labelledby="telegram-reconnect-heading"
       className="grid gap-4 rounded-md border border-border p-3 sm:grid-cols-[auto_minmax(0,1fr)]"
     >
-      <div className="space-y-4">
-        <figure className="mx-auto w-[60vw] max-w-full sm:mx-0 sm:w-[220px]">
-          <div className="rounded-md border border-border bg-white p-2 shadow-sm">
-            <img
-              src={BOT_QR_SRC}
-              alt={BOT_QR_ALT}
-              width={1024}
-              height={1536}
-              loading="lazy"
-              decoding="async"
-              className="block h-auto w-full rounded"
-            />
-          </div>
-          <figcaption className="mt-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs">
-            <a
-              href={BOT_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`${linkClass} font-medium text-foreground`}
-            >
-              {BOT_HANDLE} <ExternalLink className="h-3 w-3" aria-hidden="true" />
-            </a>
-            <a
-              href={BOT_QR_SRC}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`${linkClass} text-muted-foreground`}
-            >
-              Open full size <Maximize2 className="h-3 w-3" aria-hidden="true" />
-            </a>
-          </figcaption>
-        </figure>
-        <figure className="mx-auto w-[45vw] max-w-full sm:w-[160px]">
-          <div className="rounded-md border border-border bg-white p-2 shadow-sm">
-            <img
-              src={BOT_LINK_QR_SRC}
-              alt={BOT_LINK_QR_ALT}
-              width={495}
-              height={495}
-              loading="lazy"
-              decoding="async"
-              className="block h-auto w-full"
-            />
-          </div>
-          <figcaption className="mt-2 text-center text-xs text-muted-foreground">
-            If the artwork above does not scan, this code opens the same bot.
-          </figcaption>
-        </figure>
-      </div>
+      <figure className="mx-auto w-[60vw] max-w-full sm:mx-0 sm:w-[220px]">
+        <div className="relative rounded-md border border-border bg-white p-2 shadow-sm">
+          <img
+            src={BOT_QR_SRC}
+            alt={BOT_QR_ALT}
+            width={1024}
+            height={1536}
+            loading="lazy"
+            decoding="async"
+            className="block h-auto w-full rounded"
+          />
+          <a
+            href={BOT_QR_SRC}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Open full size"
+            title="Open full size"
+            className="absolute right-3 top-3 rounded bg-white/90 p-1 text-neutral-700 shadow-sm hover:bg-white hover:text-neutral-950"
+          >
+            <Maximize2 className="h-3.5 w-3.5" aria-hidden="true" />
+          </a>
+        </div>
+        <figcaption className="mt-2 text-center text-xs">
+          <a
+            href={BOT_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`${linkClass} font-medium text-foreground`}
+          >
+            {BOT_HANDLE} <ExternalLink className="h-3 w-3" aria-hidden="true" />
+          </a>
+        </figcaption>
+      </figure>
 
-      <div className="min-w-0 space-y-3">
+      <div className="flex min-w-0 flex-col gap-3">
         <p
           id="telegram-reconnect-heading"
           className="flex items-center gap-2 text-sm font-medium text-foreground"
@@ -144,9 +120,10 @@ export default function TelegramReconnectPanel({ children = null }) {
         </p>
         <ol aria-label="Reconnect steps" className="list-decimal space-y-1.5 pl-5 text-sm">
           <li>
-            Scan a code with the phone&apos;s camera (the small one if the artwork does not scan),
-            or open <span className="font-medium text-foreground">{BOT_HANDLE}</span> by searching
-            for it in Telegram. On a laptop, Open full size makes the artwork easier to scan.
+            Scan the code with the phone&apos;s camera, or open{' '}
+            <span className="font-medium text-foreground">{BOT_HANDLE}</span> by searching for it in
+            Telegram. On a laptop, the Open full size icon on the code&apos;s corner makes it easier
+            to scan.
           </li>
           <li>
             In the bot&apos;s chat, press <span className="font-medium text-foreground">Start</span>
@@ -168,7 +145,7 @@ export default function TelegramReconnectPanel({ children = null }) {
           </a>
           .
         </p>
-        {children}
+        {children ? <div className="sm:mt-auto">{children}</div> : null}
       </div>
     </section>
   );
