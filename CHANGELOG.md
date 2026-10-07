@@ -19,6 +19,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **A refused Telegram delivery now pages the owner by SMS and mail
+  (2026-10-06).** The notifier is best-effort by design, so when the owner's
+  account had the bot blocked, Telegram answered 403 to every send for the
+  rest of the day and the only record was a trace line nobody reads; the
+  lab-agent-offline message was among the losses. `alert-telegram-delivery`
+  is a stateful log alert on the Application Insights component: one
+  `[notify] Telegram API error` or `notifyTelegram failed` line in an hour
+  fires it through the action group, which is not Telegram. **Owner step:**
+  confirm the `hcw-azure` run (1 to add beside the permanent diff; declared
+  for the plan check).
+
 - **Reminders on Telegram: a sheet under Platform Settings and a daily
   check (owner, 2026-10-06).** Dated things not to forget — a token that
   expires, a re-verification, a renewal — had been living in session notes.

@@ -201,6 +201,13 @@ export const DECLARED = [
     after: 'true',
     reason: '#701: PROBE_AI_PROVIDERS added to enabled_timers, arming the weekly probe',
   },
+  // 2026-10-06: a refused Telegram delivery pages through the action group,
+  // after a blocked bot silenced every owner notification for a day.
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.telegram_delivery',
+    action: 'create',
+    reason: 'Telegram refused or failed a send; the owner hears by SMS and mail instead of nobody',
+  },
 ];
 
 /** The keys an update must carry for its values to be printed safely. */
