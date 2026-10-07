@@ -65,9 +65,11 @@
   HCP Terraform organization name, case-sensitive. Default: HybridCloudWorks.
 
 .PARAMETER TfcProject
-  HCP Terraform project name, case-sensitive. Defaults to Site, which is where
-  the hcw-azure workspace lives. A workspace created without choosing a project
-  lands in "Default Project" instead — including the space.
+  HCP Terraform project name, case-sensitive. Defaults to "Default Project",
+  with the space, which is where the hcw-azure workspace lives (read from the
+  HCP Terraform API, 2026-10-07). The org also has an empty project named
+  Site; the workspace was never moved into it. Read the project off the
+  workspace's Settings page and pass it when it differs.
 
 .PARAMETER TfcWorkspace
   HCP Terraform workspace name, case-sensitive.
@@ -122,13 +124,16 @@ param(
   [string] $IdentitySubscriptionId,
   [string[]] $TargetSubscriptionIds = @(),
   # These three compose the federated credential subject, which Entra matches
-  # as an exact, case-sensitive string. They are the live values, verified
-  # against the HCP Terraform API on 2026-08-19 — every one of them was wrong
-  # before that (org HybridCloudWorks, workspace hybridcloudworks-azure and
-  # project "Default Project" were assumptions, and the first two named things
-  # that do not exist).
+  # as an exact, case-sensitive string. They are the live values, read from
+  # the HCP Terraform API on 2026-10-07: org `hcw`, and the hcw-azure workspace
+  # in "Default Project" (with the space). A project named `Site` exists in
+  # the org and holds no workspace; this default said `Site` from 2026-08-19
+  # to 2026-10-07, and a re-run with it would have deleted the working
+  # credentials and written a subject nothing presents (section 5 below:
+  # the script replaces a credential whose subject differs). Copy the project
+  # off the workspace's Settings page before trusting any default here.
   [string] $TfcOrganization = 'hcw',
-  [string] $TfcProject = 'Site',
+  [string] $TfcProject = 'Default Project',
   [string] $TfcWorkspace = 'hcw-azure',
   # Named to the convention as of 2026-08-19. The originals were
   # rg-hcw-bootstrap / id-hcw-terraform / southcentralus, which predated the

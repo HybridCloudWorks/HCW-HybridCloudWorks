@@ -3845,6 +3845,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`bootstrap-terraform-oidc.ps1` defaulted to an HCP Terraform project the
+  workspace is not in.** Its `-TfcProject` default said `Site` since
+  2026-08-19; the HCP Terraform API read on 2026-10-07 shows `hcw-azure` and
+  `hcw-lab` in `Default Project` and the `Site` project empty. Because the
+  script replaces a federated credential whose subject differs, a re-run with
+  the default would have deleted the two working credentials and written a
+  subject no run presents, locking the workspace out of Azure. The default is
+  now `Default Project`, the parameter help and `infra/README.md` say where
+  the workspace lives, and the owner steps pass the project explicitly.
 - **The first digest pull request after #986 refused its own files.**
   `scripts/open-lab-pin-pr.mjs` read `git status --porcelain` through a
   helper that trims its output, so the first line lost its leading space and
