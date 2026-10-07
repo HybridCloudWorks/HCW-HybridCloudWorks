@@ -29,3 +29,22 @@ export function TabError({ message, onRetry }) {
     </div>
   );
 }
+
+/**
+ * The two notices every tab that reads key status shows: reading, and a
+ * failed read that leaves only what the tests recorded. One place for the
+ * sentence, since the Overview and the Directory would otherwise each carry
+ * it. While a retry is in flight the stale error is held back, so the
+ * reading notice and a Try again never show together (review of #923).
+ */
+export function KeyStatusNotices({ loading, data, error, onRetry, fallback }) {
+  return (
+    <>
+      {loading && !data ? <TabLoading>Reading key status…</TabLoading> : null}
+      <TabError
+        message={error && !loading && `Key status could not be read, so ${fallback}: ${error}`}
+        onRetry={onRetry}
+      />
+    </>
+  );
+}

@@ -25,7 +25,7 @@ import { sortByStatus, SERVICE_STATUS } from './integrationView';
 import { SERVICES } from './serviceRegistry';
 import { relativeTime } from './StateDot';
 import useServiceCards, { effectiveResult } from './useServiceCards';
-import { TabError, TabLoading } from './TabNotice';
+import { KeyStatusNotices } from './TabNotice';
 
 /** Sessionize takes its speaker id; every other test takes nothing. */
 export const testArgFor = (service) =>
@@ -125,10 +125,12 @@ export default function IntegrationsOverview({ tests, onOpenGroup }) {
         </div>
       </div>
 
-      {loading && !data ? <TabLoading>Reading key status…</TabLoading> : null}
-      <TabError
-        message={error && `Key status could not be read, so only test results are shown: ${error}`}
+      <KeyStatusNotices
+        loading={loading}
+        data={data}
+        error={error}
         onRetry={reload}
+        fallback="a status with no recorded test may be incomplete"
       />
 
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Services">

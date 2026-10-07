@@ -23,6 +23,7 @@
 import { BRANDS } from '@/components/admin/shared/IntegrationBadge';
 import { SERVICES } from '@/components/admin/integrations/serviceRegistry';
 import { tabHref } from '@/components/admin/integrations/tabs';
+import { serviceStatus } from '@/components/admin/integrations/integrationView';
 
 /** The categories, in the order the filter shows them. Payments and CRM are held for later. */
 export const DIRECTORY_CATEGORIES = Object.freeze([
@@ -161,7 +162,9 @@ export const DIRECTORY = Object.freeze([
     id: 'perplexity',
     category: 'ai',
     summary: 'Answer engine with web grounding.',
-    powers: 'Grounded research where a task asks for it.',
+    // Listed on the AI Engine as a provider the router could use, with no
+    // feature wired to it (review of #922): say so rather than invent a use.
+    powers: 'Nothing yet: listed on the AI Engine as a provider, with no feature wired to it.',
     docsUrl: 'https://docs.perplexity.ai',
   },
   {
@@ -233,7 +236,10 @@ export function directoryEntries({
         name: service.name,
         group: service.group,
         usedIn: service.usedIn ?? [],
-        siteUrl: brand?.site ?? service.url ?? null,
+        // The brand registry's site only. A service's own `url` is where an
+        // operator sets it up, which for a composite card is this site or a
+        // vendor's documentation, neither an "official site" (review of #922).
+        siteUrl: brand?.site ?? null,
         keyed,
         // Where it is set up here: the Services tab opened on its group,
         // which shows its card, its lights and its test.
@@ -241,6 +247,39 @@ export function directoryEntries({
       };
     })
     .filter(Boolean);
+}
+
+/**
+ * The status key for one directory entry. The same verdict the Overview
+ * computes, with one guard (review of #922): when the key status could not
+ * be read, a keyed service with no test result is unknown, not connected —
+ * without its lights there is nothing to say it is configured, and
+ * serviceStatus would otherwise read an empty light list as "link-only".
+ */
+export function directoryStatus({ entry, card, result, secretsKnown }) {
+  if (!card) return 'untested';
+  if (!secretsKnown && entry.keyed && !result) return 'untested';
+  return serviceStatus(card, result);
+}
+
+/** Entries with their status key, connection and category label attached. */
+export function decorateEntries(entries, { serviceCards, results, secretsKnown }) {
+  const cardById = new Map(serviceCards.map((card) => [card.id, card]));
+  const labels = new Map(DIRECTORY_CATEGORIES.map((c) => [c.id, c.label]));
+  return entries.map((entry) => {
+    const statusKey = directoryStatus({
+      entry,
+      card: cardById.get(entry.id),
+      result: results[entry.id],
+      secretsKnown,
+    });
+    return {
+      ...entry,
+      statusKey,
+      connection: connectionOf(statusKey),
+      categoryLabel: labels.get(entry.category) ?? entry.category,
+    };
+  });
 }
 
 /** Whether a status key from integrationView.js reads as connected, not, or unknown. */

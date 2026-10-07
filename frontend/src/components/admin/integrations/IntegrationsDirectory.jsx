@@ -23,12 +23,12 @@ import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
 import { BookOpen, ExternalLink, Search, Settings2 } from 'lucide-react';
 import {
   DIRECTORY_CATEGORIES,
-  connectionOf,
+  decorateEntries,
   directoryEntries,
 } from '@/config/integrationsDirectory';
-import { SERVICE_STATUS, serviceStatus } from './integrationView';
+import { SERVICE_STATUS } from './integrationView';
 import useServiceCards from './useServiceCards';
-import { TabError, TabLoading } from './TabNotice';
+import { KeyStatusNotices } from './TabNotice';
 
 export const CONNECTION_FILTERS = Object.freeze([
   { id: 'all', label: 'All' },
@@ -138,20 +138,11 @@ export default function IntegrationsDirectory({ tests }) {
   const [category, setCategory] = useState('all');
   const [connection, setConnection] = useState('all');
 
-  const entries = useMemo(() => {
-    const cardById = new Map(serviceCards.map((card) => [card.id, card]));
-    const labels = new Map(DIRECTORY_CATEGORIES.map((c) => [c.id, c.label]));
-    return directoryEntries().map((entry) => {
-      const card = cardById.get(entry.id);
-      const statusKey = card ? serviceStatus(card, results[entry.id]) : 'untested';
-      return {
-        ...entry,
-        statusKey,
-        connection: connectionOf(statusKey),
-        categoryLabel: labels.get(entry.category) ?? entry.category,
-      };
-    });
-  }, [serviceCards, results]);
+  const entries = useMemo(
+    () =>
+      decorateEntries(directoryEntries(), { serviceCards, results, secretsKnown: Boolean(data) }),
+    [serviceCards, results, data]
+  );
 
   const used = new Set(entries.map((entry) => entry.category));
   const categories = [
@@ -192,12 +183,12 @@ export default function IntegrationsDirectory({ tests }) {
         />
       </div>
 
-      {loading && !data ? <TabLoading>Reading key status…</TabLoading> : null}
-      <TabError
-        message={
-          error && `Key status could not be read, so connection shows test results alone: ${error}`
-        }
+      <KeyStatusNotices
+        loading={loading}
+        data={data}
+        error={error}
         onRetry={reload}
+        fallback="connection shows recorded tests and key-free services only; a keyed service with no recorded test reads as not yet tested"
       />
 
       {shown.length === 0 ? (

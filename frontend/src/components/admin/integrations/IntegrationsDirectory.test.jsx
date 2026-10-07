@@ -1,7 +1,9 @@
 /**
  * The Integrations directory: configuration held to the service registry,
  * search and filters over it, alphabetical order, and each card's status,
- * links and Set up (owner brief 2026-10-06, #919).
+ * links and Set up (owner brief 2026-10-06, #919). The status guard from
+ * the review: while the key status cannot be read, a keyed service with no
+ * test is unknown, never connected.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -16,7 +18,9 @@ import {
   DIRECTORY,
   DIRECTORY_CATEGORIES,
   connectionOf,
+  decorateEntries,
   directoryEntries,
+  directoryStatus,
 } from '@/config/integrationsDirectory';
 import { SERVICES } from './serviceRegistry';
 
@@ -92,6 +96,15 @@ describe('the configuration', () => {
         directory: [{ id: 'ghost', category: 'ai', summary: 'x.', powers: 'y.' }],
       })
     ).toEqual([]);
+    // The official site comes from the brand registry alone: a composite card
+    // has none, rather than this site's own page or a vendor's docs.
+    for (const id of ['cloud-pricing', 'hybrid-lab']) {
+      expect(directoryEntries().find((entry) => entry.id === id).siteUrl).toBeNull();
+    }
+  });
+
+  it('does not advertise an unwired provider as powering anything', () => {
+    expect(DIRECTORY.find((row) => row.id === 'perplexity').powers).toMatch(/^Nothing yet/);
   });
 
   it('reads a status key as connected, not connected, or unknown', () => {
@@ -101,6 +114,39 @@ describe('the configuration', () => {
     expect(connectionOf('not-configured')).toBe('not-connected');
     expect(connectionOf('untested')).toBe('unknown');
     expect(connectionOf('pending')).toBe('unknown');
+  });
+
+  it('reads a keyed service as unknown, not connected, while the key status cannot be read', () => {
+    const entry = { id: 'perplexity', keyed: true };
+    const card = { id: 'perplexity', items: [], test: undefined };
+    expect(directoryStatus({ entry, card, result: undefined, secretsKnown: false })).toBe(
+      'untested'
+    );
+    expect(directoryStatus({ entry, card, result: undefined, secretsKnown: true })).toBe(
+      'link-only'
+    );
+    expect(directoryStatus({ entry, card, result: { ok: true }, secretsKnown: false })).toBe('ok');
+    expect(
+      directoryStatus({
+        entry: { id: 'credly', keyed: false },
+        card: { id: 'credly', items: [] },
+        result: undefined,
+        secretsKnown: false,
+      })
+    ).toBe('link-only');
+    expect(directoryStatus({ entry, card: undefined, result: undefined, secretsKnown: true })).toBe(
+      'untested'
+    );
+    const decorated = decorateEntries([{ id: 'perplexity', keyed: true, category: 'ai' }], {
+      serviceCards: [card],
+      results: {},
+      secretsKnown: false,
+    });
+    expect(decorated[0]).toMatchObject({
+      statusKey: 'untested',
+      connection: 'unknown',
+      categoryLabel: 'AI',
+    });
   });
 });
 
@@ -192,9 +238,14 @@ describe('the tab', () => {
         .getByRole('link', { name: /Official site/ })
         .getAttribute('href')
     ).toBe('https://telegram.org');
+    // A composite card offers no Official site.
+    const pricing = items.find((item) =>
+      within(item).queryByRole('heading', { name: 'Cloud pricing cache' })
+    );
+    expect(within(pricing).queryByRole('link', { name: /Official site/ })).toBeNull();
   });
 
-  it('shows connection from the key lights: live keys read as connected, an unset key as not connected', () => {
+  it('shows connection from the key lights and tests: a recorded pass reads as connected, an unset key as not connected', () => {
     renderTab();
     expect(screen.getByText(/of \d+ connected/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Not connected' }));
@@ -205,6 +256,23 @@ describe('the tab', () => {
     const connected = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
     expect(connected).toContain('Telegram');
     expect(connected).not.toContain('Anthropic');
+  });
+
+  it('keeps recorded verdicts and reads keyed services without one as unknown while the key status read has failed', () => {
+    secretStatus.mockReturnValue({
+      data: null,
+      loading: false,
+      error: 'HTTP 403',
+      reload: vi.fn(),
+    });
+    renderTab();
+    expect(screen.getByRole('alert').textContent).toMatch(/Key status could not be read/);
+    fireEvent.click(screen.getByRole('button', { name: 'Connected' }));
+    const connected = screen.queryAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    // Telegram's recorded pass still counts; a keyed service with no test does not.
+    expect(connected).toContain('Telegram');
+    expect(connected).not.toContain('Perplexity');
+    expect(connected).not.toContain('Azure AI Speech');
   });
 
   it('searches and filters by category, and says so when nothing matches', () => {
@@ -225,8 +293,9 @@ describe('the tab', () => {
 
   it('offers the four connection filters and only the categories in use', () => {
     renderTab();
-    for (const filter of CONNECTION_FILTERS)
+    for (const filter of CONNECTION_FILTERS) {
       expect(screen.getByRole('button', { name: filter.label })).toBeTruthy();
+    }
     expect(screen.queryByRole('button', { name: 'Payments' })).toBeNull();
     expect(
       screen.getByRole('button', { name: 'All categories' }).getAttribute('aria-pressed')
