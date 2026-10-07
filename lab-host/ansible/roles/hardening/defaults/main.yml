@@ -25,3 +25,13 @@ hardening_unattended_reboot_time: "04:30"
 hardening_fail2ban_maxretry: 5
 hardening_fail2ban_findtime: 10m
 hardening_fail2ban_bantime: 1h
+
+# The daily held-package report (LAB-3, #949): hcw-held-upgradable logs one
+# syslog line per held package apt could upgrade, under this tag, to the
+# daemon facility at warning (one line at notice when there is none). The
+# tag is what a Log Analytics query or alert matches on (ProcessName).
+hardening_held_report_tag: hcw-held-upgradable
+hardening_held_report_script_path: /usr/local/sbin/hcw-held-upgradable
+# Daily, after the 04:30 unattended-upgrades reboot window and early in the
+# working day, with up to 15 minutes of jitter from the timer.
+hardening_held_report_on_calendar: "*-*-* 07:15:00"

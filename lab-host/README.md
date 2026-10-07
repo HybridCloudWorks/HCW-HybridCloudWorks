@@ -1213,6 +1213,28 @@ A passing result has no `not ok` line and ends with
 `hcw-coder-template-push.test.sh: all` and the number of checks, then
 `checks passed`.
 
+The same job runs the test of the daily held-package report
+(`ansible/roles/hardening/README.md`, "Tests"): the script and its units
+rendered with the role's defaults, run against stub `apt-mark`, `apt` and
+`logger`. It needs neither root nor Docker. PowerShell, from the repository
+root:
+
+```powershell
+docker run --rm -v "${PWD}\lab-host:/work:ro" -w /work/ansible --entrypoint bash ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 roles/hardening/tests/hcw-held-upgradable.test.sh
+```
+
+The same in bash (Git Bash or Linux), from the repository root:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/lab-host:/work:ro" -w /work/ansible --entrypoint bash ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 roles/hardening/tests/hcw-held-upgradable.test.sh
+```
+
+A passing result has no `not ok` line and ends with
+`hcw-held-upgradable.test.sh: all` and the number of checks, then
+`checks passed`. Mounted alone, `lab-host/` has no `infra/` beside it, so
+one line reads `skip -` instead of comparing the data collection rule; CI
+compares it.
+
 The Coder files have their own checks — the hardening test, the Compose
 parse and `terraform validate` — listed in
 [`../coder/README.md`](../coder/README.md) and run by the
@@ -1220,6 +1242,28 @@ parse and `terraform validate` — listed in
 `lab-host/coder/`.
 
 ## Bumping a pin
+
+Most of this is automated (#949). Every Tuesday
+`.github/workflows/lab-supply-chain.yml` runs
+`scripts/lab-pins-upstream.mjs --bump host`, which moves every pin it watches
+that is behind its publisher (Docker Engine, containerd, buildx, compose,
+Caddy and its Cloudflare module, Coder, PostgreSQL, Portainer, Vault,
+node_exporter, Node.js) together with the checksum or digest it read from
+that publisher. It also re-reads the pins that are current but can be
+rebuilt under the same name, an image tag re-pushed on a patched base or a
+package given a new Debian revision, and moves the digest or revision when
+it changed. It opens or updates one pull request on the branch
+`chore/lab-pins-host` whose body says where each value was read. A pin whose
+checksum it could not verify is not moved; it is listed in the weekly issue,
+and this section is how a person moves it. The same run proposes the lab
+image's newest base digest (`chore/lab-pins-image-base`), and each publish of
+the lab images proposes their new digests to the two places that pin them
+(`chore/lab-pins-image-digests`). Merging changes nothing on the host until
+`bootstrap.sh` runs. The prose dates beside each pin in `group_vars/all.yml`
+record the last read by hand; an automated bump's evidence is its pull
+request. How fast a runtime advisory is fixed is
+[`docs/runbooks/labs-host.md`](../docs/runbooks/labs-host.md), "Runtime
+advisories".
 
 | Pin | Lives in | How to read the current value |
 | --- | --- | --- |

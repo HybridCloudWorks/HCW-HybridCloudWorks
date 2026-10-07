@@ -1,5 +1,6 @@
-# Lab supply chain — are the lab host's pins behind upstream, and do the lab
-# images carry known vulnerabilities? (estate review 2026-10-06, LAB-3)
+# Lab supply chain — are the lab host's pins behind upstream, do the lab
+# images carry known vulnerabilities, and what moves them? (estate review
+# 2026-10-06, LAB-3; #899, #949)
 #
 # Everything the lab host runs is pinned and held, and the lab images are
 # pinned by digest where they are consumed, which is right for a host that
@@ -9,21 +10,46 @@
 # scanned again after the build that attested them. Dependabot cannot read
 # Ansible group_vars or a digest in a JS module.
 #
-# Weekly, this job:
-#   1. runs scripts/lab-pins-upstream.mjs, which asks each publisher for its
-#      newest stable version and compares it to the pin (exit 1 behind, 2
-#      when a source could not be read);
-#   2. scans the two published lab image digests the host actually runs —
-#      read from vps-agent/lib/capabilities.js and the Coder template, not
-#      from a tag — with Trivy for HIGH and CRITICAL vulnerabilities with a
-#      fix available;
-#   3. opens one issue (or comments on the open one) with both results when
-#      either says something is due. A clean week is a green run and nothing
-#      else.
+# Weekly, this workflow:
+#   1. `propose` runs scripts/lab-pins-upstream.mjs --bump for two pin sets
+#      and makes the edits in its own checkout:
+#        host        lab-host/ansible/group_vars/all.yml, every pin behind
+#                    its publisher;
+#        image-base  lab-image/versions.env and its FROM lines, to the
+#                    newest digest of the base image's release line, which is
+#                    how the lab images are rebuilt on a newer base (the
+#                    rebuild itself is the publish that merging it triggers;
+#                    publish-lab-image.yml says what a rebuild can and cannot
+#                    change on its own).
+#      Each edit carries the checksum or digest read from the publisher
+#      beside the version (scripts/lib/lab-pin-bumps.mjs says which, from
+#      where). A pin whose checksum could not be verified is not edited: it is
+#      a note, and the notes go into the issue below. The job holds a
+#      read-only token and the network input, and hands the edits on as a
+#      patch.
+#   2. `pull-request` applies each set's patch and keeps one pull request per
+#      set open (scripts/open-lab-pin-pr.mjs): a fixed branch per set, the
+#      pull request opened ready for review or, while one is open, its commit
+#      and body replaced by the new reading. It never pushes to main and never
+#      overwrites a commit someone else added to the branch. It holds
+#      `contents: read`; the push and the pull request use the GitHub App
+#      installation token the other scheduled pull requests use
+#      (MANIFEST_APP_ID / MANIFEST_APP_PRIVATE_KEY), because a pull request
+#      opened with GITHUB_TOKEN never gets its required checks. That is also
+#      why this file holds no `contents: write` or `pull-requests: write`
+#      grant (scripts/workflow-write-permissions.test.mjs).
+#   3. `check` compares every pin with upstream, scans the two published lab
+#      image digests the host actually runs — read from
+#      vps-agent/lib/capabilities.js and the Coder template, not from a tag —
+#      with Trivy for HIGH and CRITICAL vulnerabilities with a fix available,
+#      and opens one issue (or comments on the open one) when a pin is
+#      behind, an image needs a fix, or a pin could not be bumped. A clean
+#      week is a green run and nothing else.
 #
-# It bumps nothing. Every bump here needs a checksum or digest read from the
-# publisher and reviewed beside the version; the issue is the prompt, and
-# lab-host/README.md "Bumping a pin" is the procedure.
+# The response times for a runtime advisory (runc, containerd, Docker
+# Engine), and who does what, are in docs/runbooks/labs-host.md, "Runtime
+# advisories". lab-host/README.md, "Bumping a pin", is the hand procedure
+# this automates.
 name: Lab supply chain
 
 on:
@@ -47,8 +73,161 @@ env:
   TRIVY_SHA256: 1816b632dfe529869c740c0913e36bd1629cb7688bd5634f4a858c1d57c88b75
 
 jobs:
+  propose:
+    name: Propose pin bumps with publisher checksums
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout only — this job must never be able to push
+    outputs:
+      sets: ${{ steps.patches.outputs.sets }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # No npm ci: the scripts import node: built-ins only.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      # Each set writes its edits into this checkout, its evidence (the pull
+      # request body) and its notes (the pins it could not verify). Exit 2 is
+      # a plan that could not be made at all; that fails the run.
+      - name: Plan and make the bumps
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/lab-pins"
+          for set in host image-base; do
+            node scripts/lab-pins-upstream.mjs --bump "$set" \
+              --evidence "${RUNNER_TEMP}/lab-pins/evidence-${set}.md" \
+              --notes "${RUNNER_TEMP}/lab-pins/notes-${set}.md" | tee -a "$GITHUB_STEP_SUMMARY"
+          done
+
+      # One patch per set, over that set's paths only; the sets whose patch
+      # is not empty are the matrix of the next job.
+      - name: One patch per set
+        id: patches
+        run: |
+          set -euo pipefail
+          sets=()
+          for set in host image-base; do
+            mapfile -t paths < <(node scripts/open-lab-pin-pr.mjs --paths "$set")
+            git diff --binary -- "${paths[@]}" > "${RUNNER_TEMP}/lab-pins/${set}.patch"
+            if [ -s "${RUNNER_TEMP}/lab-pins/${set}.patch" ]; then sets+=("\"${set}\""); fi
+          done
+          json="[$(IFS=,; echo "${sets[*]}")]"
+          echo "Sets with a bump: ${json}"
+          echo "sets=${json}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload the patches, evidence and notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lab-pins
+          path: ${{ runner.temp }}/lab-pins/
+          retention-days: 7
+          if-no-files-found: error
+
+  pull-request:
+    name: Open or update the ${{ matrix.set }} pull request
+    needs: propose
+    if: needs.propose.outputs.sets != '[]'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    # `automation`, as in the other scheduled PR-opening jobs: it runs on a
+    # schedule, and an approval gate would leave the run waiting for a human
+    # who is not there.
+    environment: automation
+    permissions:
+      contents: read # checkout only — this job cannot push anywhere on its own
+    strategy:
+      fail-fast: false
+      matrix:
+        set: ${{ fromJSON(needs.propose.outputs.sets) }}
+    steps:
+      # `persist-credentials: false`, or the push authenticates as
+      # github-actions[bot] and is refused (publish-content-manifest.yml,
+      # run 34092896715).
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      - name: Download the patches
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: lab-pins
+          path: ${{ runner.temp }}/lab-pins
+
+      - name: Apply this set's patch
+        env:
+          SET: ${{ matrix.set }}
+        run: git apply "${RUNNER_TEMP}/lab-pins/${SET}.patch"
+
+      # Self-arming: before the App exists this reports that it opened
+      # nothing rather than failing every week.
+      - name: Is the App configured?
+        id: app
+        env:
+          MANIFEST_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          MANIFEST_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${MANIFEST_APP_PRIVATE_KEY}" ] && [ -n "${MANIFEST_APP_ID}" ]; then
+            echo "armed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::A pin moved but the App is not configured, so no pull request was opened. Set the MANIFEST_APP_ID variable and the MANIFEST_APP_PRIVATE_KEY secret (T-726)." | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # No `npm ci`: the minter imports only node:crypto and node:url.
+      - name: Mint an App installation token
+        id: token
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GITHUB_APP_ID: ${{ vars.MANIFEST_APP_ID }}
+          GITHUB_APP_PRIVATE_KEY: ${{ secrets.MANIFEST_APP_PRIVATE_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          token=$(node scripts/github-app-token.mjs)
+          # Masked BEFORE it is written anywhere, including to GITHUB_OUTPUT.
+          echo "::add-mask::${token}"
+          echo "token=${token}" >> "$GITHUB_OUTPUT"
+
+      # Stages the set's paths by name and refuses when anything else in the
+      # checkout changed; one branch per set, one open pull request per branch.
+      - name: Push the branch and open or update the pull request
+        if: steps.app.outputs.armed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          SET: ${{ matrix.set }}
+        run: node scripts/open-lab-pin-pr.mjs --set "$SET" --evidence "${RUNNER_TEMP}/lab-pins/evidence-${SET}.md" --notes "${RUNNER_TEMP}/lab-pins/notes-${SET}.md"
+
+      # The token lives an hour; the work above takes seconds. `always()`, so
+      # a failed push still cleans up.
+      - name: Revoke the installation token
+        if: always() && steps.token.outputs.token != ''
+        env:
+          GITHUB_APP_TOKEN: ${{ steps.token.outputs.token }}
+        run: node scripts/github-app-token.mjs --revoke
+
   check:
     name: Pins against upstream, images against the vulnerability database
+    needs: propose
+    # The scan and the issue do not wait on the bumps succeeding.
+    if: always()
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
@@ -78,6 +257,37 @@ jobs:
           echo "exit=${code}" >> "$GITHUB_OUTPUT"
           cat "${RUNNER_TEMP}/pins.md" >> "$GITHUB_STEP_SUMMARY"
           exit 0
+
+      # The pins `propose` could not verify, for the issue. Absent when
+      # `propose` failed; the issue then says so.
+      - name: Download the bump notes
+        if: needs.propose.result == 'success'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: lab-pins
+          path: ${{ runner.temp }}/lab-pins
+
+      - name: Collect the bump notes
+        id: notes
+        env:
+          PROPOSE_RESULT: ${{ needs.propose.result }}
+          SETS: ${{ needs.propose.outputs.sets }}
+        run: |
+          set -euo pipefail
+          out="${RUNNER_TEMP}/bump-notes.md"
+          : > "$out"
+          if [ "${PROPOSE_RESULT}" != "success" ]; then
+            echo "The \`propose\` job did not succeed (${PROPOSE_RESULT}), so no pin was bumped this week; its log says why." >> "$out"
+          else
+            for set in host image-base; do
+              if [ -s "${RUNNER_TEMP}/lab-pins/notes-${set}.md" ]; then
+                echo "**${set}:** $(cat "${RUNNER_TEMP}/lab-pins/notes-${set}.md")" >> "$out"
+                echo >> "$out"
+              fi
+            done
+          fi
+          if [ -s "$out" ]; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+          echo "sets=${SETS:-[]}" >> "$GITHUB_OUTPUT"
 
       - name: Install Trivy (pinned release binary)
         run: |
@@ -121,15 +331,16 @@ jobs:
           exit 0
 
       # One issue, kept current: created when none is open, commented on when
-      # one is. Nothing when both checks are clean.
+      # one is. Nothing when both checks are clean and every bump was made.
       - name: Open or update the issue when something is due
-        if: steps.pins.outputs.exit != '0' || steps.scan.outputs.failed == '1'
+        if: steps.pins.outputs.exit != '0' || steps.scan.outputs.failed == '1' || steps.notes.outputs.present == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           PINS_EXIT: ${{ steps.pins.outputs.exit }}
           SCAN_FAILED: ${{ steps.scan.outputs.failed }}
+          BUMP_SETS: ${{ steps.notes.outputs.sets }}
         run: |
           set -euo pipefail
           title="Lab supply chain: pins behind upstream or image vulnerabilities"
@@ -138,14 +349,20 @@ jobs:
             echo
             case "${PINS_EXIT}" in
               0) echo "**Pins:** every lab host pin is current." ;;
-              1) echo "**Pins:** at least one lab host pin is behind upstream (table below). Bump per lab-host/README.md \"Bumping a pin\"; containerd carries runc, so that row first." ;;
+              1) echo "**Pins:** at least one lab host pin is behind upstream (table below). The \`propose\` job moved every one whose checksum or digest the publisher served, in one pull request per pin set (sets with a bump this week: \`${BUMP_SETS}\`; the branches are \`chore/lab-pins-host\` and \`chore/lab-pins-image-base\`). containerd carries runc: docs/runbooks/labs-host.md, \"Runtime advisories\", has the response times." ;;
               *) echo "**Pins:** at least one source could not be read, so the pin check did not evaluate (table below)." ;;
             esac
             echo
             cat "${RUNNER_TEMP}/pins.md"
             echo
+            if [ -s "${RUNNER_TEMP}/bump-notes.md" ]; then
+              echo "**Not bumped automatically:** a bump without a verifiable checksum is not a bump. Each of these needs a person (lab-host/README.md, \"Bumping a pin\")."
+              echo
+              cat "${RUNNER_TEMP}/bump-notes.md"
+              echo
+            fi
             if [ "${SCAN_FAILED}" = "1" ]; then
-              echo "**Images:** a published lab image carries a HIGH or CRITICAL vulnerability with a fix available. Bump the base image or the tool in lab-image/versions.env and push; publish-lab-image.yml rebuilds and the consumers' digests then need their pin."
+              echo "**Images:** a published lab image carries a HIGH or CRITICAL vulnerability with a fix available. A newer base digest arrives as the \`chore/lab-pins-image-base\` pull request, and publish-lab-image.yml's weekly rebuild refreshes the full image's Debian packages; a fix in a tool is a bump in lab-image/versions.env. Each publish from main opens the \`chore/lab-pins-image-digests\` pull request that pins the new digests where they run."
             else
               echo "**Images:** no HIGH or CRITICAL vulnerability with a fix available."
             fi

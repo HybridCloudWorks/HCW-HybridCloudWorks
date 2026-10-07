@@ -45,6 +45,9 @@ the admin Labs page's Setup tab used to ask the owner to do by hand.
 | `hardening_fail2ban_maxretry` | `5` | Failures before a ban |
 | `hardening_fail2ban_findtime` | `10m` | Counting window |
 | `hardening_fail2ban_bantime` | `1h` | Ban length |
+| `hardening_held_report_tag` | `hcw-held-upgradable` | Syslog tag of the held-package report |
+| `hardening_held_report_script_path` | `/usr/local/sbin/hcw-held-upgradable` | Where the report script is installed |
+| `hardening_held_report_on_calendar` | `*-*-* 07:15:00` | When the report runs (systemd `OnCalendar`) |
 
 `meta/argument_specs.yml` is the contract; the table is a summary of it.
 
@@ -53,11 +56,44 @@ the admin Labs page's Setup tab used to ask the owner to do by hand.
    Caddy, Vault). When one of them enters the failed state it logs one line
    at `daemon.err`, which the Arc data collection rule ships and
    `alert-lab-unit-failed` pages on (LAB-2, 2026-10-06).
+7. `hcw-held-upgradable`, a daily timer (LAB-3, #949). The docker,
+   labs_agent and arc roles hold their packages so that unattended-upgrades
+   cannot move them, which also means nothing on the host said when a fix
+   for one was waiting. Once a day, after the unattended-upgrades reboot
+   window, the script reads `apt-mark showhold` and `apt list --upgradable`
+   and logs, under the tag `hcw-held-upgradable`:
+
+   - one line per held package apt could upgrade, at `daemon.warning`,
+     which the Arc data collection rule ships to Log Analytics:
+     `held package containerd.io is upgradable: installed <version>,
+     candidate <version>. ...`;
+   - otherwise one line at `daemon.notice`, which stays on the host:
+     `no held package is upgradable: 5 held (...); package lists from
+     <time>`.
+
+   It reads the lists `apt-daily.timer` refreshes and changes nothing, so it
+   never takes apt's locks; it runs as a dynamic user. A failed run is a
+   line from the failure notifier above (`OnFailure=`). On the host, bash:
+   `journalctl -t hcw-held-upgradable --since -2d` shows the last two days,
+   and `sudo systemctl start hcw-held-upgradable.service` runs it now. What
+   to do about a warning line is `docs/runbooks/labs-host.md`, "Runtime
+   advisories".
 
 ## Handlers
 
 `Restart ssh`, `Restart unattended-upgrades`, `Restart fail2ban`, `Reload
-systemd for the failure notifier`.
+systemd for the failure notifier`, `Reload systemd for the held-package
+report`.
+
+## Tests
+
+`tests/hcw-held-upgradable.test.sh` renders the report script and its two
+units with the role's defaults and runs the script against stub `apt-mark`,
+`apt` and `logger`: one warning line per held package with an upgrade and
+none for a package that is not held, the notice line when nothing is
+upgradable, and a non-zero exit when apt fails. It needs neither root nor
+Docker; CI runs it in the `ansible-lint (lab-host)` job, and
+`lab-host/README.md` ("Validating without a host") has the container line.
 
 ## Check mode
 

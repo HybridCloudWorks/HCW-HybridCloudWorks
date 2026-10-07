@@ -8,6 +8,7 @@ argument_specs:
       - Sets ufw to deny inbound and allow outbound with an explicit inbound TCP allowlist.
       - Turns on unattended-upgrades with an automatic reboot at a fixed hour.
       - Enables a fail2ban sshd jail on the systemd backend.
+      - Reports, daily to syslog, every held package apt could upgrade (hcw-held-upgradable).
     author: HybridCloudWorks
     options:
       hardening_packages:
@@ -66,3 +67,22 @@ argument_specs:
         required: false
         default: 1h
         description: How long a banned address stays banned.
+      hardening_held_report_tag:
+        type: str
+        required: false
+        default: hcw-held-upgradable
+        description:
+          - The syslog tag (ProcessName in Log Analytics) of the daily held-package report.
+          - One line per held package apt could upgrade goes to daemon.warning, which the Arc
+            data collection rule ships; the all-clear line goes to daemon.notice and stays on
+            the host.
+      hardening_held_report_script_path:
+        type: str
+        required: false
+        default: /usr/local/sbin/hcw-held-upgradable
+        description: Where the held-package report script is installed; the service runs it.
+      hardening_held_report_on_calendar:
+        type: str
+        required: false
+        default: "*-*-* 07:15:00"
+        description: systemd OnCalendar expression for the daily held-package report.

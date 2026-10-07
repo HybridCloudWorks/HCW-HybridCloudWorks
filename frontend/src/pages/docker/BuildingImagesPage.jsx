@@ -374,9 +374,9 @@ export default function DockerBuildingImagesPage() {
 
       <GuideSection id="publish" title="Publishing to GitHub Container Registry">
         <p className={PROSE}>
-          <SourceLink href={SOURCE_LINKS.workflow}>publish-lab-image.yml</SourceLink> has three
-          jobs. The first two keep validation and publishing apart, so the code a pull request can
-          change never runs with a token that can publish.
+          <SourceLink href={SOURCE_LINKS.workflow}>publish-lab-image.yml</SourceLink> has five jobs.
+          The first two keep validation and publishing apart, so the code a pull request can change
+          never runs with a token that can publish.
         </p>
         <ul className={`${PROSE} list-disc space-y-2 pl-5`}>
           <li>
@@ -392,13 +392,20 @@ export default function DockerBuildingImagesPage() {
             the digests to the run’s summary. This job alone holds <Code>packages: write</Code>, and
             it signs in to the registry with the run’s own token, so no password is stored anywhere.
           </li>
+          <li>
+            <strong>Every week</strong> the workflow also rebuilds both targets from main without
+            the build cache, so the operating system packages the <Code>full</Code> image installs
+            pick up their security fixes. It publishes the rebuild only when those packages have
+            changed, tagged with the commit’s SHA and the date.
+          </li>
         </ul>
         <p className={PROSE}>
           The result is <Code>{GHCR_IMAGE}</Code>, public, so pulling it needs no sign-in. The third
           job, <strong>publish-dockerhub</strong>, runs after <strong>publish</strong> when Docker
           Hub publishing is switched on, and copies the same images there by digest, which is where
           the lab pages’ own <Code>docker run</Code> line pulls from, and the bytes are the same in
-          both.
+          both. The lab itself runs each image by its digest, never by a tag, so the last two jobs
+          open a pull request that moves those digests to the images just published.
         </p>
         <Commands commands={COMMANDS.pull} testId="commands-pull" />
       </GuideSection>

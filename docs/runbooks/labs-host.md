@@ -6,6 +6,8 @@ checks before it changes anything; how the lab agent goes live, which is one
 PowerShell line; how the owner reaches Portainer and
 initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26),
 and moves that Vault to auto-unseal through the Arc identity (#726);
+how fast a runc, containerd or Docker Engine advisory is fixed on the host,
+and who does what ("Runtime advisories", #949);
 and how the host becomes an Azure Arc-enabled server in
 `rg-lab-hybrid-prod-cus`, sends heartbeat and `auth`/`authpriv` syslog to the
 Management workspace, and is audited against the Linux security baseline,
@@ -993,6 +995,119 @@ Management workspace as an `AzureDiagnostics` row with the caller's IP
 address, from the vault's AuditEvent diagnostic setting. When the owner has
 seen the host come back unsealed from a reboot, the cold copy can go:
 `sudo rm /root/vault-before-726.tgz`.
+
+## Runtime advisories
+
+**Stated 2026-10-07** (#949, estate review LAB-3). The lab host runs
+visitors' and learners' code in containers, so the container runtime is the
+boundary between that code and the host: runc (which Docker ships inside the
+`containerd.io` package), containerd, and Docker Engine. All three are pinned
+and held by the `docker` role, so `unattended-upgrades` never moves them, and
+every runtime fix reaches the host through a pin bump in
+`lab-host/ansible/group_vars/all.yml`, a merge, and a `bootstrap.sh` run.
+These are the times that path is held to.
+
+### Response times
+
+The clock starts when the fixed package is in Docker's apt repository for
+Ubuntu 26.04 (`download.docker.com/linux/ubuntu`, suite `resolute`), which is
+what the host installs from, and stops when `bootstrap.sh` has installed it
+on the host.
+
+| Advisory | Fix on the host within | How |
+| --- | --- | --- |
+| Critical, or a container escape with a public exploit, at any severity | 48 hours | Dispatch the weekly workflow at once (below), merge its pull request, run `bootstrap.sh` |
+| High | 7 days | The weekly pull request if it falls inside the 7 days, otherwise a dispatch as above |
+| Medium or Low | The next weekly pull request | Merged with that week's bumps, then `bootstrap.sh` |
+
+While a Critical fix is not yet in Docker's repository, the host's own
+answer is to stop taking new code: the kill switches in
+`lab-host/README.md` ("Kill switches") close sign-ups or stop Coder, and
+stopping the `hcw-labs-agent` service stops the public jobs. Reopen when the
+fix is installed.
+
+### What runs on its own
+
+- **Every day, on the host:** `hcw-held-upgradable.timer` (the `hardening`
+  role, at 07:15 host time) logs one line per held package that apt could
+  upgrade, at `daemon.warning` with the tag `hcw-held-upgradable`, which the
+  Arc data collection rule ships to the Management workspace as a `Syslog`
+  row with that `ProcessName`. No line at warning means nothing held has an
+  upgrade waiting; the all-clear line stays on the host at `notice`. An alert
+  on those rows is not built yet: that is PLAT-4's work, not this page's.
+- **Tuesdays 05:20 UTC:** `publish-lab-image.yml` rebuilds the lab images and
+  publishes them only when the `full` image's Debian packages moved; each
+  publish opens the `chore/lab-pins-image-digests` pull request.
+- **Tuesdays 06:45 UTC:** `lab-supply-chain.yml` compares every lab host pin
+  with its publisher, opens or updates the `chore/lab-pins-host` pull
+  request with each behind pin moved and its checksum or digest beside it,
+  proposes the newest lab image base digest as `chore/lab-pins-image-base`,
+  scans the two published lab images with Trivy, and opens or comments on
+  one issue when anything is due, including any pin it could not move
+  because the publisher served no checksum to verify it against.
+
+### What the owner does
+
+**Watch the three projects' advisories**, once: on each page below,
+**Watch** → **Custom** → **Security alerts**.
+
+- https://github.com/opencontainers/runc/security/advisories
+- https://github.com/containerd/containerd/security/advisories
+- https://github.com/moby/moby/security/advisories
+
+**For a 48-hour advisory, start the weekly run now.** PowerShell:
+
+```powershell
+gh workflow run lab-supply-chain.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+```
+
+Success is no output and exit code 0. About five minutes later the pull
+request is open or updated; this lists it, and a successful result is one
+row whose branch is `chore/lab-pins-host`:
+
+```powershell
+gh pr list --repo HybridCloudWorks/HCW-HybridCloudWorks --head chore/lab-pins-host
+```
+
+No row, and the run's summary saying the `containerd.io (carries runc)` row
+is `current`, means Docker has not published the fix for 26.04 yet: the
+kill switches above apply until it has.
+
+**Merge it** when its checks are green (a session merges on green, per
+`.claude/CLAUDE.md`). Its body names every value it moved and where each
+checksum was read.
+
+**Install it.** PowerShell:
+
+```powershell
+ssh -t hcw-lab "sudo /opt/hcw-src/lab-host/bootstrap.sh"
+```
+
+A good run ends with a `PLAY RECAP` line for `localhost` showing `failed=0`
+and `unreachable=0`. The package upgrade restarts the Docker daemon, which
+stops running workspaces and jobs; they start again on the next visit.
+
+**Check what runs.** PowerShell:
+
+```powershell
+ssh hcw-lab "dpkg-query -W docker-ce containerd.io && runc --version"
+```
+
+Success is the versions the pull request named, and runc's own version from
+the `containerd.io` package. Then the daily report, run now. PowerShell:
+
+```powershell
+ssh hcw-lab "sudo systemctl start hcw-held-upgradable.service && sudo journalctl -t hcw-held-upgradable --since -5min --no-pager"
+```
+
+Success is a line `no held package is upgradable: ...` (or warning lines
+only for packages the advisory did not concern). A warning line naming
+`containerd.io` or `docker-ce` means the run installed an older version
+than Docker now offers: the weekly pull request is behind again, and the
+next dispatch moves it.
+
+The hand procedure behind all of this, for a pin the workflow cannot move,
+is `lab-host/README.md`, "Bumping a pin".
 
 ## Arc onboarding
 

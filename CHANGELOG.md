@@ -116,6 +116,51 @@ This project has not cut a tagged release; entries are grouped under
   container and would clip anything placed against the 64 px rail; the
   browser test checks it is painted outside the rail.
 
+- **Lab pins move themselves by pull request, each with its publisher's
+  checksum; the lab images rebuild weekly; the host reports held packages
+  with an upgrade waiting; runtime advisories have stated response times
+  (estate review 2026-10-06, finding LAB-3, the remainder; #949).** The
+  weekly check from #899 reported and bumped nothing. Now
+  `scripts/lab-pins-upstream.mjs --bump <set>` makes the edits, and only
+  with the checksum or digest read from the publisher beside each version
+  (new `scripts/lib/lab-pin-bumps.mjs`): a Docker or NodeSource package's
+  SHA256 from the Packages index whose own hash InRelease lists, an image's
+  index digest from the registry (bytes hashed, Docker-Content-Digest
+  agreed) and the Docker Hub API, HashiCorp's SHA256SUMS, node_exporter's
+  sha256sums.txt, and the Go checksum database for the Caddy module. A pin
+  the check calls current is re-read too when its publisher can rebuild a
+  release under the same name (an image tag re-pushed on a patched base,
+  such as `postgres:18.6` that day, or a new Debian revision), and its digest
+  or revision moves. A pin with no verifiable checksum is not edited; it is
+  listed in the weekly issue. `--dry-run` prints the planned edits. `lab-supply-chain.yml` gains
+  a `propose` job (read-only) and a `pull-request` job that keeps one pull
+  request per pin set open on a fixed branch (`chore/lab-pins-host`,
+  `chore/lab-pins-image-base`), replacing its commit and body while it is
+  open and never overwriting a commit someone else added
+  (`scripts/open-lab-pin-pr.mjs`), with the GitHub App token the other
+  scheduled pull requests use, so the required checks run and no workflow
+  holds `contents: write`. The lab image base moves within its release line
+  (`python:3.14-slim-trixie` today, so 3.14.7 to 3.14.8) with
+  `BASE_PYTHON_VERSION` and every FROM. `publish-lab-image.yml` gains a
+  Tuesday 05:20 UTC rebuild that publishes only when the `full` image's
+  Debian packages moved (tagged `<sha>-rebuilt-<date>`), and after every
+  publish a `chore/lab-pins-image-digests` pull request pins the new digests
+  in `vps-agent/lib/capabilities.js` and the Coder template, each read again
+  from GHCR first; `capabilities.js` leaves the push filter so that merge
+  does not republish. Its header says what a rebuild changes on its own
+  (the Debian packages of `full`) and what it cannot (the base, its Python,
+  every tool in `versions.env`), and the Building images guide on the site
+  says the same. The `hardening` role installs
+  `hcw-held-upgradable.timer`, daily at 07:15: one `daemon.warning` line
+  tagged `hcw-held-upgradable` per held package apt could upgrade, which
+  the Arc data collection rule ships, and a `notice` line when none, with
+  its own test in the `ansible-lint (lab-host)` job. `docs/runbooks/labs-host.md`
+  "Runtime advisories" states the response times for a runc, containerd or
+  Docker Engine fix (48 hours for a critical or an exploited escape, 7 days
+  for high, the next weekly bump otherwise), what runs on its own and the
+  owner's commands. The checker also watches buildx and compose. An alert
+  on the new syslog line is PLAT-4's work.
+
 - **Admin Labs → Coder tab: Coder's own dashboard, framed (owner,
   2026-10-07).** Coder's pages open only inside the site (the lab host's
   panes-only rule), and since #925 the lab panes never show one, so the

@@ -1,0 +1,205 @@
+/**
+ * The lab pin-bump pull requests (#949): what the opener may stage, how it
+ * keeps one pull request per set, and what the two workflows that run it may
+ * hold. The same tripwires as version-floors-workflow.test.mjs, for the same
+ * reason: a job that pushes a branch with an App token must be held to the
+ * paths it means to push.
+ */
+import { describe, it, expect } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { BOT, SETS, changedPaths, decide, foreignIdentities, prBody } from './open-lab-pin-pr.mjs';
+import {
+  CAPABILITIES_PATH,
+  CODER_TEMPLATE_PATH,
+  DOCKERFILE_PATH,
+  GROUP_VARS_PATH,
+  SANDBOX_DOCKERFILE_PATH,
+  VERSIONS_ENV_PATH,
+} from './lib/lab-pin-bumps.mjs';
+import { BUMP_SETS } from './lab-pins-upstream.mjs';
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
+const workflow = (name) => readFileSync(join(REPO, '.github', 'workflows', name), 'utf8');
+const commandLines = (source) => source.split(/\r?\n/).filter((line) => !/^\s*#/.test(line));
+const job = (source, name, next) => source.slice(source.indexOf(`\n  ${name}:\n`), next ? source.indexOf(`\n  ${next}:\n`) : undefined);
+
+describe('the pin sets', () => {
+  it('are the sets lab-pins-upstream.mjs can bump, each on its own branch', () => {
+    expect(Object.keys(SETS).sort()).toEqual([...BUMP_SETS].sort());
+    const branches = Object.values(SETS).map((s) => s.branch);
+    expect(new Set(branches).size).toBe(branches.length);
+    for (const s of Object.values(SETS)) expect(s.branch).toMatch(/^chore\/lab-pins-/);
+  });
+
+  it('may touch exactly the files their planners edit, and each exists', () => {
+    expect(SETS.host.paths).toEqual([GROUP_VARS_PATH]);
+    expect(SETS['image-base'].paths).toEqual([VERSIONS_ENV_PATH, DOCKERFILE_PATH, SANDBOX_DOCKERFILE_PATH]);
+    expect(SETS['image-digests'].paths).toEqual([CAPABILITIES_PATH, CODER_TEMPLATE_PATH]);
+    for (const s of Object.values(SETS)) for (const p of s.paths) expect(existsSync(join(REPO, p)), p).toBe(true);
+  });
+
+  it('keeps one pull request per set: open, refresh, push, or comment when someone else committed', () => {
+    const pull = { number: 7 };
+    expect(decide({ pull: null, remote: null, localTree: 'a' })).toBe('push-and-open');
+    expect(decide({ pull: null, remote: { tree: 'a', foreignAuthors: [] }, localTree: 'a' })).toBe('open');
+    expect(decide({ pull, remote: { tree: 'a', foreignAuthors: [] }, localTree: 'a' })).toBe('refresh');
+    expect(decide({ pull, remote: { tree: 'b', foreignAuthors: [] }, localTree: 'a' })).toBe('push-and-refresh');
+    expect(decide({ pull, remote: { tree: 'b', foreignAuthors: ['owner@example.com'] }, localTree: 'a' })).toBe('comment');
+    // An abandoned branch with no open pull request is the bot's to reuse.
+    expect(decide({ pull: null, remote: { tree: 'b', foreignAuthors: ['owner@example.com'] }, localTree: 'a' })).toBe('push-and-open');
+  });
+
+  it('counts a person as the committer of an amended bot commit, not only as an author', () => {
+    const bot = { email: BOT.email };
+    expect(foreignIdentities([{ commit: { author: bot, committer: bot } }])).toEqual([]);
+    expect(foreignIdentities([{ commit: { author: bot, committer: { email: 'owner@example.com' } } }])).toEqual(['owner@example.com']);
+    expect(
+      foreignIdentities([
+        { commit: { author: { email: 'owner@example.com' }, committer: { email: 'owner@example.com' } } },
+        { commit: { author: bot, committer: { email: 'owner@example.com' } } },
+      ])
+    ).toEqual(['owner@example.com']);
+    expect(foreignIdentities(undefined)).toEqual([]);
+  });
+
+  it('reads changed paths from git status --porcelain', () => {
+    expect(changedPaths(' M lab-image/versions.env\n?? x.txt\n')).toEqual(['lab-image/versions.env', 'x.txt']);
+  });
+
+  it('writes a body with the evidence, the notes, the owner\'s next step and the issue', () => {
+    const body = prBody({ set: 'host', evidence: '### Caddy: 2.11.4 → 2.11.7\n', notes: '- **Coder** 2.38.0 → 2.39.0: HTTP 404\n', runUrl: 'https://example/run/1' });
+    expect(body).toContain('## Evidence\n\n### Caddy');
+    expect(body).toContain('## Not bumped\n\n- **Coder**');
+    expect(body).toContain('ssh -t hcw-lab "sudo /opt/hcw-src/lab-host/bootstrap.sh"');
+    expect(body).toContain('Refs #949');
+    expect(body).not.toMatch(/Closes #|THE_|<your/);
+    const digests = prBody({ set: 'image-digests', evidence: 'x', notes: '', runUrl: 'u' });
+    expect(digests).toContain('/usr/local/sbin/hcw-coder-template-push');
+    expect(digests).not.toContain('## Not bumped');
+  });
+
+  it('commits as the same App identity the other scheduled pull requests use', () => {
+    expect(BOT.email).toBe('hcw-manifest[bot]@users.noreply.github.com');
+  });
+});
+
+describe('open-lab-pin-pr.mjs', () => {
+  const source = readFileSync(join(REPO, 'scripts', 'open-lab-pin-pr.mjs'), 'utf8');
+
+  it('stages the set\'s paths by name, never everything', () => {
+    expect(source).toContain("git('add', '--', ...s.paths)");
+    expect(source).not.toMatch(/'add',\s*'(-A|--all|\.)'/);
+    expect(source).not.toMatch(/'commit',\s*'-a/);
+  });
+
+  it('refuses to run when a path outside the set changed', () => {
+    expect(source).toContain('paths outside the');
+  });
+
+  it('opens ready for review, never as a draft, and force-pushes only with a lease', () => {
+    expect(source).toContain('draft: false');
+    expect(source).not.toContain('draft: true');
+    expect(source).toMatch(/--force-with-lease=refs\/heads\//);
+    expect(source).not.toMatch(/'--force'[,)]/);
+  });
+});
+
+describe('lab-supply-chain.yml', () => {
+  const source = workflow('lab-supply-chain.yml');
+  const lines = commandLines(source);
+  const propose = job(source, 'propose', 'pull-request');
+  const pullRequest = job(source, 'pull-request', 'check');
+  const check = job(source, 'check');
+
+  it('runs on Tuesdays at 06:45 UTC and by hand, once', () => {
+    expect(lines.filter((l) => /cron:/.test(l))).toEqual(["    - cron: '45 6 * * 2'"]);
+    expect(lines.some((l) => /^\s*workflow_dispatch:/.test(l))).toBe(true);
+  });
+
+  it('plans both sets in a job that can read and nothing more', () => {
+    expect(propose).toContain('contents: read');
+    expect(propose).not.toMatch(/secrets\./);
+    expect(propose).toContain('for set in host image-base; do');
+    expect(propose).toContain('node scripts/lab-pins-upstream.mjs --bump "$set"');
+  });
+
+  it('opens the pull requests from the automation environment with the App token, masked first and revoked after', () => {
+    expect(pullRequest).toContain('environment: automation');
+    expect(pullRequest).toContain('contents: read');
+    expect(pullRequest).toContain('node scripts/open-lab-pin-pr.mjs --set "$SET"');
+    expect(pullRequest.indexOf('::add-mask::')).toBeGreaterThan(-1);
+    expect(pullRequest.indexOf('::add-mask::')).toBeLessThan(pullRequest.indexOf('token=${token}'));
+    expect(pullRequest).toContain('node scripts/github-app-token.mjs --revoke');
+    expect(pullRequest).toContain("if: needs.propose.outputs.sets != '[]'");
+  });
+
+  it('puts the notes of pins it could not verify into the weekly issue', () => {
+    expect(check).toContain('needs: propose');
+    expect(check).toContain('if: always()');
+    expect(check).toContain("steps.notes.outputs.present == 'true'");
+    expect(check).toContain('Not bumped automatically');
+  });
+
+  it('holds no write grant on contents or pull requests, and pins every action by SHA', () => {
+    expect(lines.some((l) => /contents:\s*write/.test(l))).toBe(false);
+    expect(lines.some((l) => /pull-requests:\s*write/.test(l))).toBe(false);
+    expect(lines.some((l) => /^permissions:\s*\{\}/.test(l))).toBe(true);
+    const uses = lines.filter((l) => /^\s*(- )?uses:\s/.test(l));
+    expect(uses.length).toBeGreaterThan(5);
+    for (const line of uses) expect(line, line.trim()).toMatch(/@[0-9a-f]{40}\s+#\s*v\d/);
+  });
+
+  it('never stages with git add', () => {
+    expect(lines.filter((l) => /\bgit add\b/.test(l))).toEqual([]);
+  });
+});
+
+describe('publish-lab-image.yml', () => {
+  const source = workflow('publish-lab-image.yml');
+  const lines = commandLines(source);
+  const build = job(source, 'build', 'publish');
+  const publish = job(source, 'publish', 'publish-dockerhub');
+  const propose = job(source, 'propose-pins', 'pin-pull-request');
+  const pullRequest = job(source, 'pin-pull-request');
+
+  it('rebuilds weekly on Tuesdays at 05:20 UTC, ahead of the supply-chain run', () => {
+    expect(lines.filter((l) => /cron:/.test(l))).toEqual(["    - cron: '20 5 * * 2'"]);
+  });
+
+  it('says in its header what a rebuild changes and what it cannot change on its own', () => {
+    expect(source).toContain('What a rebuild changes on its own');
+    expect(source).toContain('What it cannot change on its own');
+  });
+
+  it('publishes a scheduled rebuild only when the full image\'s packages moved, under a tag of its own', () => {
+    expect(build).toContain("if: github.event_name == 'schedule'");
+    expect(build).toContain('dpkg-query');
+    // Every build skips the layer cache on the schedule, or the apt layer is last week's.
+    const builds = source.split('uses: docker/build-push-action@').slice(1);
+    expect(builds).toHaveLength(4);
+    for (const b of builds) expect(b.slice(0, b.indexOf('\n      - name:'))).toContain("no-cache: ${{ github.event_name == 'schedule' }}");
+    expect(build).toContain('rebuild: ${{ steps.rebuild.outputs.rebuild }}');
+    expect(publish).toContain("(github.event_name == 'schedule' && needs.build.outputs.rebuild == 'true')");
+    expect(publish).toContain('tag="${SHA}-rebuilt-$(date -u +%Y%m%d)"');
+    expect(publish).not.toMatch(/docker push "\$\{(RUNNER|FULL)_IMAGE\}:\$\{SHA\}"/);
+  });
+
+  it('does not republish on the merge of its own digest pull request', () => {
+    const push = source.slice(source.indexOf('\n  push:\n'), source.indexOf('\npermissions:'));
+    expect(push).not.toContain("'vps-agent/lib/capabilities.js'");
+    expect(push).not.toContain('lab-host/coder/');
+  });
+
+  it('pins the consumers after every publish, by pull request from the automation environment', () => {
+    expect(propose).toContain('needs: publish');
+    expect(propose).toContain('contents: read');
+    expect(propose).toContain('--bump image-digests');
+    expect(pullRequest).toContain('environment: automation');
+    expect(pullRequest).toContain('node scripts/open-lab-pin-pr.mjs --set image-digests');
+    expect(pullRequest.indexOf('::add-mask::')).toBeLessThan(pullRequest.indexOf('token=${token}'));
+    expect(lines.some((l) => /contents:\s*write/.test(l))).toBe(false);
+    expect(lines.some((l) => /pull-requests:\s*write/.test(l))).toBe(false);
+  });
+});

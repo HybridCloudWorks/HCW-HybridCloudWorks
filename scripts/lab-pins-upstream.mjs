@@ -19,13 +19,31 @@
  * "fine", for the reason .claude/CLAUDE.md gives: a check that cannot run has
  * not run.
  *
- * It does not bump anything. Most of these pins come with a checksum or a
- * digest that has to be read from the publisher and reviewed beside the
- * version, so the bump is a pull request a person reads;
- * .github/workflows/lab-supply-chain.yml turns a non-zero exit into an issue
- * that names what moved. Automating the bump itself is the next step.
+ * Run plainly, it bumps nothing: .github/workflows/lab-supply-chain.yml turns
+ * a non-zero exit into an issue that names what moved.
+ *
+ * With --bump it also makes the edits, for one pin set at a time (#949):
+ *
+ *   --bump host           group_vars/all.yml, for every row reported BEHIND,
+ *                         and for a current image tag or apt package the
+ *                         publisher rebuilt under the same name
+ *   --bump image-base     lab-image/versions.env and its FROM lines, to the
+ *                         newest digest of the base image's release line
+ *   --bump image-digests  vps-agent/lib/capabilities.js and the Coder
+ *                         template, to the two digests named by --runner and
+ *                         --full (publish-lab-image.yml passes what it pushed)
+ *
+ * Each edit carries the checksum or digest read from the publisher beside the
+ * version (scripts/lib/lab-pin-bumps.mjs says what is read from where); a pin
+ * whose checksum cannot be verified is not edited and becomes a note.
+ * --evidence and --notes write the two Markdown sections the pull request
+ * body and the weekly issue are made of. --dry-run prints the planned edits
+ * and writes no repository file. Exit 0 when the plan was made (with or
+ * without edits), 2 when it could not be.
  *
  * Usage: node scripts/lab-pins-upstream.mjs [--summary <file>]
+ *        node scripts/lab-pins-upstream.mjs --bump <set> [--dry-run]
+ *             [--evidence <file>] [--notes <file>] [--runner <ref> --full <ref>]
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -81,6 +99,8 @@ export function readPins(text) {
   return {
     dockerEngine: coreVersion(scalar(resolute, 'engine')),
     containerd: coreVersion(scalar(resolute, 'containerd')),
+    dockerBuildx: coreVersion(scalar(resolute, 'buildx')),
+    dockerCompose: coreVersion(scalar(resolute, 'compose')),
     caddy: coreVersion(scalar(text, 'caddy_version')),
     caddyCloudflare: coreVersion(scalar(text, 'caddy_cloudflare_module_version')),
     coder: coreVersion(scalar(text, 'coder_image_tag')),
@@ -165,6 +185,8 @@ export function sources(env = process.env) {
   return {
     dockerEngine: async () => newestAptVersion(await fetchText(dockerApt), 'docker-ce'),
     containerd: async () => newestAptVersion(await fetchText(dockerApt), 'containerd.io'),
+    dockerBuildx: async () => newestAptVersion(await fetchText(dockerApt), 'docker-buildx-plugin'),
+    dockerCompose: async () => newestAptVersion(await fetchText(dockerApt), 'docker-compose-plugin'),
     caddy: gh('caddyserver/caddy'),
     caddyCloudflare: ghTags('caddy-dns/cloudflare'),
     coder: gh('coder/coder'),
@@ -183,6 +205,8 @@ export function sources(env = process.env) {
 export const LABELS = {
   dockerEngine: 'Docker Engine (docker-ce, Ubuntu 26.04 apt)',
   containerd: 'containerd.io (carries runc)',
+  dockerBuildx: 'docker-buildx-plugin',
+  dockerCompose: 'docker-compose-plugin',
   caddy: 'Caddy',
   caddyCloudflare: 'caddy-dns/cloudflare',
   coder: 'Coder',
@@ -225,8 +249,70 @@ export function renderMarkdown(rows) {
   return lines.join('\n');
 }
 
+/** The value after a flag, or null. */
+export function flag(argv, name) {
+  const at = argv.indexOf(name);
+  return at >= 0 && at + 1 < argv.length ? argv[at + 1] : null;
+}
+
+export const BUMP_SETS = ['host', 'image-base', 'image-digests'];
+
+/**
+ * --bump <set>: plan the set's edits from publisher reads, print them, and
+ * (without --dry-run) write them. The pull request is not opened here:
+ * scripts/open-lab-pin-pr.mjs does that, in a job that holds the App token
+ * and no network input of its own.
+ */
+async function bumpMain(argv) {
+  const set = flag(argv, '--bump');
+  if (!BUMP_SETS.includes(set)) {
+    console.error(`--bump takes one of ${BUMP_SETS.join(', ')}`);
+    return 2;
+  }
+  const dryRun = argv.includes('--dry-run');
+  const bump = await import('./lib/lab-pin-bumps.mjs');
+  const http = bump.makeHttp(fetch, { githubToken: process.env.GITHUB_TOKEN });
+  const read = (path) => readFileSync(join(REPO, path), 'utf8');
+
+  let plan;
+  if (set === 'host') {
+    const text = read(bump.GROUP_VARS_PATH);
+    const { rows } = await check({ pins: readPins(text), readers: sources() });
+    plan = await bump.planHost({ text, rows, http });
+  } else if (set === 'image-base') {
+    const files = Object.fromEntries(
+      [bump.VERSIONS_ENV_PATH, bump.DOCKERFILE_PATH, bump.SANDBOX_DOCKERFILE_PATH].map((p) => [p, read(p)])
+    );
+    plan = await bump.planImageBase({ files, http });
+  } else {
+    const files = Object.fromEntries([bump.CAPABILITIES_PATH, bump.CODER_TEMPLATE_PATH].map((p) => [p, read(p)]));
+    plan = await bump.planImageDigests({ files, http, runner: flag(argv, '--runner'), full: flag(argv, '--full') });
+  }
+
+  const date = new Date().toISOString().slice(0, 10);
+  process.stdout.write(`## Pin set: ${set}${dryRun ? ' (dry run: nothing written)' : ''}\n\n`);
+  process.stdout.write(bump.renderPlan(plan.applied));
+  const notes = bump.renderNotes(plan.notes);
+  if (notes) process.stdout.write(`\n${notes}`);
+
+  if (!dryRun) {
+    for (const [path, text] of Object.entries(plan.files)) {
+      if (text !== read(path)) writeFileSync(join(REPO, path), text);
+    }
+  }
+  const evidenceAt = flag(argv, '--evidence');
+  const notesAt = flag(argv, '--notes');
+  if (evidenceAt) writeFileSync(evidenceAt, bump.renderEvidence(plan.applied, { set, date }));
+  if (notesAt) writeFileSync(notesAt, notes);
+  return 0;
+}
+
 async function main(argv) {
-  const summaryAt = argv.includes('--summary') ? argv[argv.indexOf('--summary') + 1] : null;
+  if (argv.includes('--bump')) {
+    process.exitCode = await bumpMain(argv);
+    return;
+  }
+  const summaryAt = flag(argv, '--summary');
   const pins = readPins(readFileSync(GROUP_VARS, 'utf8'));
   const { rows, exitCode } = await check({ pins, readers: sources() });
   const table = renderMarkdown(rows);

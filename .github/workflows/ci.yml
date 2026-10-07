@@ -429,6 +429,15 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: bash roles/coder/tests/hcw-coder-template-push.test.sh
 
+      # The daily held-package report the hardening role installs (LAB-3,
+      # #949), rendered with the role's defaults and run against stub
+      # apt-mark, apt and logger: one daemon.warning line per held package
+      # with an upgrade, the notice line when none, a failed run when apt
+      # fails. Needs neither root nor Docker.
+      - name: hcw-held-upgradable test
+        if: steps.changes.outputs.relevant == 'true'
+        run: bash roles/hardening/tests/hcw-held-upgradable.test.sh
+
   # lab-host/coder/ is the Coder deployment on the lab host (#679): the
   # Compose file, the hcw-lab workspace template and the test that holds
   # both to the ADR 0032 boundary (the socket in the server only, nothing

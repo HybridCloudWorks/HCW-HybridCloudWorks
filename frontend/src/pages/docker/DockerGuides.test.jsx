@@ -239,8 +239,15 @@ describe('the building images guide matches the files it describes', () => {
     expect(workflow).toContain('push-to-registry: true');
     expect(workflow).toContain('provenance: false');
     expect(workflow).toContain('packages: write');
-    expect(workflow).toContain('docker push "${FULL_IMAGE}:${SHA}"');
+    // The commit's SHA, or the SHA and the date for a weekly rebuild (#949).
+    expect(workflow).toContain('docker push "${FULL_IMAGE}:${TAG}"');
+    expect(workflow).toContain('tag="${SHA}-rebuilt-$(date -u +%Y%m%d)"; else tag="${SHA}"; fi');
     expect(workflow).toContain('docker push "${FULL_IMAGE}:latest"');
+    expect(workflow).toContain("- cron: '20 5 * * 2'");
+    expect(workflow).toContain("no-cache: ${{ github.event_name == 'schedule' }}");
+    expect(workflow).toContain(
+      "(github.event_name == 'schedule' && needs.build.outputs.rebuild == 'true')"
+    );
     expect(workflow).toContain('bash /workspace/smoke.sh full');
     // Exactly one job may write packages: publish.
     expect(workflow.match(/^\s+packages: write$/gm)).toHaveLength(1);
