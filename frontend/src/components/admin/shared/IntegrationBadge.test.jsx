@@ -6,7 +6,7 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
-import IntegrationBadge, { BRANDS, brandFor } from './IntegrationBadge';
+import IntegrationBadge, { BRANDS, COMPOSITE_SERVICES, brandFor } from './IntegrationBadge';
 import { SERVICES } from '@/components/admin/integrations/serviceRegistry';
 
 describe('the registry', () => {
@@ -20,19 +20,19 @@ describe('the registry', () => {
     }
   });
 
-  it('knows every key-based service on the Integrations page that a card would credit', () => {
-    // The education profiles and the site platform values are not third-party
-    // platforms a feature is "powered by"; everything with a key is.
-    const credited = SERVICES.filter(
-      (s) =>
-        (s.secrets ?? []).length > 0 &&
-        s.group !== 'platform' &&
-        s.group !== 'labs' &&
-        s.group !== 'code-quality' &&
-        s.group !== 'cloud' &&
-        s.id !== 'linkie'
-    );
-    for (const service of credited) {
+  it('knows every service on the Integrations page except the two composites, which are named', () => {
+    // Every service card asks for a badge by its id; a vendor with no entry
+    // would get none silently. Only a service that is not one vendor may
+    // have none, and COMPOSITE_SERVICES is that list.
+    const composites = new Set(COMPOSITE_SERVICES);
+    for (const service of SERVICES) {
+      if (composites.has(service.id)) {
+        expect(
+          brandFor(service.id),
+          `${service.id} is composite and must have no brand`
+        ).toBeNull();
+        continue;
+      }
       expect(
         brandFor(service.id),
         `${service.id} (${service.name}) has no brand entry`
@@ -49,12 +49,15 @@ describe('the registry', () => {
 });
 
 describe('the badge', () => {
-  it('says "Powered by <Platform>" in the brand colour, with a medallion that is not read aloud', () => {
+  it('says "Powered by <Platform>" with the brand colour on the border, tint and medallion and the label in theme foreground', () => {
     render(<IntegrationBadge id="telegram" />);
     const pill = screen.getByText(/Powered by Telegram/);
     expect(pill.getAttribute('data-brand')).toBe('telegram');
     expect(pill.getAttribute('title')).toBe('Telegram · https://telegram.org');
     expect(pill.style.getPropertyValue('--brand')).toBe('#26A5E4');
+    // Readable text is never set in the brand colour (WCAG AA at badge sizes).
+    expect(pill.className).toContain('text-foreground');
+    expect(pill.className).not.toMatch(/(^|\s)text-\(--brand\)/);
     expect(pill.querySelector('[aria-hidden="true"]').textContent).toBe('T');
   });
 

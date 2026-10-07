@@ -22,10 +22,17 @@
  * marks, and a letter is never a misuse of anyone's logo.
  *
  * COLOURS are the platform's published primary where that is stated on the
- * platform's own site; the three marked `approximate` were read from the
+ * platform's own site; the entries marked `approximate` were read from the
  * site's wordmark rather than a brand page and are the ones to correct when
  * a brand page says otherwise. Dark mode: a black wordmark colour becomes
  * white (`onDark`), everything else is bright enough as it is.
+ *
+ * THE LABEL IS THEME FOREGROUND, NOT BRAND COLOUR (review of #921). At the
+ * sizes a badge is set in, most brand colours over their own tint fail WCAG
+ * AA — AWS orange at about 2:1, Telegram blue at about 2.5:1 against the 4.5:1
+ * the text needs — and the admin routes are outside the public contrast scan,
+ * so nothing else would catch it. The brand colour stays where it carries
+ * recognition and no words: the border, the tint and the medallion.
  *
  * ADMIN ONLY. The 2026-09-28 rule keeps vendors, tools and models off public
  * pages; this component is for the admin surfaces and nothing here changes
@@ -89,7 +96,17 @@ export const BRANDS = Object.freeze({
   cloudflare: { name: 'Cloudflare', color: '#F6821F', site: 'https://www.cloudflare.com' },
   hashicorp: { name: 'HashiCorp', color: '#7B42BC', site: 'https://www.hashicorp.com' },
   coder: { name: 'Coder', color: '#000000', onDark: '#FFFFFF', site: 'https://coder.com' },
+  linkie: { name: 'Linkie', color: '#7C3AED', site: 'https://linkie.app', approximate: true },
+  qlty: { name: 'Qlty', color: '#3B82F6', site: 'https://qlty.sh', approximate: true },
 });
+
+/**
+ * Services on the Integrations page that are not one vendor, so no single
+ * badge is honest for them: the cloud price lists are three publishers at
+ * once, and the Hybrid Lab card is Coder on this site's own host behind a
+ * Cloudflare check. They get no badge, by decision rather than omission.
+ */
+export const COMPOSITE_SERVICES = Object.freeze(['cloud-pricing', 'hybrid-lab']);
 
 /** The brand for a service id, or null when the registry has no entry. */
 export function brandFor(id) {
@@ -123,7 +140,7 @@ export default function IntegrationBadge({
   const label = `${prefix} ${brand.name}`;
   const pill = (
     <span
-      className={`inline-flex items-center whitespace-nowrap rounded-full border font-medium border-(--brand)/40 bg-(--brand)/10 text-(--brand) dark:border-(--brand-dark)/40 dark:bg-(--brand-dark)/10 dark:text-(--brand-dark) ${sizing.pill} ${className}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border font-medium border-(--brand)/40 bg-(--brand)/10 text-foreground dark:border-(--brand-dark)/40 dark:bg-(--brand-dark)/10 ${sizing.pill} ${className}`}
       style={style}
       title={`${brand.name} · ${brand.site}`}
       data-brand={brand.id}
