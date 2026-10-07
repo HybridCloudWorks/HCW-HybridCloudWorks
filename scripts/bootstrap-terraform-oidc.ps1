@@ -56,7 +56,23 @@
   second step of SEC-1 lands, Contributor on the subscription itself (section
   5 says why it is two steps). There is no management group in this tenant to
   inherit from, so a subscription absent from this list is a subscription
-  Terraform cannot touch. Defaults to IdentitySubscriptionId alone.
+  Terraform cannot touch. When omitted, the script takes the three
+  subscriptions the naming convention names in the signed-in tenant (exactly
+  one sub-app-*, one sub-plat-mgmt-* and one sub-plat-conn-*) and asks
+  nothing; IdentitySubscriptionId is always included. See -ChooseTargets.
+
+.PARAMETER ChooseTargets
+  Show the deployment-target picker even when the naming convention resolves
+  the three targets on its own. The picker lists this tenant's sub-*
+  subscriptions, with the convention's matches preselected.
+
+.PARAMETER ShowAllSubscriptions
+  Widen the picker to every enabled subscription the sign-in can see, in any
+  tenant. Only with -ChooseTargets, and only for a tenant that has not adopted
+  the naming convention: on 2026-10-07 a sign-in that saw forty-six
+  subscriptions, forty-three of them other organisations', was shown all of
+  them as grant candidates, which is the thing this switch exists to make
+  deliberate.
 
   Pass all four platform/application subscriptions in the normal case. Order
   does not matter and duplicates are ignored.
@@ -116,10 +132,14 @@
   it.
 
 .EXAMPLE
-  # Preview, no arguments. The tenant comes from the Azure CLI sign-in, and
-  # the subscriptions are offered as numbered lists with the ones matching the
-  # naming convention preselected.
+  # Preview, no arguments. The tenant comes from the Azure CLI sign-in, the
+  # identity home and the three deployment targets come from the naming
+  # convention, and nothing is asked when each pattern matches exactly once.
   ./scripts/bootstrap-terraform-oidc.ps1 -WhatIf
+
+.EXAMPLE
+  # Pick the targets by hand from this tenant's sub-* subscriptions.
+  ./scripts/bootstrap-terraform-oidc.ps1 -ChooseTargets -WhatIf
 
 .EXAMPLE
   # Same, on a machine with no browser of its own.
@@ -162,6 +182,16 @@ param(
   # the next bootstrap run would recreate the region drift that the centralus
   # consolidation removed.
   [switch] $ReplaceFederatedCredentials,
+  # The deployment targets are decided by the naming convention: exactly one
+  # sub-app-*, one sub-plat-mgmt-* and one sub-plat-conn-* subscription. When
+  # the sign-in sees exactly that, the script takes them and asks nothing.
+  # -ChooseTargets forces the picker anyway; the picker then lists only the
+  # convention's sub-* subscriptions, and -ShowAllSubscriptions widens it to
+  # everything the sign-in can see (2026-10-07: a sign-in with forty-six
+  # subscriptions, forty-three of them other organisations', was shown all
+  # of them as candidates for a Terraform grant).
+  [switch] $ChooseTargets,
+  [switch] $ShowAllSubscriptions,
   [string] $ResourceGroupName = 'rg-mgmt-boot-prod-cus',
   [string] $IdentityName = 'id-plat-terraform-prod-cus-01',
   [string] $Location = 'centralus',
@@ -324,11 +354,35 @@ if ($TargetSubscriptionIds.Count -eq 0) {
   # Preselect exactly what the configuration targets: the three subscriptions
   # behind the default, mgmt and conn providers. Identity is deliberately not
   # among them — that landing zone holds nothing (providers.tf).
-  $preselected = @($visible | Where-Object {
-      $_.name -like 'sub-app-*' -or $_.name -like 'sub-plat-mgmt-*' -or $_.name -like 'sub-plat-conn-*'
-    })
-  $TargetSubscriptionIds = @((Select-OptionSet -Title 'Deployment targets' -Options $visible `
+  $targetPatterns = @('sub-app-*', 'sub-plat-mgmt-*', 'sub-plat-conn-*')
+  # Only this tenant's subscriptions can be a target: a sign-in that also
+  # sees other organisations' subscriptions (a partner or guest account) must
+  # never have one of them matched by name and granted to.
+  $inTenant = @($visible | Where-Object { $_.tenantId -eq $TenantId })
+  $preselected = @()
+  $oneEach = $true
+  foreach ($pattern in $targetPatterns) {
+    $matched = @($inTenant | Where-Object { $_.name -like $pattern })
+    if ($matched.Count -ne 1) { $oneEach = $false }
+    $preselected += $matched
+  }
+  # One match per pattern is the convention's answer, and the convention is
+  # the contract: take it, say so, and ask nothing. The picker is for a
+  # tenant that has not adopted it, or an operator who asked for it.
+  if ($oneEach -and -not $ChooseTargets) {
+    Write-Ok 'Deployment targets (one per naming-convention pattern; -ChooseTargets to pick instead):'
+    foreach ($item in $preselected) { Write-Info "  $(Format-Subscription $item)" }
+    $TargetSubscriptionIds = @($preselected.id)
+  } else {
+  $candidates = if ($ShowAllSubscriptions) { $visible } else { @($inTenant | Where-Object { $_.name -like 'sub-*' }) }
+  if ($candidates.Count -eq 0) { $candidates = $inTenant }
+  if ($candidates.Count -eq 0) { $candidates = $visible }
+  if (-not $ShowAllSubscriptions -and $candidates.Count -lt $visible.Count) {
+    Write-Info "Listing the $($candidates.Count) sub-* subscriptions in tenant $TenantId; -ShowAllSubscriptions lists all $($visible.Count) the sign-in can see."
+  }
+  $TargetSubscriptionIds = @((Select-OptionSet -Title 'Deployment targets' -Options $candidates `
         -Label ${function:Format-Subscription} -Preselected $preselected).id)
+  }
 }
 
 # The identity's own subscription is always a deployment target: Terraform

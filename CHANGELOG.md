@@ -3845,6 +3845,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`bootstrap-terraform-oidc.ps1` takes the three deployment targets from
+  the naming convention and asks nothing.** On 2026-10-07 the picker listed
+  all forty-six subscriptions the owner's sign-in could see, forty-three of
+  them other organisations', as candidates for a Terraform grant, with the
+  right three merely starred. When exactly one `sub-app-*`, one
+  `sub-plat-mgmt-*` and one `sub-plat-conn-*` subscription is visible the
+  script now prints them as `[ok]` and continues; `-ChooseTargets` brings the
+  picker back, which then lists only `sub-*` subscriptions unless
+  `-ShowAllSubscriptions` is given.
 - **`bootstrap-terraform-oidc.ps1` no longer replaces a federated credential
   whose subject differs without being told to.** On 2026-10-07 the
   `hcw-azure` workspace was found in HCP Terraform's `Default Project` while
