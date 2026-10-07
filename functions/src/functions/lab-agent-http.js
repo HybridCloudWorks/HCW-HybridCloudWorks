@@ -22,7 +22,7 @@ const handlers = (context) =>
   createLabAgentHandlers({
     guard: getDefaultAgentGuard(),
     store: { queryDocs, readDoc, patchDoc, replaceDocIfMatch },
-    notifier: createNotifier({ store: { readDoc, upsertDoc }, log: context }),
+    notifier: createNotifier({ store: { readDoc, upsertDoc, patchDoc }, log: context }),
   });
 
 httpRoute('claimLabJob', {

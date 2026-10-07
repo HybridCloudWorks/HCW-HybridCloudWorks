@@ -162,44 +162,35 @@ export function describeNotified(notified) {
   return `Telegram said: ${stages.map(([, word]) => word).join(' · ')} · last ${relativeTime(latest)}`;
 }
 
-/**
- * What the test route's answer means, in the words the owner needs. Telegram's
- * status decides the sentence on a refusal: 403 is a blocked bot, 400 a chat
- * it cannot find, 401 a bad token.
- */
+/** What the test route's answer means, in the words the owner needs. */
+const TEST_OUTCOMES = {
+  sent: { ok: true, text: 'Sent. Check Telegram for "Test from Platform Settings".' },
+  cooldown: {
+    ok: true,
+    text: 'A test went out less than fifteen minutes ago; that one is the proof. Try again later for a fresh one.',
+  },
+  not_configured: {
+    ok: false,
+    text: 'Telegram is not configured on the app: the bot token or the chat id is missing.',
+  },
+  exception: { ok: false, text: 'Telegram could not be reached. Try again in a minute.' },
+};
+
+/** Telegram's status decides the sentence on a refusal. */
+const TELEGRAM_REFUSALS = {
+  403: 'Telegram refused (403): the bot is blocked. Open its chat and press Unblock or Restart.',
+  400: 'Telegram refused (400): it cannot find the chat; the stored chat id is not yours.',
+  401: 'Telegram refused (401): the stored bot token is not valid.',
+};
+
 export function describeTestResult(result) {
-  if (result?.sent)
-    return { ok: true, text: 'Sent. Check Telegram for "Test from Platform Settings".' };
-  const reason = result?.reason;
-  if (reason === 'cooldown') {
-    return {
-      ok: true,
-      text: 'A test went out less than fifteen minutes ago; that one is the proof. Try again later for a fresh one.',
-    };
-  }
-  if (reason === 'not_configured') {
-    return {
-      ok: false,
-      text: 'Telegram is not configured on the app: the bot token or the chat id is missing.',
-    };
-  }
-  if (reason === 'telegram_error') {
+  if (result?.sent) return TEST_OUTCOMES.sent;
+  if (result?.reason === 'telegram_error') {
     const status = Number(result?.status);
-    if (status === 403)
-      return {
-        ok: false,
-        text: 'Telegram refused (403): the bot is blocked. Open its chat and press Unblock or Restart.',
-      };
-    if (status === 400)
-      return {
-        ok: false,
-        text: 'Telegram refused (400): it cannot find the chat; the stored chat id is not yours.',
-      };
-    if (status === 401)
-      return { ok: false, text: 'Telegram refused (401): the stored bot token is not valid.' };
-    return { ok: false, text: `Telegram refused${Number.isFinite(status) ? ` (${status})` : ''}.` };
+    const fallback = `Telegram refused${Number.isFinite(status) ? ` (${status})` : ''}.`;
+    return { ok: false, text: TELEGRAM_REFUSALS[status] ?? fallback };
   }
-  return { ok: false, text: 'Telegram could not be reached. Try again in a minute.' };
+  return TEST_OUTCOMES[result?.reason] ?? TEST_OUTCOMES.exception;
 }
 
 /** The button at the top: one test through the production notifier, and what came back. */

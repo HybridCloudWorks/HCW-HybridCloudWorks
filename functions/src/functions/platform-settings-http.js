@@ -17,7 +17,7 @@
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { queryDocs, readDoc, upsertDoc } from '../lib/cosmos-client.js';
+import { patchDoc, queryDocs, readDoc, upsertDoc } from '../lib/cosmos-client.js';
 import { createPlatformSettingsHandlers } from '../lib/platform-settings.js';
 import { createNotifier } from '../lib/notify.js';
 import { createNotifyTestHandlers } from '../lib/notify-test.js';
@@ -30,6 +30,7 @@ const handlers = () =>
 
 // Test Telegram (owner brief 2026-10-06): one message through the production
 // notifier, so the Reminders tab can prove the channel before relying on it.
+// The notifier claims its cooldown with a conditional patch, hence patchDoc.
 // A literal two-segment path beside the {setting} template; the template
 // matches one segment, so the two never meet.
 httpRoute('cmsRemindersTelegramTest', {
@@ -39,7 +40,7 @@ httpRoute('cmsRemindersTelegramTest', {
   handler: (request, context) =>
     createNotifyTestHandlers({
       guard: getDefaultGuard(),
-      notifier: createNotifier({ store: { readDoc, upsertDoc }, log: context }),
+      notifier: createNotifier({ store: { readDoc, upsertDoc, patchDoc }, log: context }),
     }).sendTelegramTest(request, context),
 });
 
