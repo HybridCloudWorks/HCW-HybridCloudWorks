@@ -215,12 +215,12 @@ const recordedRuns = Object.entries(fixture.runs);
  * The job image, pinned by digest, moves with every publish (the
  * chore/lab-pins-image-digests pull request), and the recording must not go
  * stale with it: #989 moved the digest while #987 was open and this test
- * went red on a rebase. The argv is compared with the runner image reference
- * normalised on both sides; the proxy rules below still see the recorded
+ * went red on a rebase. The argv is compared with its one digest-pinned image
+ * reference (the runner, or a capability's own image) normalised on both sides; the proxy rules below still see the recorded
  * digest form, which is all they check.
  */
-const RUNNER_IMAGE = /^ghcr\.io\/hybridcloudworks\/hcw-lab-runner:[0-9a-f]{40}@sha256:[0-9a-f]{64}$/;
-const sameRunnerImage = (arg) => (RUNNER_IMAGE.test(arg) ? '<runner image by digest>' : arg);
+const PINNED_IMAGE = /^[a-z0-9][a-z0-9./_-]*(?::[A-Za-z0-9._-]+)?@sha256:[0-9a-f]{64}$/;
+const samePinnedImage = (arg) => (PINNED_IMAGE.test(arg) ? '<image by digest>' : arg);
 const createOf = (run) => materialise(run.requests.find((r) => r.path.endsWith('/containers/create')));
 
 function createWithBody(body, headers = {}) {
@@ -268,12 +268,12 @@ describe('what Docker CLI does for a job, recorded', () => {
     expect(Object.keys(fixture.runs).sort()).toEqual(Object.keys(CAPABILITIES).sort());
     for (const [name, run] of recordedRuns) {
       const argv = buildDockerArgs(CAPABILITIES[name], { ...fixture.job, encoding: run.encoding }, fixture.limits);
-      expect(argv.map(sameRunnerImage), `${name}: re-run scripts/lab/capture-docker-cli-requests.mjs`).toEqual(
-        run.argv.map(sameRunnerImage)
+      expect(argv.map(samePinnedImage), `${name}: re-run scripts/lab/capture-docker-cli-requests.mjs`).toEqual(
+        run.argv.map(samePinnedImage)
       );
-      // The image itself still has to be the digest-pinned runner, on both sides.
-      expect(argv.filter((arg) => RUNNER_IMAGE.test(arg))).toHaveLength(1);
-      expect(run.argv.filter((arg) => RUNNER_IMAGE.test(arg))).toHaveLength(1);
+      // Exactly one image, pinned by digest, on both sides.
+      expect(argv.filter((arg) => PINNED_IMAGE.test(arg))).toHaveLength(1);
+      expect(run.argv.filter((arg) => PINNED_IMAGE.test(arg))).toHaveLength(1);
     }
   });
 
