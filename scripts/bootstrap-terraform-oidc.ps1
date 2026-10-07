@@ -52,14 +52,15 @@
   (conditioned, Set-TerraformRbacCondition.ps1), the custom role
   "HCW Terraform Subscription Scope" (scripts/terraform-identity-grants.json:
   create resource groups, budgets, provider registration), Contributor on
-  each resource group infra/ declares in that subscription, and, until the
-  second step of SEC-1 lands, Contributor on the subscription itself (section
-  5 says why it is two steps). There is no management group in this tenant to
-  inherit from, so a subscription absent from this list is a subscription
-  Terraform cannot touch. When omitted, the script takes the three
-  subscriptions the naming convention names in the signed-in tenant (exactly
-  one sub-app-*, one sub-plat-mgmt-* and one sub-plat-conn-*) and asks
-  nothing; IdentitySubscriptionId is always included. See -ChooseTargets.
+  each resource group infra/ declares in that subscription, and, unless
+  -RemoveSubscriptionContributor is given, Contributor on the subscription
+  itself (section 5 says why SEC-1 is two steps). There is no management
+  group in this tenant to inherit from, so a subscription absent from this
+  list is a subscription Terraform cannot touch. When omitted, the script
+  takes the three subscriptions the naming convention names in the
+  signed-in tenant (exactly one sub-app-*, one sub-plat-mgmt-* and one
+  sub-plat-conn-*) and asks nothing; IdentitySubscriptionId is always
+  included. See -ChooseTargets.
 
 .PARAMETER ChooseTargets
   Show the deployment-target picker even when the naming convention resolves
@@ -96,6 +97,23 @@
   the script with both subjects printed, because the other way to agree, moving
   the workspace back into the project the credential names, changes nothing in
   Azure and is usually what happened.
+
+.PARAMETER RemoveSubscriptionContributor
+  SEC-1 step two. Stop granting Contributor at subscription scope, read every
+  narrow grant back from Azure (Contributor on each resource group in
+  scripts/terraform-identity-grants.json, the custom role with the actions
+  the JSON lists, and RBAC Administrator carrying a condition that refuses
+  Owner and Contributor, on every target), and only when all of them are
+  present delete the identity's Contributor assignment at each target
+  subscription. One missing grant stops the run with nothing removed.
+  Honours -WhatIf: the preview prints one "Would remove" line per
+  subscription.
+
+  Off by default, so a plain run keeps step one's behaviour and grants
+  subscription Contributor wherever it is missing. That makes a plain run
+  the rollback, and it means every re-run after step two carries this switch
+  (adding a resource group, re-applying the condition), or it puts the wide
+  grant back.
 
 .PARAMETER TfcWorkspace
   HCP Terraform workspace name, case-sensitive.
@@ -144,6 +162,11 @@
 .EXAMPLE
   # Same, on a machine with no browser of its own.
   ./scripts/bootstrap-terraform-oidc.ps1 -DeviceCode
+
+.EXAMPLE
+  # SEC-1 step two, previewed: reads the narrow grants back and prints one
+  # "Would remove" line per subscription. Drop -WhatIf to remove them.
+  ./scripts/bootstrap-terraform-oidc.ps1 -RemoveSubscriptionContributor -WhatIf
 #>
 [CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param(
@@ -182,6 +205,9 @@ param(
   # the next bootstrap run would recreate the region drift that the centralus
   # consolidation removed.
   [switch] $ReplaceFederatedCredentials,
+  # SEC-1 step two (section 5c). Off by default: a plain run grants
+  # subscription Contributor where it is missing, which is the rollback.
+  [switch] $RemoveSubscriptionContributor,
   # The deployment targets are decided by the naming convention: exactly one
   # sub-app-*, one sub-plat-mgmt-* and one sub-plat-conn-* subscription. When
   # the sign-in sees exactly that, the script takes them and asks nothing.
@@ -720,31 +746,73 @@ foreach ($credentialName in ($subjects.Keys | Sort-Object)) {
 #     keeps the list equal to the groups infra/ declares). Everything inside
 #     a group comes from here.
 #
-# Plus, for now, Contributor on the subscription. SEC-1 lands in TWO steps
-# on purpose, and this is step one. The grants above are additive; a run
-# after this script proves nothing broke but cannot prove the narrow grants
-# are SUFFICIENT while the wide one is still there. Step two, a separate and
-# later change, removes 'Contributor' from $subscriptionRoles below and
-# deletes the live assignment, and is confirmed by the next plan and apply.
-# Doing both at once would mean the first run to find a missing action is
-# the run that has already lost the subscription-wide grant. None of this
-# can lock a run out mid-apply: these assignments are not in Terraform
-# state, and only this script, run by the owner, changes them.
+# Plus Contributor on the subscription, unless -RemoveSubscriptionContributor
+# is given. SEC-1 lands in TWO steps on purpose. Step one (2026-10-07) added
+# the grants above beside the wide one: a run after it proved nothing broke
+# but could not prove the narrow grants SUFFICIENT while the wide one was
+# still there. Step two is a run with -RemoveSubscriptionContributor: it
+# stops granting subscription Contributor, reads every narrow grant back
+# (section 5c), and only then deletes the identity's Contributor assignment
+# on each target subscription; the next plan and apply are the proof. Doing
+# both at once would have made the first run to find a missing action the
+# run that had already lost the subscription-wide grant. None of this can
+# lock a run out mid-apply: these assignments are not in Terraform state,
+# and only this script, run by the owner, changes them.
 #
-# A NEW resource group in infra/ costs one extra pass once step two lands:
+# A plain run, without the switch, keeps step one's behaviour and grants
+# subscription Contributor wherever it is missing. That is the rollback
+# (the owner's own Owner right makes the grant, so the identity's condition,
+# which refuses Contributor, does not stand in the way), and it is also why
+# every re-run after step two carries the switch.
+#
+# What infra/ does outside the nine groups, audited for step two (ADR 0005,
+# amendment "2026-10-07, step two"), and what covers it once the wide grant
+# is gone:
+#   - control-plane reads at subscription scope (provider list, name
+#     checks, soft-deleted Key Vault lookup, role definitions): RBAC
+#     Administrator, whose built-in definition carries */read, which its
+#     condition does not restrict;
+#   - resource-group create and update, the two subscription budgets,
+#     provider registration: the custom role;
+#   - role assignments anywhere in the subscription: RBAC Administrator,
+#     under its condition;
+#   - everything that crosses a group or a subscription (the hub and spoke
+#     peerings, diagnostic settings, the data collection rule and
+#     Application Insights writing to the Management workspace, the budgets'
+#     action group): inside a declared group at both ends, so Contributor on
+#     each group covers both halves;
+#   - data-plane operations: unchanged, because Contributor carries no data
+#     actions at any scope.
+# The one known gap is destroy-time only: azurerm purges a deleted Cognitive
+# Services account (the Foundry account) through
+# Microsoft.CognitiveServices/locations/resourceGroups/deletedAccounts/delete,
+# which lives at subscription scope, and the custom role carries no delete
+# above a group but the budgets'. Destroying or replacing that account is
+# therefore an owner step, like removing a group.
+# terraform-identity-grants.test.mjs fails when infra/ gains a resource type
+# nobody has classified this way.
+#
+# A NEW resource group in infra/ costs one extra pass once step two is done:
 # the apply that creates it cannot create anything inside it, because
 # Contributor on a group can only be granted once the group exists. Add the
 # name to terraform-identity-grants.json in the same pull request, apply
 # (the group is created, its contents fail with AuthorizationFailed), re-run
-# this script, and run the apply again. Or land the group alone first.
+# this script with -RemoveSubscriptionContributor, and run the apply again.
+# Or land the group alone first.
 Write-Step 'Role assignments'
 
 $grantsPath = Join-Path $PSScriptRoot 'terraform-identity-grants.json'
 $grants = Get-Content -LiteralPath $grantsPath -Raw | ConvertFrom-Json
 $scopeRoleName = $grants.subscriptionRole.Name
 
-# Step one of two (see above): 'Contributor' leaves this list in step two.
-$subscriptionRoles = @('Contributor', 'Role Based Access Control Administrator', $scopeRoleName)
+# Step one keeps 'Contributor' in this list; -RemoveSubscriptionContributor
+# (step two, see above) takes it out, and section 5c deletes the live one.
+$narrowSubscriptionRoles = @('Role Based Access Control Administrator', $scopeRoleName)
+$subscriptionRoles = if ($RemoveSubscriptionContributor) {
+  $narrowSubscriptionRoles
+} else {
+  @('Contributor') + $narrowSubscriptionRoles
+}
 
 # Which slot of terraform-identity-grants.json a subscription fills, from its
 # name, the same convention the target picker above preselects by.
@@ -779,31 +847,42 @@ function Stop-OnUnreadable {
   }
 }
 
-$roleList = Invoke-Az @(
-  'role', 'definition', 'list', '--name', $scopeRoleName, '--custom-role-only', 'true', '-o', 'json'
-) -AllowFailure
-Stop-OnUnreadable -What "the custom role definitions named '$scopeRoleName'"
-$existingRole = @(@($roleList) | Where-Object { $_ })
-if ($existingRole.Count -gt 1) {
-  Stop-WithGuidance "More than one custom role is named '$scopeRoleName'." @(
-    'Delete the extra definition, then re-run. List them with:',
-    "az role definition list --name `"$scopeRoleName`" --custom-role-only true -o table"
-  )
+# The custom role definitions with this name, read fail-closed. Section 5c
+# reads them again after the write below, so the step-two check judges the
+# definition Azure holds, not the one this run meant to write.
+function Get-ScopeRoleDefinition {
+  $roleList = Invoke-Az @(
+    'role', 'definition', 'list', '--name', $scopeRoleName, '--custom-role-only', 'true', '-o', 'json'
+  ) -AllowFailure
+  Stop-OnUnreadable -What "the custom role definitions named '$scopeRoleName'"
+  $found = @(@($roleList) | Where-Object { $_ })
+  if ($found.Count -gt 1) {
+    Stop-WithGuidance "More than one custom role is named '$scopeRoleName'." @(
+      'Delete the extra definition, then re-run. List them with:',
+      "az role definition list --name `"$scopeRoleName`" --custom-role-only true -o table"
+    )
+  }
+  return , $found
 }
+
 # The whole permission shape, not only actions and scopes: one permission
 # block, no notActions, no data actions. A definition that drifted by hand
 # (an extra block, a data action) is rewritten, never reported as matching
 # (review of #984).
-$roleMatches = $false
-if ($existingRole.Count -eq 1) {
-  $permissions = @($existingRole[0].permissions)
+function Test-ScopeRoleMatches {
+  param([object[]] $Definition)
+  if (@($Definition).Count -ne 1) { return $false }
+  $permissions = @($Definition[0].permissions)
   $heldActions = @($permissions | ForEach-Object { $_.actions } | Where-Object { $_ } | Sort-Object)
   $heldOther = @($permissions | ForEach-Object { @($_.notActions) + @($_.dataActions) + @($_.notDataActions) } | Where-Object { $_ })
-  $heldScopes = @($existingRole[0].assignableScopes | Sort-Object)
-  $roleMatches = ($permissions.Count -eq 1) -and ($heldOther.Count -eq 0) -and
-                 (($heldActions -join ',') -eq ($wantedActions -join ',')) -and
-                 (($heldScopes -join ',').ToLowerInvariant() -eq ($assignableScopes -join ',').ToLowerInvariant())
+  $heldScopes = @($Definition[0].assignableScopes | Sort-Object)
+  return ($permissions.Count -eq 1) -and ($heldOther.Count -eq 0) -and
+         (($heldActions -join ',') -eq ($wantedActions -join ',')) -and
+         (($heldScopes -join ',').ToLowerInvariant() -eq ($assignableScopes -join ',').ToLowerInvariant())
 }
+
+$existingRole = Get-ScopeRoleDefinition
+$roleMatches = Test-ScopeRoleMatches -Definition $existingRole
 if ($roleMatches) {
   Write-Ok "$scopeRoleName — defined, assignable on $($assignableScopes.Count) subscription(s)"
 } elseif ($PSCmdlet.ShouldProcess($scopeRoleName, 'create or update the custom role definition')) {
@@ -945,6 +1024,188 @@ if ($identity -and $identity.principalId) {
 }
 
 # ===========================================================================
+# 5c. SEC-1 step two: Contributor at subscription scope, removed
+# ===========================================================================
+# Only with -RemoveSubscriptionContributor, and only once every narrow grant
+# has been READ BACK from Azure rather than assumed from the writes above:
+#   - Contributor on each resource group the JSON lists for the subscription,
+#   - the custom role assigned at the subscription, and its definition
+#     holding exactly the JSON's actions,
+#   - RBAC Administrator at the subscription, every such assignment carrying
+#     a condition that names Owner and Contributor (the roles it refuses).
+# One missing grant on any target stops the step with nothing removed: a
+# removal that runs ahead of a missing grant is an apply that fails with
+# AuthorizationFailed on the owner's confirmation. The deletes honour
+# -WhatIf, which prints one "Would remove" line per subscription.
+function Test-RefusesRoles {
+  param([object] $Assignment, [string[]] $RoleIds)
+  $text = if ($Assignment.PSObject.Properties['condition']) { [string] $Assignment.condition } else { '' }
+  if (-not $text) { return $false }
+  $lower = $text.ToLowerInvariant()
+  foreach ($roleId in $RoleIds) {
+    if (-not $lower.Contains($roleId.ToLowerInvariant())) { return $false }
+  }
+  return $true
+}
+
+if ($RemoveSubscriptionContributor) {
+  Write-Step 'SEC-1 step two: Contributor at subscription scope'
+
+  if (-not ($identity -and $identity.principalId)) {
+    Stop-WithGuidance "$IdentityName does not exist, so there is no subscription Contributor to remove." @(
+      'Run this script without -RemoveSubscriptionContributor first (step one), plan',
+      'and apply in HCP Terraform, then re-run it with the switch.'
+    )
+  }
+
+  # The condition names roles by id. Resolved by name here, the way
+  # Set-TerraformRbacCondition.ps1 resolves them, never typed by hand.
+  $refusedIds = @()
+  foreach ($name in @('Owner', 'Contributor')) {
+    $definitions = Invoke-Az @('role', 'definition', 'list', '--name', $name, '-o', 'json') -AllowFailure
+    Stop-OnUnreadable -What "the built-in role definition '$name'"
+    $builtIn = @(@($definitions) | Where-Object { $_ -and $_.roleType -eq 'BuiltInRole' -and $_.roleName -eq $name })
+    if ($builtIn.Count -ne 1) {
+      Stop-WithGuidance "Expected one built-in role named '$name', found $($builtIn.Count)." @('Nothing was removed.')
+    }
+    $refusedIds += $builtIn[0].name
+  }
+
+  $missing = [System.Collections.Generic.List[string]]::new()
+  $toRemove = [System.Collections.Generic.List[object]]::new()
+
+  if (Test-ScopeRoleMatches -Definition (Get-ScopeRoleDefinition)) {
+    Write-Ok "$scopeRoleName — definition holds the $($wantedActions.Count) actions in terraform-identity-grants.json"
+  } else {
+    $missing.Add("$scopeRoleName — the definition Azure holds differs from terraform-identity-grants.json (actions or assignable scopes)")
+  }
+
+  foreach ($id in $TargetSubscriptionIds) {
+    $scope = "/subscriptions/$id"
+    $label = $subscriptionNames[$id]
+    $slot = Get-SubscriptionSlot -Name $label
+    if (-not $slot) {
+      $missing.Add("$label — matches none of sub-app-*, sub-plat-mgmt-*, sub-plat-conn-*, so it has no resource-group grants to fall back on")
+      continue
+    }
+
+    $held = Invoke-Az @(
+      'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $scope,
+      '--subscription', $id, '-o', 'json'
+    ) -AllowFailure
+    Stop-OnUnreadable -What "the identity's role assignments on $label"
+    $atScope = @(@($held) | Where-Object { $_ -and $_.scope -eq $scope })
+
+    if (@($atScope | Where-Object { $_.roleDefinitionName -eq $scopeRoleName }).Count -gt 0) {
+      Write-Ok "$label — $scopeRoleName"
+    } else {
+      $missing.Add("$label — $scopeRoleName at subscription scope")
+    }
+
+    $rbacAdmin = @($atScope | Where-Object { $_.roleDefinitionName -eq 'Role Based Access Control Administrator' })
+    $conditioned = @($rbacAdmin | Where-Object { Test-RefusesRoles -Assignment $_ -RoleIds $refusedIds })
+    if ($rbacAdmin.Count -eq 0) {
+      $missing.Add("$label — Role Based Access Control Administrator at subscription scope")
+    } elseif ($conditioned.Count -ne $rbacAdmin.Count) {
+      $missing.Add("$label — Role Based Access Control Administrator without a condition refusing Owner and Contributor (scripts/Set-TerraformRbacCondition.ps1)")
+    } else {
+      Write-Ok "$label — Role Based Access Control Administrator, conditioned (refuses Owner and Contributor)"
+    }
+
+    foreach ($group in @($grants.resourceGroups.$slot)) {
+      $groupScope = "$scope/resourceGroups/$group"
+      $groupHeld = Invoke-Az @(
+        'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $groupScope,
+        '--subscription', $id, '-o', 'json'
+      ) -AllowFailure
+      if (Test-LastAzFailed) {
+        $missing.Add("$label/$group — unreadable; a group that does not exist yet needs the apply that creates it")
+        continue
+      }
+      if (@(@($groupHeld) | Where-Object { $_ -and $_.scope -eq $groupScope -and $_.roleDefinitionName -eq 'Contributor' }).Count -gt 0) {
+        Write-Ok "$label/$group — Contributor"
+      } else {
+        $missing.Add("$label/$group — Contributor")
+      }
+    }
+
+    foreach ($assignment in @($atScope | Where-Object { $_.roleDefinitionName -eq 'Contributor' })) {
+      $toRemove.Add([pscustomobject]@{ Label = $label; Id = $assignment.id; Subscription = $id })
+    }
+  }
+
+  if ($missing.Count -gt 0) {
+    Stop-WithGuidance "$($missing.Count) narrow grant(s) could not be read back, so subscription Contributor stays where it is." (
+      @('Nothing was removed. Missing:') +
+      @($missing | ForEach-Object { "  $_" }) +
+      @(
+        '',
+        'If the lines above have just written these, Azure can take a minute or two to',
+        'list them: re-run with -RemoveSubscriptionContributor. A group that does not',
+        'exist yet needs the apply that creates it first. A condition that does not',
+        'refuse Contributor is fixed by scripts/Set-TerraformRbacCondition.ps1.'
+      )
+    )
+  }
+
+  if ($toRemove.Count -eq 0) {
+    Write-Ok 'No target holds Contributor at subscription scope; step two is already done'
+  }
+
+  foreach ($item in $toRemove) {
+    if ($PSCmdlet.ShouldProcess("$IdentityName on $($item.Label)", 'remove Contributor at subscription scope')) {
+      Invoke-Az @('role', 'assignment', 'delete', '--ids', $item.Id) | Out-Null
+      Write-Act "$($item.Label) — Contributor at subscription scope removed"
+    } else {
+      Write-Act "Would remove Contributor at subscription scope on $($item.Label)"
+    }
+  }
+
+  # Read back, for the same reason the elevation above is read back, and by
+  # ROLE AT SCOPE rather than by the ids just deleted: a Contributor
+  # recreated under a new id between the listing and this read (a concurrent
+  # plain run, which is the rollback) would pass an id check while the wide
+  # grant is live (review of #996). Every target is re-read with
+  # --subscription stated (#992), and an unreadable list is not a clean one.
+  # Skipped under -WhatIf, where nothing was removed.
+  if (-not $WhatIfPreference) {
+    $stillHeld = [System.Collections.Generic.List[string]]::new()
+    foreach ($id in $TargetSubscriptionIds) {
+      $scope = "/subscriptions/$id"
+      $label = $subscriptionNames[$id]
+      $after = Invoke-Az @(
+        'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $scope,
+        '--subscription', $id, '-o', 'json'
+      ) -AllowFailure
+      if (Test-LastAzFailed) {
+        $stillHeld.Add("$label — could not read the identity's assignments back")
+        continue
+      }
+      $rows = @(@($after) | Where-Object { $_ -and $_.scope -eq $scope -and $_.roleDefinitionName -eq 'Contributor' })
+      if ($rows.Count -eq 0) {
+        Write-Ok "$label — no Contributor at subscription scope (read back)"
+      } else {
+        foreach ($row in $rows) {
+          $stillHeld.Add("$label — Contributor at $($row.scope) (assignment $($row.id))")
+        }
+      }
+    }
+    if ($stillHeld.Count -gt 0) {
+      Stop-WithGuidance 'Contributor at subscription scope is still held after the removal.' (
+        @($stillHeld | ForEach-Object { "  $_" }) +
+        @(
+          '',
+          'A row with a new assignment id means something granted it again while this ran',
+          '(a plain run of this script is the rollback and does exactly that). Re-run with',
+          '-RemoveSubscriptionContributor; it removes only what is still there. The read-back',
+          'one-liner in docs/runbooks/deployment-runbook.md, section 0, shows all three.'
+        )
+      )
+    }
+  }
+}
+
+# ===========================================================================
 # 6. What the operator still has to do by hand
 # ===========================================================================
 Write-Step 'Next: set these in the HCP Terraform workspace'
@@ -1076,6 +1337,14 @@ if (-not $WhatIfPreference) {
     }
     $flag = if ($observed -eq 'none') { ' **← Terraform cannot deploy here**' } else { '' }
     & $add "| $($subscriptionNames[$id]) | $observed$flag |"
+  }
+  & $add ''
+  if ($RemoveSubscriptionContributor) {
+    & $add 'Run with `-RemoveSubscriptionContributor` (SEC-1 step two): Contributor should be'
+    & $add 'absent from every row above. A plain re-run grants it back, which is the rollback.'
+  } else {
+    & $add 'Run without `-RemoveSubscriptionContributor`: Contributor is granted at each'
+    & $add 'subscription (SEC-1 step one, or the rollback of step two).'
   }
   & $add ''
   & $add 'Contributor on the resource groups `infra/` declares, read back the same way:'

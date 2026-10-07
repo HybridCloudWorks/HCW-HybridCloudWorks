@@ -234,3 +234,311 @@ describe('the RBAC Administrator condition against what infra/ assigns', () => {
     expect(refused).toEqual([]);
   });
 });
+
+/**
+ * SEC-1 step two takes Contributor off the subscription, so everything infra/
+ * does has to be covered by what is left: Contributor on each declared group,
+ * the custom role at the subscription, and RBAC Administrator (conditioned)
+ * at the subscription, whose built-in definition also grants every
+ * control-plane read (Microsoft's built-in roles reference lists the wildcard
+ * read action; the condition restricts role-assignment writes and deletes
+ * only). Contributor carries no data actions,
+ * so no data-plane path changes with it.
+ *
+ * The audit is recorded in ADR 0005 (amendment "2026-10-07, step two") and
+ * in the bootstrap's section 5 comment. These checks keep it true as infra/
+ * grows: every resource and data type infra/ uses is classified below by the
+ * grant that covers it, and a type nobody has classified fails the build,
+ * because the failure it prevents is AuthorizationFailed on the owner's
+ * confirmation, naming a resource rather than the missing grant.
+ */
+/** Every `resource` and `data` block in infra/, with braces balanced. */
+function allBlocks(text) {
+  const out = [];
+  const head = /^(resource|data)\s+"(\w+)"\s+"(\w+)"\s*\{/gm;
+  for (const m of text.matchAll(head)) {
+    let depth = 0;
+    let end = m.index;
+    for (let i = m.index; i < text.length; i += 1) {
+      if (text[i] === '{') depth += 1;
+      else if (text[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    const key = m[1] === 'data' ? `data.${m[2]}` : m[2];
+    out.push({ key, label: m[3], body: text.slice(m.index, end + 1) });
+  }
+  return out;
+}
+
+/** A block's text with whole-line comments removed. */
+function withoutComments(body) {
+  return body
+    .split('\n')
+    .filter((line) => !/^\s*(#|\/\/)/.test(line))
+    .join('\n');
+}
+
+const BUDGET_ACTIONS = [
+  'Microsoft.Consumption/budgets/read',
+  'Microsoft.Consumption/budgets/write',
+  'Microsoft.Consumption/budgets/delete',
+];
+
+/**
+ * Types whose Azure scope is the subscription itself, and the custom-role
+ * actions each needs. Provider registration is the third subscription-scope
+ * job; the register test above holds it to var.azure_resource_providers.
+ */
+const SUBSCRIPTION_SCOPE = {
+  azurerm_resource_group: [
+    'Microsoft.Resources/subscriptions/resourceGroups/read',
+    'Microsoft.Resources/subscriptions/resourceGroups/write',
+  ],
+  azurerm_consumption_budget_subscription: BUDGET_ACTIONS,
+};
+
+/** Covered by something other than Contributor on a group, and why. */
+const OTHER_GRANT = {
+  azurerm_role_assignment: 'RBAC Administrator at subscription scope, under its condition',
+  azurerm_resource_group_policy_assignment:
+    'nothing the run identity holds: the owner grants Resource Policy Contributor on the group ' +
+    '(docs/runbooks/labs-host.md) before setting lab_hybrid_policy_enabled; Contributor never could',
+  'data.azurerm_client_config': 'no Azure call: read from the token',
+  'data.azurerm_role_definition': "RBAC Administrator's */read at subscription scope",
+};
+
+/**
+ * Created, read and changed inside one of the declared groups, so Contributor
+ * on that group covers them. A cross-group or cross-subscription reference
+ * among them (peering to the other virtual network, diagnostics and the data
+ * collection rule to the Management workspace, an action group in
+ * Management) points at another declared group, which Contributor covers too.
+ */
+const IN_A_DECLARED_GROUP = new Set([
+  'azapi_resource',
+  'azapi_resource_action',
+  'azapi_update_resource',
+  'data.azapi_resource',
+  'azurerm_app_service_custom_hostname_binding',
+  'azurerm_application_insights',
+  'azurerm_application_insights_standard_web_test',
+  // The account itself is in the `ai` group. Destroying it is not covered:
+  // azurerm then purges it through deletedAccounts/delete at subscription
+  // scope, which the custom role deliberately lacks (ADR 0005, step two).
+  'azurerm_cognitive_account',
+  'azurerm_cognitive_deployment',
+  'azurerm_consumption_budget_resource_group',
+  'azurerm_cosmosdb_account',
+  'azurerm_cosmosdb_sql_container',
+  'azurerm_cosmosdb_sql_database',
+  'azurerm_cosmosdb_sql_role_assignment',
+  'azurerm_federated_identity_credential',
+  'azurerm_function_app_flex_consumption',
+  'azurerm_key_vault',
+  'azurerm_log_analytics_workspace',
+  'azurerm_monitor_action_group',
+  'azurerm_monitor_data_collection_rule',
+  'azurerm_monitor_diagnostic_setting',
+  'azurerm_monitor_metric_alert',
+  'azurerm_monitor_scheduled_query_rules_alert_v2',
+  'azurerm_network_security_group',
+  'azurerm_route_table',
+  'azurerm_service_plan',
+  'azurerm_static_web_app',
+  'azurerm_storage_account',
+  'azurerm_storage_container',
+  'azurerm_storage_management_policy',
+  'azurerm_subnet',
+  'azurerm_subnet_network_security_group_association',
+  'azurerm_user_assigned_identity',
+  'azurerm_virtual_network',
+  'azurerm_virtual_network_peering',
+]);
+
+/**
+ * The attributes that decide where an Azure call lands: the group a resource
+ * is created in, the scope a role assignment or alert targets, the parent or
+ * target of an azapi or diagnostic resource. Every one of them must resolve
+ * to a declared group or something inside one.
+ */
+const SCOPE_ATTRIBUTES = [
+  'scope',
+  'scopes',
+  'parent_id',
+  'resource_id',
+  'target_resource_id',
+  'resource_group_name',
+  'resource_group_id',
+];
+
+/**
+ * Locals and variables a scope-bearing attribute may name, each with the
+ * reason it resolves below a declared group. Empty on purpose: none is used
+ * on 2026-10-07, and an entry here is a reviewed decision, not a default.
+ */
+const SCOPE_EXPRESSION_ALLOWLIST = {};
+
+describe('what infra/ does once subscription Contributor is gone (SEC-1 step two)', () => {
+  const blocks = allBlocks(source).filter((b) => /^(data\.)?(azurerm|azapi)_/.test(b.key));
+  const declared = Object.values(declaredResourceGroups()).flat();
+  const values = {
+    'var.workload_name': stringDefault('workload_name'),
+    'var.environment': stringDefault('environment'),
+    'var.region_abbreviation': stringDefault('region_abbreviation'),
+  };
+
+  it('reads a plausible set of Azure blocks from infra/ at all', () => {
+    // Guards the guard: about 130 azurerm and azapi blocks on 2026-10-07.
+    expect(blocks.length).toBeGreaterThan(100);
+    expect(blocks.some((b) => b.key === 'azurerm_consumption_budget_subscription')).toBe(true);
+  });
+
+  it('uses no Azure type that nobody has classified by the grant that covers it', () => {
+    const unclassified = [...new Set(blocks.map((b) => b.key))]
+      .filter((key) => !(key in SUBSCRIPTION_SCOPE) && !(key in OTHER_GRANT) && !IN_A_DECLARED_GROUP.has(key))
+      .sort();
+    expect(
+      unclassified,
+      'infra/ uses an Azure type this test has not classified. Decide which grant covers it with ' +
+        'subscription Contributor gone: Contributor on a declared group (IN_A_DECLARED_GROUP), the custom ' +
+        'role in terraform-identity-grants.json (SUBSCRIPTION_SCOPE, with the actions it needs added to the ' +
+        'role), or RBAC Administrator / the owner (OTHER_GRANT). A type that acts at subscription scope ' +
+        'and is classified as in-group plans cleanly and fails at apply.'
+    ).toEqual([]);
+  });
+
+  it('gives the custom role every action the subscription-scope types need', () => {
+    const present = [...new Set(blocks.map((b) => b.key))].filter((key) => key in SUBSCRIPTION_SCOPE);
+    expect(present.sort()).toEqual(Object.keys(SUBSCRIPTION_SCOPE).sort());
+    const missing = present
+      .flatMap((key) => SUBSCRIPTION_SCOPE[key].map((action) => ({ key, action })))
+      .filter(({ action }) => !grants.subscriptionRole.Actions.includes(action))
+      .map(({ key, action }) => `${key} needs ${action}`);
+    expect(missing).toEqual([]);
+  });
+
+  it('keeps budgets the only delete the custom role carries', () => {
+    const deletes = grants.subscriptionRole.Actions.filter((a) => /\/delete$/i.test(a));
+    expect(deletes).toEqual(['Microsoft.Consumption/budgets/delete']);
+  });
+
+  /** Why one expression does not resolve below a declared group, or null. */
+  function expressionProblem(expr) {
+    if (expr in SCOPE_EXPRESSION_ALLOWLIST) return null;
+    if (/^data\.azurerm_subscriptions?\b/.test(expr)) return `${expr} is the subscription itself`;
+    const ref = expr.match(/^(azurerm_\w+|azapi_\w+)\.\w+(?:\[[^\]]+\])?\.(id|name)$/);
+    if (!ref) return `${expr} is not a declared resource's id (resolve it, or allowlist it with a reason)`;
+    const [, type, attribute] = ref;
+    if (type === 'azurerm_resource_group') return null;
+    if (attribute !== 'id') return `${expr} names a ${type}'s ${attribute}, not an id`;
+    if (!IN_A_DECLARED_GROUP.has(type)) return `${type} is not classified as living in a declared group`;
+    return null;
+  }
+
+  /** Why one attribute value does not resolve below a declared group, or []. */
+  function scopeProblems(value) {
+    if (/data\.azurerm_subscriptions?\b/.test(value)) return [`${value} names data.azurerm_subscription`];
+    const literal = value.match(/^"(.*)"$/);
+    if (!literal) {
+      // A bare reference, or a list of them (`scopes`).
+      return value
+        .replace(/^\[|\]$/g, '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map(expressionProblem)
+        .filter(Boolean);
+    }
+    const text = literal[1];
+    if (text.startsWith('/')) {
+      const group = text.match(/^\/subscriptions\/[^/]+\/resourceGroups\/([^/]+)/i)?.[1];
+      const name = group?.replace(/\$\{([^}]+)\}/g, (whole, expr) => values[expr] ?? whole);
+      return name && declared.includes(name) ? [] : [`literal ${text} is not inside a declared resource group`];
+    }
+    // "${azurerm_x.y.id}/child": the leading reference decides where it lands.
+    const lead = text.match(/^\$\{([^}]+)\}/)?.[1];
+    if (!lead) return [`literal "${text}" names no declared resource`];
+    const problem = expressionProblem(lead.trim());
+    return problem ? [problem] : [];
+  }
+
+  it('resolves every scope-bearing attribute below a declared group', () => {
+    const attribute = new RegExp(`^\\s*(${SCOPE_ATTRIBUTES.join('|')})\\s*=\\s*(.+)$`, 'gm');
+    const found = blocks
+      .filter((b) => !(b.key in SUBSCRIPTION_SCOPE))
+      .flatMap(({ key, label, body }) =>
+        [...withoutComments(body).matchAll(attribute)].map((m) => ({
+          where: `${key}.${label}.${m[1]}`,
+          value: m[2].trim(),
+        }))
+      );
+    // Guards the guard: about 115 such attributes on 2026-10-07, 25 of them
+    // role-assignment scopes.
+    expect(found.length).toBeGreaterThan(100);
+    expect(found.filter((f) => /^azurerm_role_assignment\.\w+\.scope$/.test(f.where)).length).toBeGreaterThanOrEqual(25);
+    const problems = found.flatMap(({ where, value }) => scopeProblems(value).map((p) => `${where}: ${p}`));
+    expect(
+      problems,
+      'A block is scoped to something that is not a declared resource group or a resource inside one. ' +
+        'With subscription Contributor gone the run identity holds Contributor only on the declared groups, ' +
+        'and a role assignment at subscription scope would be a widening the condition does not refuse.'
+    ).toEqual([]);
+  });
+
+  it('writes no literal Azure id above a declared group, except the subscription budgets', () => {
+    const above = blocks
+      .filter((b) => !(b.key in SUBSCRIPTION_SCOPE))
+      .flatMap(({ key, label, body }) =>
+        [...withoutComments(body).matchAll(/\/subscriptions\/[^"\s]*/g)]
+          .map((m) => m[0])
+          .filter((id) => {
+            const group = id.match(/\/resourceGroups\/([^/"]+)/i)?.[1];
+            if (!group) return true;
+            const name = group.replace(/\$\{([^}]+)\}/g, (whole, expr) => values[expr] ?? whole);
+            return !declared.includes(name);
+          })
+          .map((id) => `${key}.${label}: ${id}`)
+      );
+    expect(
+      above,
+      'A block builds an Azure id at subscription scope or in an undeclared group. With subscription ' +
+        'Contributor gone, only the custom role reaches the subscription; classify the type there.'
+    ).toEqual([]);
+  });
+
+  it('is what the bootstrap removes only after reading every narrow grant back', () => {
+    expect(bootstrapScript).toMatch(/\[switch\] \$RemoveSubscriptionContributor/);
+    // RBAC Administrator stays at subscription scope on both sides of the
+    // switch: its */read is what covers the reads above a group.
+    expect(bootstrapScript).toMatch(
+      /\$narrowSubscriptionRoles = @\('Role Based Access Control Administrator', \$scopeRoleName\)/
+    );
+    // A plain run still grants subscription Contributor: step one, and the rollback.
+    expect(bootstrapScript).toMatch(
+      /\$subscriptionRoles = if \(\$RemoveSubscriptionContributor\) \{\s*\$narrowSubscriptionRoles\s*\} else \{\s*@\('Contributor'\) \+ \$narrowSubscriptionRoles\s*\}/
+    );
+    const refuse = bootstrapScript.indexOf('if ($missing.Count -gt 0) {');
+    const remove = bootstrapScript.indexOf("Invoke-Az @('role', 'assignment', 'delete', '--ids', $item.Id)");
+    expect(refuse).toBeGreaterThan(0);
+    expect(remove).toBeGreaterThan(refuse);
+    expect(bootstrapScript).toMatch(
+      /ShouldProcess\([^\n]*'remove Contributor at subscription scope'\)\) \{\s*Invoke-Az @\('role', 'assignment', 'delete'/
+    );
+    // The read-back after the deletes looks for Contributor AT SUBSCRIPTION
+    // SCOPE on every target, not for the deleted ids: a Contributor granted
+    // again under a new id (a concurrent plain run) must still stop it
+    // (review of #996).
+    const readBack = bootstrapScript.indexOf(
+      "$rows = @(@($after) | Where-Object { $_ -and $_.scope -eq $scope -and $_.roleDefinitionName -eq 'Contributor' })"
+    );
+    expect(readBack).toBeGreaterThan(remove);
+    expect(bootstrapScript).not.toContain('$_.id -eq $item.Id');
+    expect(bootstrapScript).toContain('Contributor at subscription scope removed');
+    expect(bootstrapScript).toContain('Would remove Contributor at subscription scope on');
+  });
+});
