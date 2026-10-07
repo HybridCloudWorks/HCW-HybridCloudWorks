@@ -40,6 +40,10 @@ This project has not cut a tagged release; entries are grouped under
   window, once on the day, and weekly while overdue, until it is marked
   done. A stage is stamped only when the message was sent, so an
   unconfigured bot means a retry tomorrow, not a reminder counted as said.
+  Same evening, on the owner's first look: the tab is a form on top that
+  adds one reminder and clears when the save took, and a pane below listing
+  every reminder with its details, a Done box and a red circle X that
+  cancels it after one inline confirmation; nothing is edited in place.
   **Owner steps:** add `SEND_REMINDERS` to `enabled_timers` on the
   `hcw-azure` workspace and confirm the run. The plan reads 3 to add, 1 to
   change, 3 to destroy: the three are the permanent azapi replacements every

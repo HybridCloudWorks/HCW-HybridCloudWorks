@@ -5,27 +5,32 @@
  *
  * Owner request 2026-10-06: a token expiry, a re-verification date and the
  * like had been living in notes rather than anywhere the platform could act
- * on. Each row here is one reminder; the daily check says it on Telegram
- * once within its lead days, once on the day, then weekly while overdue,
- * until it is marked done. The `notified` stamps the timer writes ride along
- * on every save unchanged, so saving the sheet never makes a reminder fire
- * twice; nothing on this tab edits them.
+ * on. The daily check says each one on Telegram once within its lead days,
+ * once on the day, then weekly while overdue, until it is marked done.
  *
- * Rows are shown with the undated first (a new row lands at the top), then
- * open reminders by date, then done ones; the stored order is the order
- * rows were added, which the server keeps as given.
+ * Owner request the same evening, on seeing the first cut: a form at the top
+ * to add ONE reminder, and on Save it lands in a pane below listing every
+ * reminder with its details and a red circle X to cancel it. So the tab is
+ * two parts over one document: the form, which saves the list with the new
+ * row appended and then clears; and the list, where each row can be marked
+ * done or cancelled (removed), each a save of its own. Nothing is edited in
+ * place — to change a reminder, cancel it and add it again — which keeps
+ * every save a single intention. Cancel asks once, inline, before it removes.
+ *
+ * The `notified` stamps the timer writes ride along on every save unchanged
+ * and the server merges any stamp written while the page was open, so saving
+ * from here never makes a reminder fire twice.
  */
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { BellRing, Plus, Trash2 } from 'lucide-react';
+import { BellRing, ExternalLink, Plus, X } from 'lucide-react';
 import {
   SETTING_LABELS,
-  SaveRow,
   SettingSection,
   StoredState,
   relativeTime,
@@ -124,7 +129,7 @@ const TONE_CLASS = {
   destructive: 'border-destructive/40 bg-destructive/5 text-destructive',
 };
 
-/** "Telegram: coming up · due · last said 3 d ago", or nothing when never said. */
+/** "Telegram said: coming up · on the day · last 3 d ago", or nothing when never said. */
 export function describeNotified(notified) {
   const stages = [
     ['ahead', 'coming up'],
@@ -139,105 +144,230 @@ export function describeNotified(notified) {
   return `Telegram said: ${stages.map(([, word]) => word).join(' · ')} · last ${relativeTime(latest)}`;
 }
 
-function ReminderRow({ reminder, n, today, saving, onEdit, onRemove }) {
-  const due = describeDue(reminder, today);
-  const problem = rowProblem(reminder);
-  const said = describeNotified(reminder.notified);
+/**
+ * The form: one reminder, saved on Add and cleared. The Add button is held
+ * back until the row would pass the server, and the reason is shown.
+ */
+export function NewReminderForm({ saving, onAdd }) {
+  const [draft, setDraft] = useState(newReminder);
+  const problem = rowProblem(draft);
+  const edit = (patch) => setDraft((current) => ({ ...current, ...patch }));
+
+  const submit = async (event) => {
+    event.preventDefault();
+    if (problem) return;
+    const added = await onAdd({
+      ...draft,
+      title: draft.title.trim(),
+      leadDays: Number(draft.leadDays),
+      notes: draft.notes.trim(),
+      url: draft.url.trim(),
+    });
+    if (added) setDraft(newReminder());
+  };
+
   return (
-    <li className="space-y-2 rounded-md border border-border p-3">
+    <form
+      onSubmit={submit}
+      className="space-y-3 rounded-md border border-border p-3"
+      aria-label="New reminder"
+    >
+      <p className="text-sm font-medium">New reminder</p>
       <div className="flex flex-wrap items-center gap-2">
         <Input
-          aria-label={`Title ${n}`}
-          value={reminder.title}
+          aria-label="Title"
+          value={draft.title}
           disabled={saving}
           placeholder="What must not be forgotten"
-          onChange={(event) => onEdit({ title: event.target.value })}
+          onChange={(event) => edit({ title: event.target.value })}
           className="w-full sm:w-80"
         />
         <Input
-          aria-label={`Due date ${n}`}
+          aria-label="Due date"
           type="date"
-          value={reminder.dueDate}
+          value={draft.dueDate}
           disabled={saving}
-          onChange={(event) => onEdit({ dueDate: event.target.value })}
+          onChange={(event) => edit({ dueDate: event.target.value })}
           className="w-44"
         />
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground">Days before</span>
           <Input
-            aria-label={`Days before ${n}`}
+            aria-label="Days before"
             type="number"
             min={0}
             max={MAX_LEAD_DAYS}
             step={1}
-            value={reminder.leadDays}
+            value={draft.leadDays}
             disabled={saving}
-            onChange={(event) => onEdit({ leadDays: event.target.value })}
+            onChange={(event) => edit({ leadDays: event.target.value })}
             className="w-20"
           />
         </label>
+      </div>
+      <Input
+        aria-label="Link"
+        value={draft.url}
+        disabled={saving}
+        spellCheck={false}
+        placeholder="https:// where to go when it fires (optional)"
+        onChange={(event) => edit({ url: event.target.value })}
+        className="font-mono text-xs"
+      />
+      <Textarea
+        aria-label="Notes"
+        value={draft.notes}
+        disabled={saving}
+        rows={2}
+        placeholder="What to do, in a line or two (optional; sent with the message)"
+        onChange={(event) => edit({ notes: event.target.value })}
+      />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs text-muted-foreground">
+          {problem ?? 'Telegram says it once in the window, once on the day, weekly while overdue.'}
+        </span>
+        <Button type="submit" size="sm" disabled={saving || Boolean(problem)}>
+          <Plus className="mr-2 h-3.5 w-3.5" /> Add reminder
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/** One listed reminder: its details, Done, and the red X that cancels it after one confirmation. */
+function ReminderItem({ reminder, today, saving, onToggleDone, onCancel }) {
+  const [confirming, setConfirming] = useState(false);
+  const due = describeDue(reminder, today);
+  const said = describeNotified(reminder.notified);
+  return (
+    <li className="flex flex-wrap items-start gap-3 rounded-md border border-border p-3">
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={`font-medium ${reminder.done ? 'text-muted-foreground line-through' : ''}`}
+          >
+            {reminder.title}
+          </span>
+          <span className={`rounded-full border px-2 py-0.5 text-xs ${TONE_CLASS[due.tone]}`}>
+            {due.label}
+          </span>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Due {reminder.dueDate} · {plural(Number(reminder.leadDays) || 0, 'day')} before
+          {reminder.url ? (
+            <>
+              {' · '}
+              <a
+                href={reminder.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 underline"
+              >
+                Link <ExternalLink className="h-3 w-3" aria-hidden="true" />
+              </a>
+            </>
+          ) : null}
+        </p>
+        {reminder.notes ? <p className="whitespace-pre-wrap text-sm">{reminder.notes}</p> : null}
+        <p className="text-xs text-muted-foreground">
+          {said ?? 'Telegram has not said this one yet.'}
+        </p>
+      </div>
+      <div className="flex items-center gap-3">
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
-            aria-label={`Done ${n}`}
+            aria-label={`Done: ${reminder.title}`}
             checked={Boolean(reminder.done)}
             disabled={saving}
-            onChange={(event) => onEdit({ done: event.target.checked })}
+            onChange={(event) => onToggleDone(event.target.checked)}
             className="h-4 w-4"
           />
           Done
         </label>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          disabled={saving}
-          aria-label={`Remove reminder ${n}`}
-          onClick={onRemove}
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </Button>
-        <span className={`ml-auto rounded-full border px-2 py-0.5 text-xs ${TONE_CLASS[due.tone]}`}>
-          {due.label}
-        </span>
-      </div>
-      <Input
-        aria-label={`Link ${n}`}
-        value={reminder.url}
-        disabled={saving}
-        spellCheck={false}
-        placeholder="https:// where to go when it fires (optional)"
-        onChange={(event) => onEdit({ url: event.target.value })}
-        className="font-mono text-xs"
-      />
-      <Textarea
-        aria-label={`Notes ${n}`}
-        value={reminder.notes}
-        disabled={saving}
-        rows={2}
-        placeholder="What to do, in a line or two (optional; sent with the message)"
-        onChange={(event) => onEdit({ notes: event.target.value })}
-      />
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-        <span>{said ?? 'Telegram has not said this one yet.'}</span>
-        {problem ? <span className="text-destructive">{problem}</span> : null}
+        {confirming ? (
+          <span className="flex items-center gap-2 text-xs">
+            <span className="text-destructive">Cancel this reminder?</span>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={saving}
+              onClick={onCancel}
+            >
+              Yes, cancel
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={saving}
+              onClick={() => setConfirming(false)}
+            >
+              Keep
+            </Button>
+          </span>
+        ) : (
+          <button
+            type="button"
+            aria-label={`Cancel reminder: ${reminder.title}`}
+            title="Cancel this reminder"
+            disabled={saving}
+            onClick={() => setConfirming(true)}
+            className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        )}
       </div>
     </li>
   );
 }
 
-export function RemindersCard({ value, onChange, onSave, saving, meta, today = todayIso() }) {
-  const reminders = useMemo(() => value?.reminders ?? [], [value]);
+/** The pane: every reminder, undated first, then open by date, then done. */
+export function ReminderList({ reminders, today, saving, onToggleDone, onCancel }) {
   const order = useMemo(() => displayOrder(reminders), [reminders]);
-  const problems = reminders.filter((reminder) => rowProblem(reminder)).length;
-
-  const update = (next) => onChange({ reminders: next });
-  const edit = (index, patch) =>
-    update(reminders.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  const remove = (index) => update(reminders.filter((_row, i) => i !== index));
-  const add = () => update([...reminders, newReminder()]);
-
   const open = reminders.filter((reminder) => !reminder.done).length;
+  return (
+    <section aria-label="Your reminders" className="space-y-2">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">Your reminders</p>
+        <p className="text-xs text-muted-foreground">
+          {reminders.length === 0
+            ? '0 reminders.'
+            : `${plural(open, 'open reminder')}${reminders.length - open > 0 ? `, ${reminders.length - open} done` : ''}.`}
+        </p>
+      </div>
+      {reminders.length === 0 ? (
+        <p className="rounded-md border border-dashed border-border p-4 text-center text-sm text-muted-foreground">
+          Nothing here yet. Add the first one above; it appears here when saved.
+        </p>
+      ) : (
+        <ul className="space-y-2">
+          {order.map((index) => (
+            <ReminderItem
+              key={reminders[index].id}
+              reminder={reminders[index]}
+              today={today}
+              saving={saving}
+              onToggleDone={(done) => onToggleDone(index, done)}
+              onCancel={() => onCancel(index)}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The card: form on top, list below, one stored document. Every action is
+ * its own save of the whole list — append, flip done, remove — and `onSave`
+ * resolves true when the server took it, which is when the form clears.
+ */
+export function RemindersCard({ value, onSave, saving, meta, today = todayIso() }) {
+  const reminders = useMemo(() => value?.reminders ?? [], [value]);
+  const saveList = (next) => onSave({ reminders: next });
 
   return (
     <Card>
@@ -249,52 +379,22 @@ export function RemindersCard({ value, onChange, onSave, saving, meta, today = t
           Dated things not to forget: a token that expires, a renewal, a date to re-check something.
           Each one is said on Telegram once within its days-before window, once on the day, and
           weekly after that until it is marked done. The check runs once a day, in the morning
-          Central time. Notes and the link travel with the message, so write them for your phone.
+          Central time. Notes and the link travel with the message, so write them for your phone. To
+          change a reminder, cancel it and add it again.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4 pt-0">
+      <CardContent className="space-y-5 pt-0">
         <StoredState meta={meta} />
-        <form
-          className="space-y-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (problems === 0) onSave();
-          }}
-        >
-          {reminders.length === 0 ? (
-            <p className="text-xs text-muted-foreground">
-              Nothing here yet. Add the first one, give it a title and a date, and save.
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              {plural(open, 'open reminder')}
-              {reminders.length - open > 0 ? `, ${reminders.length - open} done` : ''}.
-            </p>
-          )}
-          <ul className="space-y-3">
-            {order.map((index) => (
-              <ReminderRow
-                key={reminders[index].id}
-                reminder={reminders[index]}
-                n={index + 1}
-                today={today}
-                saving={saving}
-                onEdit={(patch) => edit(index, patch)}
-                onRemove={() => remove(index)}
-              />
-            ))}
-          </ul>
-          <SaveRow saving={saving} disabled={problems > 0}>
-            <Button type="button" variant="outline" size="sm" disabled={saving} onClick={add}>
-              <Plus className="mr-2 h-3.5 w-3.5" /> Add reminder
-            </Button>
-            {problems > 0 ? (
-              <span className="text-xs text-destructive">
-                {plural(problems, 'row')} need a title and a date before saving.
-              </span>
-            ) : null}
-          </SaveRow>
-        </form>
+        <NewReminderForm saving={saving} onAdd={(reminder) => saveList([...reminders, reminder])} />
+        <ReminderList
+          reminders={reminders}
+          today={today}
+          saving={saving}
+          onToggleDone={(index, done) =>
+            saveList(reminders.map((row, i) => (i === index ? { ...row, done } : row)))
+          }
+          onCancel={(index) => saveList(reminders.filter((_row, i) => i !== index))}
+        />
       </CardContent>
     </Card>
   );
@@ -309,13 +409,7 @@ export default function RemindersTab() {
         setting={setting}
         label={SETTING_LABELS.reminders}
         render={(s) => (
-          <RemindersCard
-            value={s.value}
-            meta={s.meta}
-            saving={s.saving}
-            onChange={s.setValue}
-            onSave={() => s.save(s.value)}
-          />
+          <RemindersCard value={s.value} meta={s.meta} saving={s.saving} onSave={s.save} />
         )}
       />
     </div>
