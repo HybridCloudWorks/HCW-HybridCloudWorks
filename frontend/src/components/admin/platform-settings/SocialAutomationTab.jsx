@@ -11,6 +11,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -151,7 +152,7 @@ export function SocialAutopostCard({
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <Share2 className="h-5 w-5" /> Social autoposting
+          <Share2 className="h-5 w-5" /> Social autoposting <IntegrationBadge id="publer" />
         </CardTitle>
         <CardDescription>
           On a live publish, a caption is generated and one post per account is scheduled in Publer

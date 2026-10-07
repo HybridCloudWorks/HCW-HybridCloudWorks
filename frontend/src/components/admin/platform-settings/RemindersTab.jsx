@@ -46,6 +46,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
+import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
 import {
   SETTING_LABELS,
   SettingSection,
@@ -236,13 +237,7 @@ export function TestTelegramButton({ send = () => postJSON(TELEGRAM_TEST_ROUTE, 
 }
 
 /** The one delivery method there is, named rather than offered as a choice of one. */
-function DeliveredBy() {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/5 px-2 py-0.5 text-xs text-sky-700 dark:text-sky-300">
-      <Send className="h-3 w-3" aria-hidden="true" /> Delivered by Telegram
-    </span>
-  );
-}
+const DeliveredBy = () => <IntegrationBadge id="telegram" prefix="Delivered by" size="xs" />;
 
 /**
  * The form, for a new reminder or an existing one. `initial` is the row it
@@ -557,7 +552,7 @@ export function RemindersCard({ value, onSave, saving, meta, today = todayIso(),
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <BellRing className="h-5 w-5" /> Reminders
+          <BellRing className="h-5 w-5" /> Reminders <IntegrationBadge id="telegram" />
         </CardTitle>
         <CardDescription>
           Dated things not to forget: a token that expires, a renewal, a date to re-check something.

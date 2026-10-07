@@ -17,6 +17,7 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -125,7 +126,9 @@ export default function NewsletterSettingsCard({ onSaved }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-base">Newsletter settings</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base">
+          Newsletter settings <IntegrationBadge id="resend" size="xs" />
+        </CardTitle>
         <CardDescription>
           Every issue carries your postal address (required by law for commercial email) and sends
           replies to the inbox below. Nothing can be approved until both are filled in. Content sets
