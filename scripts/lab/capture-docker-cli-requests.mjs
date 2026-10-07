@@ -86,12 +86,14 @@ function record(argv, dockerConfig) {
         const end = buf.indexOf(`${CRLF}${CRLF}`);
         if (end === -1) return;
         const [requestLine, ...headerLines] = buf.subarray(0, end).toString('latin1').split(CRLF);
-        const headers = {};
+        // A Map, not an object: header names come from the client, and an
+        // object would take `__proto__` as one.
+        const headers = new Map();
         for (const line of headerLines) {
           const colon = line.indexOf(':');
-          headers[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+          headers.set(line.slice(0, colon).trim().toLowerCase(), line.slice(colon + 1).trim());
         }
-        const length = Number(headers['content-length'] || 0);
+        const length = Number(headers.get('content-length') || 0);
         if (buf.length < end + 4 + length) return;
         const body = buf.subarray(end + 4, end + 4 + length).toString('utf8');
         buf = buf.subarray(end + 4 + length);
@@ -101,7 +103,7 @@ function record(argv, dockerConfig) {
           method,
           path: pathname.replace(id, '<id>'),
           query,
-          headers: Object.fromEntries(KEPT_HEADERS.filter((h) => h in headers).map((h) => [h, headers[h]])),
+          headers: Object.fromEntries(KEPT_HEADERS.filter((h) => headers.has(h)).map((h) => [h, headers.get(h)])),
           body,
         });
         const json = (status, value) => {
