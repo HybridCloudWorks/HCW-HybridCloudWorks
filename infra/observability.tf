@@ -707,6 +707,73 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "app_exceptions" {
 }
 
 # ---------------------------------------------------------------------------
+# Telegram — the owner's channel refused a message
+# ---------------------------------------------------------------------------
+#
+# Every owner-facing notification in this app goes through one notifier
+# (functions/src/lib/notify.js) and the notifier is best-effort by design: a
+# refused delivery is a log line and the caller carries on. That was right for
+# the callers and wrong for the owner. On 2026-10-06 the owner's Telegram
+# account had the bot blocked, Telegram answered 403 to every send for the
+# rest of the day — the lab-agent-offline message among them — and the only
+# record was `[notify] Telegram API error 403` in traces, which nobody reads.
+# A channel that fails silently is not a channel.
+#
+# This rule turns that log line into a page through the action group, which
+# is SMS and mail, not Telegram, so it reaches the owner when Telegram does
+# not. One refused send in an hour is enough: the notifier is never asked to
+# send unless something already happened, so a refusal is never noise. Same
+# component scope and identity as alert-app-exceptions above, for the same
+# reasons.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "telegram_delivery" {
+  name                = "alert-telegram-delivery-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = azurerm_resource_group.app["web"].location
+  scopes              = [azurerm_application_insights.hcw.id]
+  description         = "Telegram refused or failed a notification to the owner in the last hour. Check that the bot is not blocked and the chat id is current."
+  severity            = 2
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT1H"
+
+  # Stateful, as alert-app-exceptions: one page per incident, one Resolved mail
+  # once an hour has passed with no refusal.
+  auto_mitigation_enabled = true
+
+  criteria {
+    # The two lines notify.js writes when a send does not go: Telegram's own
+    # refusal (a status code) and a thrown error (network, timeout). Classic
+    # schema, because the scope is the component (see the note on the rule
+    # above). Count, so the query returns the rows themselves.
+    query                   = "traces | where message startswith \"[notify] Telegram API error\" or message startswith \"[notify] notifyTelegram failed\""
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
+}
+
+# ---------------------------------------------------------------------------
 # Log Analytics — ingestion is approaching the daily cap
 # ---------------------------------------------------------------------------
 #
