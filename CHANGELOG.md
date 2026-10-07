@@ -54,6 +54,26 @@ This project has not cut a tagged release; entries are grouped under
   allowed". Tests: `functions/src/lib/ai/mcp.test.js`,
   `functions/src/lib/admin-integrations.test.js`, and
   `frontend/src/lib/aiEngine.test.js` (the seed against the API policy).
+- **Platform Settings → Reminders shows the Telegram bot's QR code, for
+  pairing a phone with the bot again (owner, 2026-10-07).** The owner's QR
+  artwork for `@agenticarchitectbot` now sits at the top of the Reminders
+  card, at a fixed 220 px wide on a laptop and 60 % of the screen width on
+  a phone, on a white panel so the dark artwork reads in both themes. Beside
+  it: the handle as a link to `https://t.me/agenticarchitectbot`, an **Open
+  full size** link to the same image for scanning from another screen, and
+  three steps for when the phone loses the bot (scan or search the handle,
+  press Start or Unblock, press **Test Telegram**), with the existing Test
+  Telegram button inside the same panel as the proof. The panel also says
+  why nothing else changes: the bot answers only the chat id in
+  `TELEGRAM_CHAT_ID`, which a Telegram account keeps on a new phone, and
+  links Integrations → Keys for the case where the account itself changed.
+  The image is imported from `frontend/src/assets/admin/telegram-bot-qr.png`
+  as delivered (1,907,187 bytes, under every limit the build and deploy
+  set), so Vite fingerprints it into `/assets` and it is fetched only when
+  the tab is open. It is meant to encode only the bot's public link, but
+  jsQR could not read the embossed modules, so that is the owner's word
+  until a phone scans it; the handle link works either way.
+  `TelegramReconnectPanel.jsx`, with tests beside it.
 
 - **Governance remainders of the 2026-10-06 estate review: the Terraform
   run identity's Contributor scoped to its resource groups, code owners on

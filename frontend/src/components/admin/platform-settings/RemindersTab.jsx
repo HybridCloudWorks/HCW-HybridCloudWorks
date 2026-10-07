@@ -16,7 +16,11 @@
  * Test Telegram button at the top that proves the channel through the
  * production notifier and shows Telegram's own reason when it refuses.
  *
- * So the tab is: the test button; the form, which saves the list with the new
+ * Owner request 2026-10-07: the bot's QR code on the page, for re-pairing a
+ * phone that loses the bot. TelegramReconnectPanel holds it, wrapped around
+ * the test button so the scan and its proof sit together.
+ *
+ * So the tab is: the QR panel with the test button; the form, which saves the list with the new
  * row appended and then clears; and the list, where each row can be edited
  * (the same form, in place), marked done, or cancelled (removed), each a
  * save of its own. One delivery method exists, so the form says "Delivered
@@ -47,6 +51,7 @@ import {
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
 import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
+import TelegramReconnectPanel from './TelegramReconnectPanel';
 import {
   SETTING_LABELS,
   SettingSection,
@@ -562,7 +567,9 @@ export function RemindersCard({ value, onSave, saving, meta, today = todayIso(),
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5 pt-0">
-        <TestTelegramButton {...(sendTest ? { send: sendTest } : {})} />
+        <TelegramReconnectPanel>
+          <TestTelegramButton {...(sendTest ? { send: sendTest } : {})} />
+        </TelegramReconnectPanel>
         <StoredState meta={meta} />
         <NewReminderForm saving={saving} onAdd={(reminder) => saveList([...reminders, reminder])} />
         <ReminderList
