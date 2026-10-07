@@ -35,6 +35,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   APPS_HOST_SUFFIX,
+  CSRF_HEADER,
+  CSRF_PAGE_PATH,
   LAB_WORKSPACES,
   ME_PATH,
   MESSAGES,
@@ -44,11 +46,14 @@ import {
   TEMPLATE,
   TEMPLATE_API_PATH,
   assess,
+  buildsApiPath,
   codeServerUrl,
   createPagePath,
+  csrfTokenFrom,
   ownerName,
   resolveLab,
   runLauncher,
+  startPlan,
   templateVerdict,
   workspaceApiPath,
   workspacePagePath,
@@ -68,6 +73,9 @@ const OWNER = 'saulpatinojr';
 const ME = { id: '3f1c6a2e-5f0b-4b7e-9d1a-0c2b4e6f8a10', username: 'SaulPatinoJr' };
 const TFV = 'terraform-validate-walkthrough';
 
+const WORKSPACE_ID = '0b7e1f3a-5c2d-4e8f-9a1b-2c3d4e5f6a7b';
+const ACTIVE_VERSION = 'd4c3b2a1-0f9e-4d8c-b7a6-5f4e3d2c1b0a';
+
 function workspace({
   status = 'running',
   agentStatus = 'connected',
@@ -76,9 +84,13 @@ function workspace({
   subdomainName = `code-server--lab-tfv--${OWNER}`,
   subdomain = true,
   apps,
+  outdated = false,
 } = {}) {
   return {
+    id: WORKSPACE_ID,
     name: 'lab-tfv',
+    outdated,
+    template_active_version_id: ACTIVE_VERSION,
     latest_build: {
       status,
       transition: 'start',
@@ -118,12 +130,26 @@ function answer(spec) {
   return typeof spec === 'number' ? json(spec, {}) : json(200, spec);
 }
 
+/** Coder's index page, as the launcher reads the CSRF token from it. */
+const CSRF_TOKEN = 'JXm9hOUdZctWt0ZZGAy9xiS/gxMKYOThdxjjMnMUyn4=';
+const CODER_PAGE = `<!doctype html><html><head><meta property="csrf-token" content="${CSRF_TOKEN}" /></head><body></body></html>`;
+const page = (html) => ({ ok: true, status: 200, text: async () => html });
+
 /**
  * A launcher run against a scripted Coder. `me` answers /users/me; `reads`
- * answers the workspace reads in order, and `templates` the template reads,
- * the last of each repeating (see `answer`).
+ * answers the workspace reads in order, `templates` the template reads and
+ * `builds` the start POSTs, the last of each repeating (see `answer`);
+ * `csrfPage` is what GET / answers (a page, or a status).
  */
-async function launch({ search = `?lab=${TFV}`, me = ME, reads = [404], templates = [HCW_LAB], poll = POLL } = {}) {
+async function launch({
+  search = `?lab=${TFV}`,
+  me = ME,
+  reads = [404],
+  templates = [HCW_LAB],
+  builds = [201],
+  csrfPage = CODER_PAGE,
+  poll = POLL,
+} = {}) {
   let clock = 0;
   const calls = [];
   const says = [];
@@ -133,7 +159,7 @@ async function launch({ search = `?lab=${TFV}`, me = ME, reads = [404], template
   const sleeps = [];
   // Requests and frame changes in the order they happened.
   const events = [];
-  const next = { reads: 0, templates: 0 };
+  const next = { reads: 0, templates: 0, builds: 0 };
   const scripted = (list, key) => {
     const spec = list[Math.min(next[key], list.length - 1)];
     next[key] += 1;
@@ -142,7 +168,9 @@ async function launch({ search = `?lab=${TFV}`, me = ME, reads = [404], template
 
   const fetch = async (url, init) => {
     calls.push({ url, init });
-    events.push(['GET', url]);
+    events.push([init?.method ?? 'GET', url]);
+    if (url === CSRF_PAGE_PATH) return typeof csrfPage === 'number' ? answer(csrfPage) : page(csrfPage);
+    if (init?.method === 'POST') return scripted(builds, 'builds');
     if (url === ME_PATH) return answer(me);
     if (url === TEMPLATE_API_PATH) return scripted(templates, 'templates');
     return scripted(reads, 'reads');
@@ -330,7 +358,8 @@ describe('assess', () => {
     ['canceled', 'stopped'],
     ['deleted', 'create'],
   ])('a latest build %s is %s', (status, state) => {
-    expect(assess(workspace({ status }), 'lab-tfv', OWNER)).toEqual({ state });
+    // A stopped or cancelled build also carries its start plan (tested below).
+    expect(assess(workspace({ status }), 'lab-tfv', OWNER)).toMatchObject({ state });
   });
 
   it.each([
@@ -473,13 +502,83 @@ describe('runLauncher', () => {
     expect(run.says.at(-1)).toBe(MESSAGES['signed-out']);
   });
 
-  it('shows Coder’s own workspace page for a stopped workspace, where Start is', async () => {
-    const run = await launch({ reads: [workspace({ status: 'stopped' }), workspace({ status: 'stopped' }), workspace({ status: 'starting' }), workspace()] });
+  it('starts a stopped workspace itself, with the CSRF token from Coder’s page, and waits for it', async () => {
+    const run = await launch({ reads: [workspace({ status: 'stopped' }), workspace({ status: 'starting' }), workspace()] });
+    expect(run.end).toBe('ready');
+    // No Coder page is framed and no click is asked for.
+    expect(run.frames).toEqual([]);
+    expect(run.posts).toEqual(['checking', 'starting', 'ready']);
+    expect(run.says).not.toContain(MESSAGES.stopped);
+    const start = run.calls.find((c) => c.init?.method === 'POST');
+    expect(start.url).toBe(buildsApiPath(WORKSPACE_ID));
+    expect(start.init.headers[CSRF_HEADER]).toBe(CSRF_TOKEN);
+    expect(start.init.credentials).toBe('same-origin');
+    expect(JSON.parse(start.init.body)).toEqual({ transition: 'start' });
+    // The page was read before the start, and only then.
+    expect(run.events.map(([m, u]) => `${m} ${u}`)).toEqual(
+      expect.arrayContaining([`GET ${CSRF_PAGE_PATH}`, `POST ${buildsApiPath(WORKSPACE_ID)}`])
+    );
+    expect(run.calls.filter((c) => c.url === CSRF_PAGE_PATH)).toHaveLength(1);
+    expect(run.navigations).toHaveLength(1);
+  });
+
+  it('starts an outdated workspace on the template’s active version, so a template change reaches every lab', async () => {
+    const run = await launch({ reads: [workspace({ status: 'stopped', outdated: true }), workspace()] });
+    expect(run.end).toBe('ready');
+    const start = run.calls.find((c) => c.init?.method === 'POST');
+    expect(JSON.parse(start.init.body)).toEqual({ transition: 'start', template_version_id: ACTIVE_VERSION });
+  });
+
+  it('falls back to Coder’s own workspace page, where Start is, when Coder refuses the start — once per visit', async () => {
+    const run = await launch({
+      reads: [workspace({ status: 'stopped' }), workspace({ status: 'stopped' }), workspace({ status: 'starting' }), workspace()],
+      builds: [403],
+    });
     expect(run.end).toBe('ready');
     expect(run.frames).toEqual(['/@me/lab-tfv']);
     expect(run.posts).toEqual(['checking', 'stopped', 'starting', 'ready']);
     expect(run.says).toContain(MESSAGES.stopped);
-    expect(run.navigations).toHaveLength(1);
+    expect(run.calls.filter((c) => c.init?.method === 'POST')).toHaveLength(1);
+  });
+
+  it('falls back the same way when Coder’s page carries no CSRF token, and never posts without one', async () => {
+    const run = await launch({
+      reads: [workspace({ status: 'stopped' }), workspace({ status: 'starting' }), workspace()],
+      csrfPage: '<!doctype html><html><head></head><body>no token here</body></html>',
+    });
+    expect(run.end).toBe('ready');
+    expect(run.frames).toEqual(['/@me/lab-tfv']);
+    expect(run.calls.filter((c) => c.init?.method === 'POST')).toHaveLength(0);
+    const unreadable = await launch({ reads: [workspace({ status: 'stopped' }), workspace()], csrfPage: 503 });
+    expect(unreadable.frames).toEqual(['/@me/lab-tfv']);
+    expect(unreadable.calls.filter((c) => c.init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('never starts a failed build blind: its page carries the reason and Retry', async () => {
+    const run = await launch({ reads: [workspace({ status: 'failed' }), workspace({ status: 'starting' }), workspace()] });
+    expect(run.end).toBe('ready');
+    expect(run.frames).toEqual(['/@me/lab-tfv']);
+    expect(run.calls.filter((c) => c.init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('plans a start only for a stopped or cancelled build of a workspace with an id, reading the token from the meta tag', () => {
+    expect(startPlan(workspace({ status: 'stopped' }))).toEqual({ path: buildsApiPath(WORKSPACE_ID), body: { transition: 'start' } });
+    expect(startPlan(workspace({ status: 'canceled', outdated: true }))).toEqual({
+      path: buildsApiPath(WORKSPACE_ID),
+      body: { transition: 'start', template_version_id: ACTIVE_VERSION },
+    });
+    expect(startPlan(workspace({ status: 'failed' }))).toBeNull();
+    expect(startPlan(workspace({ status: 'running' }))).toBeNull();
+    expect(startPlan({ ...workspace({ status: 'stopped' }), id: '' })).toBeNull();
+    expect(assess(workspace({ status: 'stopped' }), 'lab-tfv', OWNER)).toEqual({
+      state: 'stopped',
+      start: { path: buildsApiPath(WORKSPACE_ID), body: { transition: 'start' } },
+    });
+    expect(assess(workspace({ status: 'failed' }), 'lab-tfv', OWNER)).toEqual({ state: 'stopped' });
+    expect(csrfTokenFrom(CODER_PAGE)).toBe(CSRF_TOKEN);
+    expect(csrfTokenFrom('<meta property="csrf-token" content="">')).toBeNull();
+    expect(csrfTokenFrom('<meta name="description" content="x">')).toBeNull();
+    expect(csrfTokenFrom(null)).toBeNull();
   });
 
   it('waits on a workspace that is already starting, with no frame of Coder’s', async () => {
