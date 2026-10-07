@@ -274,12 +274,15 @@ test('workspace apps are served on their own names only, never on the dashboard 
 test('code-server opens trusted, without the AI chat, on the README, with telemetry off', () => {
   // 2026-09-28: the first workspace opened in Restricted Mode with the
   // built-in Chat panel asking for a sign-in. The settings are the fix; each
-  // name was checked against VS Code 1.139.1, which code-server 4.139.1
+  // name was checked against VS Code 1.140.0, which code-server 4.140.0
   // carries, and the `settings` input against the module at 1.6.0. A bump
   // of either pin means checking them again, which is why both are here.
   const [codeServer] = hclBlocks(mainTf, 'module "code-server"');
   assert.match(codeServer.body, /^\s*version\s*=\s*"1\.6\.0"\s*$/m, 'the module the settings input was read from');
-  assert.match(codeServer.body, /^\s*install_version\s*=\s*"4\.139\.1"\s*$/m, 'the code-server the setting names were read from');
+  assert.match(codeServer.body, /^\s*install_version\s*=\s*"4\.140\.0"\s*$/m, 'the code-server the setting names were read from');
+  // The release notice stays off: its link opened a window the site's
+  // sandboxed pane could not navigate (#911), and the release is this pin.
+  assert.match(codeServer.body, /^\s*additional_args\s*=\s*"--disable-update-check"\s*$/m, 'release notices off');
   const settings = assignedObject(codeServer.body, 'settings');
   assert.ok(settings !== null, 'the module is given User settings');
   const entries = settings
