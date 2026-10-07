@@ -29,3 +29,20 @@ export function TabError({ message, onRetry }) {
     </div>
   );
 }
+
+/**
+ * The two notices every tab that reads key status shows: reading, and a
+ * failed read that leaves only test results. One place for the sentence,
+ * since the Overview and the Directory would otherwise each carry it.
+ */
+export function KeyStatusNotices({ loading, data, error, onRetry, fallback }) {
+  return (
+    <>
+      {loading && !data ? <TabLoading>Reading key status…</TabLoading> : null}
+      <TabError
+        message={error && `Key status could not be read, so ${fallback}: ${error}`}
+        onRetry={onRetry}
+      />
+    </>
+  );
+}
