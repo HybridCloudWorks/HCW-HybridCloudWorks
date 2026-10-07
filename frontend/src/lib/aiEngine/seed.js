@@ -139,6 +139,54 @@ export const DEFAULT_PROVIDERS = [
   },
 ];
 
+/**
+ * The Publer MCP tools the seeded server may call (#995): the 27 that only
+ * read Publer and the 7 that only change the session's selection, from
+ * `tools/list` on 2026-10-07. The 13 that create, schedule, publish, edit,
+ * delete or upload are deliberately absent, `delete_publer_posts` among
+ * them because it opens the delete that `confirm_delete_publer_posts`
+ * completes. The API refuses a call outside this list whatever the role, and
+ * only a super_admin can change it. docs/runbooks/publer.md has the split.
+ */
+export const PUBLER_MCP_ALLOWED_TOOLS = Object.freeze([
+  // Read-only
+  'get_publer_user',
+  'list_publer_accounts',
+  'lookup_publer_accounts',
+  'list_publer_posts',
+  'lookup_publer_posts',
+  'list_publer_drafts',
+  'get_recent_posts',
+  'get_publer_job_status',
+  'get_post_insights',
+  'get_hashtag_insights',
+  'get_hashtag_performing_posts',
+  'get_best_times_to_post',
+  'list_analytics_charts',
+  'get_analytics_chart_data',
+  'get_members_analytics',
+  'analyze_recent_performance',
+  'list_competitors',
+  'get_competitors_analytics',
+  'list_publer_media',
+  'lookup_publer_media',
+  'list_media_options',
+  'generate_campaign_plan',
+  'search_publer_docs',
+  'read_publer_docs_page',
+  'search_publer_help',
+  'read_publer_help_article',
+  'load_publer_card_state',
+  // Session selection only
+  'list_publer_workspaces',
+  'select_publer_workspace',
+  'change_publer_workspace',
+  'select_publer_account',
+  'select_publer_posts',
+  'select_publer_media',
+  'save_publer_card_state',
+]);
+
 export const DEFAULT_MCP_SERVERS = [
   {
     id: 'plaud',
@@ -273,11 +321,12 @@ export const DEFAULT_MCP_SERVERS = [
     transport: 'http',
     enabled: false,
     apiKeyEnvVar: 'PUBLER_API_KEY',
+    allowedTools: [...PUBLER_MCP_ALLOWED_TOOLS],
     tools: [],
     status: 'untested',
     order: 12,
     notes:
-      'Uses PUBLER_API_KEY (the same key as the Social Hub), bound to mcp.publer.com only. The workspace is chosen through the tools, not a header. Sync lists tools even with a bad key; get_publer_user is the key check. Tools that create, schedule, publish, reschedule, update or delete posts are live — see docs/runbooks/publer.md before calling anything but the read tools.',
+      'Uses PUBLER_API_KEY (the same key as the Social Hub), bound to mcp.publer.com only. Only the read and session tools are allowed; the API refuses the tools that create, schedule, publish, edit, delete or upload. Switching it on or off, and changing the allowed tools, needs super_admin. Sync lists tools even with a bad key; get_publer_user is the key check.',
   },
 ];
 

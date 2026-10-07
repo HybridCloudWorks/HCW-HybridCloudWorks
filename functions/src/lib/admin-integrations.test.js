@@ -836,6 +836,101 @@ describe('MCP key-to-host binding, routing privilege and config audit (AP-B1, 20
   });
 });
 
+describe('MCP tool allowlist writes (#995, 2026-10-07)', () => {
+  const publer = {
+    id: 'publer-mcp',
+    url: 'https://mcp.publer.com',
+    apiKeyEnvVar: 'PUBLER_API_KEY',
+    allowedTools: ['get_publer_user', 'lookup_publer_accounts'],
+    enabled: false,
+    createdAt: '2026-10-07T00:00:00Z',
+  };
+  const firecrawl = {
+    id: 'firecrawl',
+    url: 'https://mcp.firecrawl.dev/sse',
+    apiKeyEnvVar: 'FIRECRAWL_API_KEY',
+    enabled: true,
+  };
+  const editorOnlyGuard = {
+    requireRole: vi.fn(async (_request, minimum) =>
+      minimum === 'super_admin'
+        ? { user: null, role: null, error: { status: 403, body: '{"error":"Requires super_admin or higher"}' } }
+        : { user: { oid: 'editor-1' }, role: 'editor', error: null }
+    ),
+  };
+  const patch = (h, id, body) =>
+    h.patchConfig(makeRequest({ params: { collection: 'mcp-servers', id }, body }), context);
+  const put = (h, id, body) =>
+    h.putConfig(makeRequest({ params: { collection: 'mcp-servers', id }, body }), context);
+
+  it('refuses an editor PATCH that names allowedTools, and an editor switching a Publer-key server', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ ...publer })) });
+    const h = createAdminIntegrationHandlers({ guard: editorOnlyGuard, store, ...fixed });
+    expect(
+      (await patch(h, 'publer-mcp', { allowedTools: ['get_publer_user', 'submit_publer_posts'] })).status
+    ).toBe(403);
+    // Even a list identical to the stored one: naming it is the privilege.
+    expect((await patch(h, 'publer-mcp', { allowedTools: [...publer.allowedTools] })).status).toBe(403);
+    expect((await patch(h, 'publer-mcp', { enabled: true })).status).toBe(403);
+    expect(store.patchDoc).not.toHaveBeenCalled();
+
+    // Firecrawl's switch stays an editor's, as before.
+    const store2 = makeStore({ readDoc: vi.fn(async () => ({ ...firecrawl })) });
+    const h2 = createAdminIntegrationHandlers({ guard: editorOnlyGuard, store: store2, ...fixed });
+    expect((await patch(h2, 'firecrawl', { enabled: false })).status).toBe(200);
+    // But a list on Firecrawl is a super_admin decision too.
+    expect((await patch(h2, 'firecrawl', { allowedTools: ['scrape'] })).status).toBe(403);
+  });
+
+  it('refuses a Publer-key server saved without a non-empty allowedTools, before any write', async () => {
+    const store = makeStore();
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const { allowedTools: _omitted, ...withoutList } = publer;
+    for (const body of [withoutList, { ...publer, allowedTools: [] }, { ...publer, allowedTools: 'all' }]) {
+      const res = await put(h, 'publer-mcp', body);
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toMatch(/allowedTools/);
+    }
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+
+    // Moving an existing keyless server onto the Publer key needs the list too.
+    const store2 = makeStore({
+      readDoc: vi.fn(async () => ({ id: 'x', url: 'https://mcp.publer.com', apiKeyEnvVar: null })),
+    });
+    const h2 = createAdminIntegrationHandlers({ guard: allowGuard, store: store2, ...fixed });
+    expect((await patch(h2, 'x', { apiKeyEnvVar: 'PUBLER_API_KEY' })).status).toBe(400);
+    // And the list cannot be emptied on a server that has one.
+    const store3 = makeStore({ readDoc: vi.fn(async () => ({ ...publer })) });
+    const h3 = createAdminIntegrationHandlers({ guard: allowGuard, store: store3, ...fixed });
+    expect((await patch(h3, 'publer-mcp', { allowedTools: [] })).status).toBe(400);
+    expect((await patch(h3, 'publer-mcp', { allowedTools: null })).status).toBe(400);
+    expect(store3.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('lets a super_admin set the list, keeps the stored list through a PUT that omits it, and audits both', async () => {
+    const store = makeStore({ readDoc: vi.fn(async () => ({ ...publer })) });
+    const h = createAdminIntegrationHandlers({ guard: allowGuard, store, ...fixed });
+    const narrowed = await patch(h, 'publer-mcp', { allowedTools: ['get_publer_user'] });
+    expect(narrowed.status).toBe(200);
+
+    const { allowedTools: _omitted, ...withoutList } = publer;
+    const replaced = await put(h, 'publer-mcp', { ...withoutList, name: 'Publer MCP' });
+    expect(replaced.status).toBe(200);
+    const stored = store.upsertDoc.mock.calls.find(([c]) => c === 'mcp_servers')[1];
+    expect(stored.allowedTools).toEqual(publer.allowedTools);
+
+    const rows = store.upsertDoc.mock.calls
+      .filter(([c]) => c === 'admin_audit_logs')
+      .map(([, d]) => d.details);
+    expect(rows[0]).toMatchObject({
+      fields: ['allowedTools'],
+      before: { allowedTools: publer.allowedTools },
+      after: { allowedTools: ['get_publer_user'] },
+    });
+    expect(rows[1].after.allowedTools).toEqual(publer.allowedTools);
+  });
+});
+
 describe('partial MCP/AI config updates never disturb a stored secret', () => {
   // `oauthToken` on mcp_servers is the only secret VALUE these two collections
   // store — an ai_providers document holds `apiKeyEnvVar`, the NAME of a

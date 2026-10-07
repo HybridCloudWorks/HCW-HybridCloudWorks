@@ -15,8 +15,8 @@
 | Caller | `publerProxy` (`functions/src/functions/integrations-http.js`) and `syncSocialCalendarScheduled` (`functions/src/lib/timers/publer-sync.js`) | `syncMcpTools` and `mcpProxy` (`functions/src/lib/ai/mcp.js`) |
 | Key header | `Authorization: Bearer-API` followed by the key | `Authorization: Bearer` followed by the key |
 | Workspace | `Publer-Workspace-Id` header from `PUBLER_WORKSPACE_ID` | Chosen through the tools (`select_publer_workspace`); one workspace locks itself. No header. |
-| Policy | `assertSafePath` denylist; no path allowlist (estate review finding AP-B3) | `PUBLER_API_KEY` bound to `mcp.publer.com` only, and no query string on that host (`functions/src/lib/ai/mcp-policy.js`) |
-| Who can call | editor | Sync and tool calls: editor. Registering, or changing the URL or key name: super_admin |
+| Policy | `assertSafePath` denylist; no path allowlist (estate review finding AP-B3) | `PUBLER_API_KEY` bound to `mcp.publer.com` only, no query string on that host, and a required tool allowlist (`allowedTools`, #995) enforced on every call (`functions/src/lib/ai/mcp-policy.js`) |
+| Who can call | editor | Sync and calls to allowed tools: editor. Registering, changing the URL, key name or `allowedTools`, and switching the server on or off: super_admin |
 
 Two Publer behaviours that this repository measured and that its own
 documentation states the other way round:
@@ -44,6 +44,7 @@ dummy key. No real key was used and nothing was written to Publer.
 | REST proxy probe | **Ready.** The Publer card's Test button on Integrations → Services posts `{ path: '/accounts', method: 'GET' }` to `publerProxy`, which calls `GET https://app.publer.com/api/v1/accounts`. Good: `Connected — N social account(s).` AP-B3 (no path allowlist on `publerProxy`) is still open and is not changed here. |
 | MCP server URL and auth | **Ready.** `https://mcp.publer.com`, Streamable HTTP: JSON-RPC over POST, replies framed as server-sent events, sessions by `mcp-session-id`, protocol `2024-11-05`, server `Publer Copilot MCP` 0.5.4. Key as `Authorization: Bearer` (accepted) or `Bearer-API` (documented). The `?api_key=` form Publer also accepts is refused here. |
 | `PUBLER_API_KEY` allowed as an MCP key | **Needs code: this change.** Before it, `validateMcpApiKeyEnvVar` refused `PUBLER_API_KEY` at save and at call time. It is now on the list and bound to `mcp.publer.com` as its only host; every other host, `app.publer.com` included, is refused. |
+| Write tools out of reach | **Needs code: this change (#995).** A server using `PUBLER_API_KEY` cannot be saved, and cannot be called, without a non-empty `allowedTools`. The API refuses a tool outside the list with 403 before any request leaves, for every role and for platform jobs alike. The seed's list is the 34 read and session tools. |
 | Admin UI can register it at super_admin | **Needs code: this change, then owner action.** A disabled `Publer MCP` entry (`publer-mcp`) is now in the AI Engine seed. The seed writes it the first time a super_admin opens the MCP Servers tab. An editor-only account opening the AI Engine before that sees the seed error with a Retry button, because a new server needs super_admin. |
 | Plan | **Needs owner action:** Publer offers MCP on Business and Enterprise (its help article also says Top Ambassadors on Enterprise, beta). A key on a plan without MCP is refused with `Invalid API key or not active for this account`. |
 | Rate limit | Publer documents 100 requests per 2 minutes per user for its API. Nothing documents a separate MCP limit; assume MCP calls share it with the 5-minute calendar timer. |
@@ -82,16 +83,35 @@ workspace, accounts, posts or media the MCP session has selected.
 | `reschedule_publer_post` | Moves a scheduled post or draft. |
 | `change_publer_post_state` | Promotes a draft to scheduled, or back. |
 | `confirm_delete_publer_posts` | Deletes posts permanently. |
-| `delete_publer_posts` | Annotated read-only: it draws the delete confirmation and deletes nothing, but it is the first step of a delete, so it is listed here. |
+| `delete_publer_posts` | Annotated read-only, and deletes nothing itself, but it opens the delete preview that `confirm_delete_publer_posts` completes, so it is out. |
 | `create_publer_post_from_file`, `create_publer_photo_draft` | Create drafts with media. |
 | `create_publer_ideas` | Saves content ideas. |
 | `upload_publer_media_from_url`, `upload_publer_chat_media`, `upload_publer_media` | Add files to the media library. |
 
-The AI Engine has no per-tool allowlist: once the server is enabled, any
-editor can call any of these from the Playground, which has no confirmation
-step of its own. Publer's guards (`confirm_multiple`, `confirmation_required`,
-the delete preview) cover some of them, not all. Keep the server switched off
-except while it is in use, or give it a read-only key (below).
+**None of these 13 is callable here.** The seeded server's `allowedTools`
+names the 34 read and session tools above and nothing else, and `mcpProxy`
+(and any platform job that calls an MCP tool) refuses every other tool with
+403, naming the tool and the server, before any request reaches Publer,
+whatever the caller's role. A super_admin is refused too unless the list
+names the tool. The rules (#995, `mcp-policy.js` and
+`admin-integrations/config-collections.js`):
+
+- A server whose key is `PUBLER_API_KEY` must carry a non-empty
+  `allowedTools`; saving one without it is refused, and a stored one
+  without it refuses every call.
+- Only a super_admin can write `allowedTools`, and only a super_admin can
+  switch a `PUBLER_API_KEY` server on or off. An editor's write naming
+  either is refused with 403. A full PUT that omits the list keeps the
+  stored one.
+- Sync stores the tool list Publer offers and never touches
+  `allowedTools`, so a new Publer tool is not callable until a super_admin
+  adds it.
+- Firecrawl, Replicate, the VPS token and keyless servers have no list and
+  behave as before: any tool name. A list, once given, is enforced.
+- Every write records `allowedTools` before and after in the
+  `ai_config_updated` audit row.
+
+The card reads "34 of 47 tools allowed" once synced.
 
 **A narrower key.** Publer keys carry scopes; Workspaces and Accounts are
 required, and Posts, Media and Analytics are optional. The Social Hub needs
@@ -116,8 +136,9 @@ Everything here is read-only. Sign in to the admin as the owner (super_admin).
    with about 47 tools and the status turns connected. **A sync succeeds
    even with a wrong key**, because Publer lists its tools without checking
    the key, so this proves the connection and the policy, not the key.
-4. Switch the card on. The Playground lists only enabled servers with
-   synced tools.
+4. Switch the card on (super_admin only for this server). The
+   Playground lists only enabled servers with synced tools. The card
+   should read `34 of 47 tools allowed`.
 5. Open <https://hybridcloudworks.com/admin/ai-engine?tab=playground>,
    choose **MCP Tool**, server `Publer MCP`, tool `get_publer_user`,
    arguments `{}`, and send. Good: your Publer name and plan. A refusal

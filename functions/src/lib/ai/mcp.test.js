@@ -8,6 +8,9 @@ import {
   validateMcpKeyBinding,
   INTEGRATION_KEY_HOSTS,
   KNOWN_INTEGRATION_KEY_NAMES,
+  TOOL_ALLOWLIST_REQUIRED_KEYS,
+  mcpToolRefusal,
+  validateMcpToolPolicy,
 } from './mcp.js';
 
 const context = { error: vi.fn() };
@@ -468,5 +471,173 @@ describe('Publer MCP binding (2026-10-07)', () => {
       tools: [{ name: 'get_publer_user', description: 'Who', inputSchema: { type: 'object' } }],
     });
     expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('MCP tool allowlist (#995, 2026-10-07)', () => {
+  // A cut of the seeded publer-mcp list (frontend/src/lib/aiEngine/seed.js,
+  // checked against this policy by frontend/src/lib/aiEngine.test.js).
+  const READ_TOOLS = ['get_publer_user', 'lookup_publer_accounts', 'list_publer_drafts'];
+  const WRITE_TOOLS = [
+    'submit_publer_posts',
+    'publish_publer_draft',
+    'update_publer_post',
+    'reschedule_publer_post',
+    'change_publer_post_state',
+    'delete_publer_posts',
+    'confirm_delete_publer_posts',
+    'create_publer_post_from_file',
+    'create_publer_photo_draft',
+    'create_publer_ideas',
+    'upload_publer_media_from_url',
+    'upload_publer_chat_media',
+    'upload_publer_media',
+  ];
+  const seededPubler = (over = {}) => ({
+    id: 'publer-mcp',
+    url: 'https://mcp.publer.com',
+    transport: 'http',
+    apiKeyEnvVar: 'PUBLER_API_KEY',
+    allowedTools: [...READ_TOOLS],
+    enabled: true,
+    ...over,
+  });
+  const superAdminGuard = {
+    requireRole: vi.fn(async () => ({ role: 'super_admin', error: null })),
+  };
+  const toolResult = () =>
+    response({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'Saul, Business' }] } });
+  const call = (guard, server, tool, fetch) =>
+    createMcpHandlers({ guard, store: makeStore(server), env: { PUBLER_API_KEY: 'pk' }, fetch }).mcpProxy(
+      request({ serverId: server.id, tool, arguments: {} }),
+      context
+    );
+
+  it('requires a non-empty list for the Publer key only, and fails closed on a malformed one', () => {
+    expect([...TOOL_ALLOWLIST_REQUIRED_KEYS]).toEqual(['PUBLER_API_KEY']);
+    expect(validateMcpToolPolicy({ apiKeyEnvVar: 'PUBLER_API_KEY', allowedTools: READ_TOOLS })).toEqual(
+      READ_TOOLS
+    );
+    for (const allowedTools of [undefined, null, []]) {
+      expect(() => validateMcpToolPolicy({ apiKeyEnvVar: 'PUBLER_API_KEY', allowedTools })).toThrow(
+        /PUBLER_API_KEY must name the tools/
+      );
+    }
+    for (const allowedTools of ['all', [''], [42], { 0: 'x' }]) {
+      expect(() => validateMcpToolPolicy({ apiKeyEnvVar: 'MCP_X', allowedTools })).toThrow(
+        /array of tool names/
+      );
+    }
+    // The other shared keys, and no key, need no list.
+    for (const apiKeyEnvVar of ['FIRECRAWL_API_KEY', 'REPLICATE_API_KEY', 'VPS_API_TOKEN', 'MCP_X', null]) {
+      expect(validateMcpToolPolicy({ apiKeyEnvVar })).toBeNull();
+    }
+  });
+
+  it('refuses every write tool on the seeded server with 403, for an editor, and sends nothing', async () => {
+    for (const tool of WRITE_TOOLS) {
+      const fetch = vi.fn();
+      const result = await call(allowGuard, seededPubler(), tool, fetch);
+      expect(result.status).toBe(403);
+      const body = JSON.parse(result.body);
+      expect(body.ok).toBe(false);
+      expect(body.error).toContain(`"${tool}"`);
+      expect(body.error).toContain('"publer-mcp"');
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it('refuses a super_admin the same way unless the list names the tool', async () => {
+    const fetch = vi.fn(async () => toolResult());
+    const refused = await call(superAdminGuard, seededPubler(), 'submit_publer_posts', fetch);
+    expect(refused.status).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
+
+    const listed = seededPubler({ allowedTools: [...READ_TOOLS, 'submit_publer_posts'] });
+    const allowed = await call(superAdminGuard, listed, 'submit_publer_posts', fetch);
+    expect(allowed.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes get_publer_user to Publer with the server-side key', async () => {
+    const fetch = vi.fn(async (_url, options) => {
+      expect(JSON.parse(options.body)).toMatchObject({
+        method: 'tools/call',
+        params: { name: 'get_publer_user' },
+      });
+      expect(options.headers.Authorization).toBe('Bearer pk');
+      return toolResult();
+    });
+    const result = await call(allowGuard, seededPubler(), 'get_publer_user', fetch);
+    expect(result.status).toBe(200);
+    expect(JSON.parse(result.body)).toMatchObject({ ok: true, result: 'Saul, Business' });
+  });
+
+  it('refuses every call to a Publer-key server stored without a list', async () => {
+    for (const allowedTools of [undefined, []]) {
+      const fetch = vi.fn();
+      const result = await call(allowGuard, seededPubler({ allowedTools }), 'get_publer_user', fetch);
+      expect(result.status).toBe(403);
+      expect(JSON.parse(result.body).error).toMatch(/must name the tools it may call/);
+      expect(fetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it('holds the platform job path to the same list (callMcpTool via mcpToolRefusal)', () => {
+    expect(
+      mcpToolRefusal({ serverId: 'publer-mcp', server: seededPubler(), tool: 'publish_publer_draft' })
+    ).toMatch(/not in the allowedTools of MCP server "publer-mcp"/);
+    expect(
+      mcpToolRefusal({ serverId: 'publer-mcp', server: seededPubler(), tool: 'get_publer_user' })
+    ).toBeNull();
+  });
+
+  it('leaves Firecrawl as it was: no list, any tool name reaches the server', async () => {
+    const firecrawl = {
+      id: 'firecrawl',
+      url: 'https://mcp.firecrawl.dev/mcp',
+      transport: 'http',
+      apiKeyEnvVar: 'FIRECRAWL_API_KEY',
+      enabled: true,
+    };
+    const fetch = vi.fn(async () => toolResult());
+    const result = await createMcpHandlers({
+      guard: allowGuard,
+      store: makeStore(firecrawl),
+      env: { FIRECRAWL_API_KEY: 'fc' },
+      fetch,
+    }).mcpProxy(request({ serverId: 'firecrawl', tool: 'firecrawl_scrape', arguments: {} }), context);
+    expect(result.status).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    // Given a list, it is held to it.
+    expect(
+      mcpToolRefusal({
+        serverId: 'firecrawl',
+        server: { ...firecrawl, allowedTools: ['firecrawl_search'] },
+        tool: 'firecrawl_scrape',
+      })
+    ).toMatch(/not in the allowedTools/);
+  });
+
+  it('never widens allowedTools on Sync', async () => {
+    const store = makeStore(seededPubler());
+    const fetch = vi.fn(async () =>
+      response({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { tools: [...READ_TOOLS, ...WRITE_TOOLS].map((name) => ({ name })) },
+      })
+    );
+    const handlers = createMcpHandlers({
+      guard: allowGuard,
+      store,
+      env: { PUBLER_API_KEY: 'pk' },
+      fetch,
+      now: fixedNow,
+    });
+    const result = await handlers.syncMcpTools(request({ serverId: 'publer-mcp' }), context);
+    expect(JSON.parse(result.body).tools).toHaveLength(READ_TOOLS.length + WRITE_TOOLS.length);
+    const [, , patch] = store.patchDoc.mock.calls[0];
+    expect(Object.keys(patch).sort()).toEqual(['lastError', 'lastTested', 'status', 'tools']);
   });
 });

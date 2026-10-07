@@ -10,10 +10,15 @@ import {
   INTEGRATION_KEY_HOSTS,
   KNOWN_INTEGRATION_KEY_NAMES,
   MCP_KEY_ENV_PATTERN,
+  TOOL_ALLOWLIST_REQUIRED_KEYS,
+  mcpToolRefusal,
   readMcpSecret,
+  requiresToolAllowlist,
   resolveMcpAuthHeaders,
+  validateMcpAllowedTools,
   validateMcpApiKeyEnvVar,
   validateMcpKeyBinding,
+  validateMcpToolPolicy,
   validateMcpUrl,
 } from './mcp-policy.js';
 
@@ -47,10 +52,15 @@ export {
   INTEGRATION_KEY_HOSTS,
   KNOWN_INTEGRATION_KEY_NAMES,
   MCP_KEY_ENV_PATTERN,
+  TOOL_ALLOWLIST_REQUIRED_KEYS,
+  mcpToolRefusal,
   readMcpSecret,
+  requiresToolAllowlist,
   resolveMcpAuthHeaders,
+  validateMcpAllowedTools,
   validateMcpApiKeyEnvVar,
   validateMcpKeyBinding,
+  validateMcpToolPolicy,
   validateMcpUrl,
 };
 
@@ -462,15 +472,20 @@ const isJsonObject = (value) =>
 
 /**
  * What stands between a found server and a tool call: the server must be
- * enabled, its URL and key name must pass policy, and the arguments must be
- * a JSON object. The URL on success, the outcome on refusal.
+ * enabled, its URL and key name must pass policy, the tool must be one its
+ * `allowedTools` names (#995; mcp-policy.js says when a list applies), and
+ * the arguments must be a JSON object. The URL on success, the outcome on
+ * refusal. The tool check is the role-independent boundary: it runs for
+ * every caller, the browser proxy and the platform jobs alike.
  */
-function prepareToolCall(server, toolArguments) {
+function prepareToolCall({ serverId, server, tool, toolArguments }) {
   if (server.enabled !== true) {
     return { failure: { ok: false, error: 'MCP server is disabled', httpStatus: 403 } };
   }
   const { url, error } = validatedMcpUrl(server);
   if (error) return { failure: { ok: false, error, httpStatus: 400 } };
+  const refusal = mcpToolRefusal({ serverId, server, tool });
+  if (refusal) return { failure: { ok: false, error: refusal, httpStatus: 403 } };
   if (!isJsonObject(toolArguments)) {
     return {
       failure: {
@@ -538,7 +553,8 @@ function toolCallOutcome(rpcResult) {
  * Returns an outcome rather than throwing: `{ ok: true, result, raw }` on a
  * tool result, or `{ ok: false, error, code?, httpStatus }` where `httpStatus`
  * is what the proxy answers for that failure (404 unknown server, 403
- * disabled, 400 bad URL or arguments, 500 configuration read failed) and 200
+ * disabled or a tool outside the server's allowedTools, 400 bad URL or
+ * arguments, 500 configuration read failed) and 200
  * for an upstream failure the proxy reports in the body. `code` is
  * `UNAUTHENTICATED` when the upstream rejected the credential (401/402/403 or
  * `invalid_token`), which is the signal a caller uses to say "reconnect"
@@ -582,7 +598,7 @@ export async function callMcpTool({
   if (loaded.failure) return loaded.failure;
   const { server } = loaded;
 
-  const prepared = prepareToolCall(server, toolArguments);
+  const prepared = prepareToolCall({ serverId, server, tool, toolArguments });
   if (prepared.failure) return prepared.failure;
 
   try {
@@ -632,7 +648,12 @@ function toolListOutcome(rpcResult) {
   return { tools: normalizeMcpTools(rpcResult) };
 }
 
-/** tools/list on a validated server, the result stored on its document. */
+/**
+ * tools/list on a validated server, the result stored on its document. The
+ * patch names `tools` and the status fields only: a sync records what the
+ * server offers and never widens `allowedTools`, which only a super_admin
+ * config write sets (#995).
+ */
 async function syncToolList(ctx, context, { serverId, server, url }) {
   const { store, env, now, transportOptions } = ctx;
   try {

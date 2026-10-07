@@ -31,6 +31,8 @@ export function readMcpSecret(env, name) {
 export const MCP_KEY_ENV_PATTERN = /^MCP_[A-Z0-9_]+$/;
 export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
   'FIRECRAWL_API_KEY',
+  // Usable only with a tool allowlist (TOOL_ALLOWLIST_REQUIRED_KEYS below):
+  // Publer's MCP can publish and delete, so the key alone is not enough.
   'PUBLER_API_KEY',
   'REPLICATE_API_KEY',
   'VPS_API_TOKEN',
@@ -104,6 +106,77 @@ export function validateMcpApiKeyEnvVar(value) {
   throw new Error(
     `apiKeyEnvVar must be an MCP_* app setting or one of ${KNOWN_INTEGRATION_KEY_NAMES.join(', ')}; "${name}" is not allowed`
   );
+}
+
+/**
+ * Shared keys whose servers may only call the tools their document names in
+ * `allowedTools` (#995, 2026-10-07). Publer's MCP server can create,
+ * schedule, publish and delete posts, and `mcpProxy` needs only the editor
+ * role, so without a list any editor could publish through it, past the
+ * Social Hub's own publishing rules. A server naming one of these keys must
+ * carry a non-empty `allowedTools`; a missing or empty list is refused at
+ * save time and every call to such a server is refused at call time.
+ */
+export const TOOL_ALLOWLIST_REQUIRED_KEYS = Object.freeze(['PUBLER_API_KEY']);
+
+const keyNameOf = (apiKeyEnvVar) => (typeof apiKeyEnvVar === 'string' ? apiKeyEnvVar.trim() : '');
+
+/** Whether a server naming this key must carry `allowedTools`. */
+export function requiresToolAllowlist(apiKeyEnvVar) {
+  return TOOL_ALLOWLIST_REQUIRED_KEYS.includes(keyNameOf(apiKeyEnvVar));
+}
+
+/**
+ * The shape of `allowedTools`: absent (undefined or null) returns null, which
+ * means no list; otherwise an array of non-empty tool names, returned
+ * trimmed. Anything else throws, so a malformed list fails closed.
+ */
+export function validateMcpAllowedTools(value) {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.some((name) => typeof name !== 'string' || !name.trim())) {
+    throw new Error('allowedTools must be an array of tool names');
+  }
+  return value.map((name) => name.trim());
+}
+
+/**
+ * The key and the tool list as a pair: the list's shape, and a non-empty
+ * list where the key requires one. Returns the list (or null for none).
+ */
+export function validateMcpToolPolicy({ apiKeyEnvVar, allowedTools }) {
+  const list = validateMcpAllowedTools(allowedTools);
+  if (requiresToolAllowlist(apiKeyEnvVar) && (!list || list.length === 0)) {
+    throw new Error(
+      `a server using ${keyNameOf(apiKeyEnvVar)} must name the tools it may call in allowedTools`
+    );
+  }
+  return list;
+}
+
+/**
+ * Why a tool call on this server is refused, or null when it may go ahead.
+ * Checked before any upstream request, whatever the caller's role.
+ *
+ * A server with no `allowedTools` may call any tool name, which is exactly
+ * what every server could do before #995: `mcpProxy` has never limited a
+ * call to the synced tool list, so Firecrawl, Replicate, the VPS token and
+ * keyless or `MCP_*` servers keep that behaviour until someone gives them a
+ * list. A server that does carry a list is held to it, an empty one
+ * included. A server whose key requires a list and has none refuses every
+ * call.
+ */
+export function mcpToolRefusal({ serverId, server, tool }) {
+  let list;
+  try {
+    list = validateMcpToolPolicy({
+      apiKeyEnvVar: server?.apiKeyEnvVar,
+      allowedTools: server?.allowedTools,
+    });
+  } catch (error) {
+    return `Tool "${tool}" refused on MCP server "${serverId}": ${error.message}`;
+  }
+  if (list === null || list.includes(tool)) return null;
+  return `Tool "${tool}" is not in the allowedTools of MCP server "${serverId}"`;
 }
 
 /**

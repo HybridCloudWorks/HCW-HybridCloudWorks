@@ -2431,7 +2431,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: '3. Enable',
-            body: 'Toggle Publer MCP on. The Playground only lists enabled servers that have synced tools.',
+            body: 'Toggle Publer MCP on (super_admin only for this server). The Playground only lists enabled servers that have synced tools. The card reads “34 of 47 tools allowed”: the allowed list ships with the seed and only a super_admin can change it.',
             codes: [],
           },
         ],
@@ -2446,7 +2446,7 @@ export const SERVICE_DOCS = {
           },
           {
             heading: 'Never call from here',
-            body: 'submit_publer_posts, publish_publer_draft, update_publer_post, reschedule_publer_post, change_publer_post_state, confirm_delete_publer_posts, create_publer_post_from_file, create_publer_photo_draft, create_publer_ideas and the upload_publer_* tools write to Publer. The Playground has no confirmation step.',
+            body: 'submit_publer_posts, publish_publer_draft, update_publer_post, reschedule_publer_post, change_publer_post_state, confirm_delete_publer_posts, create_publer_post_from_file, create_publer_photo_draft, create_publer_ideas and the upload_publer_* tools write to Publer. delete_publer_posts deletes nothing itself, but it opens the delete preview that confirm_delete_publer_posts completes, so it is out too. None of the 13 is in the server’s allowed tools, and the API refuses a call to any of them whatever the role.',
             codes: [],
           },
         ],
