@@ -27,6 +27,7 @@ describe('the Labs Hub order (ADR 0033)', () => {
       'console',
       'agents',
       'settings',
+      'coder',
     ]);
   });
 });
