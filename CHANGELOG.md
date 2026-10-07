@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Integrations directory: a configuration-driven tab on the admin
+  Integrations page (owner brief 2026-10-06, slice 3; #919).** One card per
+  external service — its Powered-by badge, category, a one-line summary,
+  what it powers here, where it is used, connection status from the same
+  key lights and test verdicts the Overview reads, Docs and Official site
+  links, and Set up, which opens the service on the Services tab. Search,
+  category and connection filters, alphabetical. The rows are
+  `frontend/src/config/integrationsDirectory.js` over the service registry
+  and the brand registry; tests hold the three to each other, so a service
+  cannot be missing from the directory. Admin-only, as every vendor-naming
+  surface is.
+
 - **One "Powered by" badge for every third-party service in the admin
   (owner brief 2026-10-06, slice 2; #918).** `IntegrationBadge` renders
   "Powered by <Platform>" in the platform's colour with a medallion, from one

@@ -41,6 +41,7 @@ import { useSearchParams } from 'react-router';
 import { Plug } from 'lucide-react';
 import PageHeader from '@/components/admin/shared/PageHeader';
 import IntegrationsOverview from '@/components/admin/integrations/IntegrationsOverview';
+import IntegrationsDirectory from '@/components/admin/integrations/IntegrationsDirectory';
 import IntegrationsServices from '@/components/admin/integrations/IntegrationsServices';
 import IntegrationsKeys from '@/components/admin/integrations/IntegrationsKeys';
 import IntegrationsIdentity from '@/components/admin/integrations/IntegrationsIdentity';
@@ -74,7 +75,7 @@ export default function IntegrationsPage() {
       <PageHeader
         icon={Plug}
         title="Integrations Hub"
-        description="Every third-party service, whether it is answering, and the keys it answers with. Keys are held in Azure Key Vault and can be written here but never read back."
+        description="Every third-party service, whether it is answering, and the keys it answers with; the Directory explains what each one is and brings. Keys are held in Azure Key Vault and can be written here but never read back."
         help={HELP}
       />
 
@@ -86,6 +87,7 @@ export default function IntegrationsPage() {
         label="Integrations Hub"
       >
         {activeTab === 'overview' && <IntegrationsOverview tests={tests} onOpenGroup={openGroup} />}
+        {activeTab === 'directory' && <IntegrationsDirectory tests={tests} />}
         {activeTab === 'services' && (
           <IntegrationsServices
             group={searchParams.get('group')}

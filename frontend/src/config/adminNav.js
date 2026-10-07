@@ -286,7 +286,7 @@ const ITEMS = [
     '/admin/integrations',
     Plug,
     'Integrations',
-    'Every external service, its keys, its connection test and where it is used.',
+    'Every external service, its keys, its connection test, where it is used, and a directory explaining each one.',
   ],
 ];
 
