@@ -1,13 +1,16 @@
 /**
- * Reminders: the badge says where each one stands, a new row needs a title
- * and a date before the sheet can be saved, and a save PUTs the body the
- * daily check reads with the timer's stamps untouched (owner, 2026-10-06).
+ * Reminders: a form on top adds one reminder and clears when the save took;
+ * the pane below lists every reminder with its badge, a Done box and a red
+ * circle X that cancels after one confirmation; every action PUTs the whole
+ * list with the timer's stamps untouched (owner, 2026-10-06, both requests).
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
 import RemindersTab, {
+  NewReminderForm,
+  ReminderList,
   RemindersCard,
   describeDue,
   describeNotified,
@@ -156,112 +159,193 @@ describe('where a reminder stands', () => {
   });
 });
 
-describe('RemindersCard', () => {
-  it('shows every stored row with its badge, the overdue and done ones included', () => {
-    render(
-      <RemindersCard
-        value={stored}
-        meta={meta}
-        saving={false}
-        onChange={vi.fn()}
-        onSave={vi.fn()}
-        today={TODAY}
-      />
-    );
-    expect(screen.getByLabelText('Title 1').value).toBe(
-      'Cloudflare DNS token for the lab host expires'
-    );
-    expect(screen.getByText('In 90 days')).toBeTruthy();
-    expect(screen.getByText('In 4 days · Telegram window open')).toBeTruthy();
-    expect(screen.getByText('Done', { selector: 'span' })).toBeTruthy();
-    expect(screen.getByText(/2 open reminders, 1 done/)).toBeTruthy();
-    expect(screen.getByText(/Telegram said: coming up/)).toBeTruthy();
-    // The undated-first order puts the nearest open date before the far one.
-    const titles = screen.getAllByLabelText(/^Title \d$/).map((input) => input.value);
-    expect(titles[0]).toBe('Re-verify the Learn catalogues');
-  });
+describe('NewReminderForm', () => {
+  it('holds Add until the row has a title and a date, names why, then hands over a trimmed row and clears', async () => {
+    const onAdd = vi.fn(async () => true);
+    render(<NewReminderForm saving={false} onAdd={onAdd} />);
+    const add = screen.getByRole('button', { name: /Add reminder/ });
+    expect(add.hasAttribute('disabled')).toBe(true);
+    expect(screen.getByText('Title needed')).toBeTruthy();
 
-  it('adds a row at the top, and holds Save until it has a title and a date', () => {
-    const onChange = vi.fn();
-    const { rerender } = render(
-      <RemindersCard
-        value={{ reminders: [] }}
-        meta={meta}
-        saving={false}
-        onChange={onChange}
-        onSave={vi.fn()}
-        today={TODAY}
-      />
-    );
-    fireEvent.click(screen.getByRole('button', { name: /Add reminder/ }));
-    const [[next]] = onChange.mock.calls;
-    expect(next.reminders).toHaveLength(1);
-    expect(next.reminders[0]).toMatchObject({
-      title: '',
-      dueDate: '',
-      leadDays: 7,
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: '  Renew the thing  ' } });
+    expect(screen.getByText('Date needed')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-12-01' } });
+    fireEvent.change(screen.getByLabelText('Days before'), { target: { value: '14' } });
+    fireEvent.change(screen.getByLabelText('Link'), {
+      target: { value: ' https://example.test/renew ' },
+    });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: ' Do it early. ' } });
+    expect(add.hasAttribute('disabled')).toBe(false);
+
+    fireEvent.submit(screen.getByRole('form', { name: 'New reminder' }));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
+    const [[row]] = onAdd.mock.calls;
+    expect(row).toMatchObject({
+      title: 'Renew the thing',
+      dueDate: '2026-12-01',
+      leadDays: 14,
+      url: 'https://example.test/renew',
+      notes: 'Do it early.',
       done: false,
       notified: {},
     });
-
-    rerender(
-      <RemindersCard
-        value={next}
-        meta={meta}
-        saving={false}
-        onChange={onChange}
-        onSave={vi.fn()}
-        today={TODAY}
-      />
-    );
-    expect(screen.getByRole('button', { name: 'Save' }).hasAttribute('disabled')).toBe(true);
-    expect(screen.getByText(/1 row need a title and a date/)).toBeTruthy();
-    expect(screen.getByText('No date yet')).toBeTruthy();
+    expect(row.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/);
+    await waitFor(() => expect(screen.getByLabelText('Title').value).toBe(''));
+    expect(screen.getByLabelText('Due date').value).toBe('');
   });
 
-  it('edits a row in place and marks it done without touching the stamps', () => {
-    const onChange = vi.fn();
-    render(
-      <RemindersCard
-        value={stored}
-        meta={meta}
-        saving={false}
-        onChange={onChange}
-        onSave={vi.fn()}
-        today={TODAY}
-      />
-    );
-    fireEvent.change(screen.getByLabelText('Days before 2'), { target: { value: '14' } });
-    expect(onChange.mock.calls.at(-1)[0].reminders[1]).toMatchObject({
-      id: 'learn-pages',
-      leadDays: '14',
-      notified: { ahead: '2026-10-03T13:00:00.000Z' },
-    });
-    fireEvent.click(screen.getByLabelText('Done 2'));
-    expect(onChange.mock.calls.at(-1)[0].reminders[1].done).toBe(true);
-    fireEvent.click(screen.getByRole('button', { name: 'Remove reminder 3' }));
-    expect(onChange.mock.calls.at(-1)[0].reminders.map((r) => r.id)).toEqual([
-      'cf-token',
-      'learn-pages',
-    ]);
+  it('keeps the draft when the save was refused', async () => {
+    const onAdd = vi.fn(async () => false);
+    render(<NewReminderForm saving={false} onAdd={onAdd} />);
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Kept' } });
+    fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-12-01' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'New reminder' }));
+    await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText('Title').value).toBe('Kept');
   });
 });
 
-describe('RemindersTab', () => {
-  it('loads the sheet and PUTs it back with the stamps the timer wrote', async () => {
-    render(<RemindersTab />);
-    await screen.findByText('Reminders');
-    expect(getJSON).toHaveBeenCalledWith(settingRoute('reminders'));
-    fireEvent.change(screen.getByLabelText('Notes 1'), {
-      target: { value: 'Re-scope to the lab zone first. Then rotate.' },
+describe('ReminderList', () => {
+  it('lists every reminder with its details and badge, nearest open first, done last', () => {
+    render(
+      <ReminderList
+        reminders={stored.reminders}
+        today={TODAY}
+        saving={false}
+        onToggleDone={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    const items = screen.getAllByRole('listitem');
+    expect(items).toHaveLength(3);
+    expect(within(items[0]).getByText('Re-verify the Learn catalogues')).toBeTruthy();
+    expect(within(items[0]).getByText('In 4 days · Telegram window open')).toBeTruthy();
+    expect(within(items[0]).getByText(/Telegram said: coming up/)).toBeTruthy();
+    expect(within(items[1]).getByText('In 90 days')).toBeTruthy();
+    expect(within(items[1]).getByText(/Due 2027-01-04 · 7 days before/)).toBeTruthy();
+    expect(within(items[1]).getByRole('link', { name: /Link/ }).getAttribute('href')).toBe(
+      'https://dash.cloudflare.com/profile/api-tokens'
+    );
+    expect(within(items[1]).getByText('Re-scope to the lab zone first.')).toBeTruthy();
+    expect(within(items[2]).getByText('Done', { selector: 'span' })).toBeTruthy();
+    expect(screen.getByText(/2 open reminders, 1 done/)).toBeTruthy();
+  });
+
+  it('shows the empty pane when there is nothing', () => {
+    render(
+      <ReminderList
+        reminders={[]}
+        today={TODAY}
+        saving={false}
+        onToggleDone={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Nothing here yet. Add the first one above/)).toBeTruthy();
+  });
+
+  it('cancels only after the inline confirmation, and Keep backs out', () => {
+    const onCancel = vi.fn();
+    render(
+      <ReminderList
+        reminders={stored.reminders}
+        today={TODAY}
+        saving={false}
+        onToggleDone={vi.fn()}
+        onCancel={onCancel}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Cancel reminder: Cloudflare DNS token for the lab host expires',
+      })
+    );
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(screen.getByText('Cancel this reminder?')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep' }));
+    expect(screen.queryByText('Cancel this reminder?')).toBeNull();
+    expect(onCancel).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Cancel reminder: Cloudflare DNS token for the lab host expires',
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, cancel' }));
+    // Index into the stored list, not the display order.
+    expect(onCancel).toHaveBeenCalledWith(0);
+  });
+
+  it('flips Done for the right stored row', () => {
+    const onToggleDone = vi.fn();
+    render(
+      <ReminderList
+        reminders={stored.reminders}
+        today={TODAY}
+        saving={false}
+        onToggleDone={onToggleDone}
+        onCancel={vi.fn()}
+      />
+    );
+    fireEvent.click(screen.getByLabelText('Done: Re-verify the Learn catalogues'));
+    expect(onToggleDone).toHaveBeenCalledWith(1, true);
+  });
+});
+
+describe('RemindersCard and the tab', () => {
+  it('adding from the form saves the list with the new row appended, stamps untouched', async () => {
+    const onSave = vi.fn(async () => true);
+    render(
+      <RemindersCard value={stored} meta={meta} saving={false} onSave={onSave} today={TODAY} />
+    );
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'New one' } });
+    fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-11-01' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'New reminder' }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const [[saved]] = onSave.mock.calls;
+    expect(saved.reminders).toHaveLength(4);
+    expect(saved.reminders[3]).toMatchObject({
+      title: 'New one',
+      dueDate: '2026-11-01',
+      leadDays: 7,
     });
-    fireEvent.submit(screen.getByLabelText('Notes 1').closest('form'));
+    expect(saved.reminders[1].notified).toEqual({ ahead: '2026-10-03T13:00:00.000Z' });
+  });
+
+  it('cancelling saves the list without that row; Done saves it flipped', async () => {
+    const onSave = vi.fn(async () => true);
+    render(
+      <RemindersCard value={stored} meta={meta} saving={false} onSave={onSave} today={TODAY} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel reminder: Already handled' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes, cancel' }));
+    expect(onSave).toHaveBeenLastCalledWith({
+      reminders: stored.reminders.filter((r) => r.id !== 'done-one'),
+    });
+    fireEvent.click(screen.getByLabelText('Done: Re-verify the Learn catalogues'));
+    const [last] = onSave.mock.calls.at(-1);
+    expect(last.reminders.find((r) => r.id === 'learn-pages')).toMatchObject({
+      done: true,
+      notified: { ahead: '2026-10-03T13:00:00.000Z' },
+    });
+  });
+
+  it('loads the sheet, and an Add PUTs the whole list to the reminders route', async () => {
+    render(<RemindersTab />);
+    await screen.findByText('Your reminders');
+    expect(getJSON).toHaveBeenCalledWith(settingRoute('reminders'));
+    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Foundry review' } });
+    fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-12-01' } });
+    fireEvent.submit(screen.getByRole('form', { name: 'New reminder' }));
     await waitFor(() => expect(sendJSON).toHaveBeenCalledTimes(1));
     const [[route, method, body]] = sendJSON.mock.calls;
     expect(route).toBe(settingRoute('reminders'));
     expect(method).toBe('PUT');
-    expect(body.reminders[0].notes).toBe('Re-scope to the lab zone first. Then rotate.');
-    expect(body.reminders[1].notified).toEqual({ ahead: '2026-10-03T13:00:00.000Z' });
-    expect(body.reminders[2].done).toBe(true);
+    expect(body.reminders).toHaveLength(4);
+    expect(body.reminders[3].title).toBe('Foundry review');
+    // The saved list is what the pane shows, and the form is clear again.
+    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(4));
+    expect(screen.getByLabelText('Title').value).toBe('');
   });
 });
