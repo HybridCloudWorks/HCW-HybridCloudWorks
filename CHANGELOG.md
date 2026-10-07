@@ -54,6 +54,33 @@ This project has not cut a tagged release; entries are grouped under
   allowed". Tests: `functions/src/lib/ai/mcp.test.js`,
   `functions/src/lib/admin-integrations.test.js`, and
   `frontend/src/lib/aiEngine.test.js` (the seed against the API policy).
+- **Platform Settings → Reminders shows the Telegram bot's QR code, for
+  pairing a phone with the bot again (owner, 2026-10-07).** The owner's QR
+  artwork for `@agenticarchitectbot` now sits at the top of the Reminders
+  card, at a fixed 220 px wide on a laptop and 60 % of the screen width on
+  a phone, on a white panel so the dark artwork reads in both themes, with
+  the handle linked to `https://t.me/agenticarchitectbot` and an **Open
+  full size** link. The artwork is AI-generated (its C2PA manifest names
+  the image generator) and no decoder read its embossed modules, so it is
+  not verified to scan. Beneath it, at 160 px on a laptop and 45 % of the
+  screen on a phone, is the verified path: a plain black-on-white code
+  generated from the t.me link (version 3, error correction Q, eight
+  modules of quiet zone) that jsQR decodes back to exactly
+  `https://t.me/agenticarchitectbot` at 495, 247, 165 and 123 px. Three
+  steps cover a phone that loses the bot (scan a code or search the handle,
+  press Start or Unblock, press **Test Telegram** and watch for the message
+  on that phone), with the existing Test Telegram button inside the same
+  panel. The note under them says what Sent proves: Telegram accepted a
+  message for the chat id in `TELEGRAM_CHAT_ID`, not that this phone holds
+  that chat. When Sent shows and nothing arrives, check which account the
+  phone is signed in to first (the same account keeps the same chat id on
+  any phone), and change the stored id on Integrations → Keys only if the
+  account itself changed. Both images are imported from
+  `frontend/src/assets/admin/`: the artwork as delivered (1,907,187
+  bytes) is fingerprinted into `/assets`, and the code (3,119 bytes) is
+  under Vite's 4 KiB inline limit, so it ships as a data URI inside the
+  lazy Platform Settings chunk. Both load only when that page is open.
+  `TelegramReconnectPanel.jsx`, with tests beside it.
 
 - **Governance remainders of the 2026-10-06 estate review: the Terraform
   run identity's Contributor scoped to its resource groups, code owners on

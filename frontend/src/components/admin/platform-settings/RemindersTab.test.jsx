@@ -424,7 +424,9 @@ describe('RemindersCard and the tab', () => {
     await screen.findByText('Your reminders');
     expect(getJSON).toHaveBeenCalledWith(settingRoute('reminders'));
     expect(screen.getByRole('button', { name: /Test Telegram/ })).toBeTruthy();
-    expect(screen.getAllByRole('listitem')).toHaveLength(3);
+    // Scoped to the pane: the reconnect panel above it has a list of its own.
+    const pane = () => within(screen.getByRole('region', { name: 'Your reminders' }));
+    expect(pane().getAllByRole('listitem')).toHaveLength(3);
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Foundry review' } });
     fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-12-01' } });
     fireEvent.submit(screen.getByRole('form', { name: 'New reminder' }));
@@ -434,7 +436,7 @@ describe('RemindersCard and the tab', () => {
     expect(method).toBe('PUT');
     expect(body.reminders).toHaveLength(4);
     expect(body.reminders[3].title).toBe('Foundry review');
-    await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(4));
+    await waitFor(() => expect(pane().getAllByRole('listitem')).toHaveLength(4));
     expect(screen.getByLabelText('Title').value).toBe('');
   });
 });
