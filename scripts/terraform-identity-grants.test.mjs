@@ -36,6 +36,33 @@ const variables = readFileSync(join(INFRA, 'variables.tf'), 'utf8');
 const conditionScript = readFileSync(join(SCRIPTS, 'Set-TerraformRbacCondition.ps1'), 'utf8');
 const bootstrapScript = readFileSync(join(SCRIPTS, 'bootstrap-terraform-oidc.ps1'), 'utf8');
 
+/**
+ * The HCP Terraform project in the federated-credential subject has one
+ * documented value, and the script's default must be that value: on
+ * 2026-10-07 the default, the runbook and backend.tf all said one project while
+ * the live workspace sat in another, and a re-run would have replaced the
+ * credentials silently. This pins the default to the two documents an operator
+ * reads first, so the three cannot drift apart again; which project is RIGHT
+ * is read off the workspace's Settings page, not from any of them.
+ */
+describe('the OIDC project default', () => {
+  const scriptDefault = bootstrapScript.match(/^\s*\[string\] \$TfcProject = '([^']+)',/m)[1];
+  const backend = readFileSync(join(SCRIPTS, '..', 'infra', 'backend.tf'), 'utf8');
+  const backendProject = backend.match(/^# Org: hcw \| Project: ([^|]+?) \| Workspace: hcw-azure$/m)[1];
+  const runbook = readFileSync(join(SCRIPTS, '..', 'docs', 'runbooks', 'deployment-runbook.md'), 'utf8');
+  const runbookProject = runbook.match(/org `hcw`, project `([^`]+)`, workspace `hcw-azure`/)[1];
+
+  it('is the project backend.tf and the deployment runbook name', () => {
+    expect(scriptDefault).toBe(backendProject);
+    expect(scriptDefault).toBe(runbookProject);
+  });
+
+  it('is replaced on the identity only when asked', () => {
+    expect(bootstrapScript).toMatch(/\[switch\] \$ReplaceFederatedCredentials/);
+    expect(bootstrapScript).toMatch(/if \(-not \$ReplaceFederatedCredentials\) \{\s*Stop-WithGuidance/);
+  });
+});
+
 /** Every `resource "<type>" "<label>" { ... }` block, braces balanced. */
 function resourceBlocks(text, type) {
   const out = [];

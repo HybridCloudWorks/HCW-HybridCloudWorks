@@ -3845,15 +3845,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
-- **`bootstrap-terraform-oidc.ps1` defaulted to an HCP Terraform project the
-  workspace is not in.** Its `-TfcProject` default said `Site` since
-  2026-08-19; the HCP Terraform API read on 2026-10-07 shows `hcw-azure` and
-  `hcw-lab` in `Default Project` and the `Site` project empty. Because the
-  script replaces a federated credential whose subject differs, a re-run with
-  the default would have deleted the two working credentials and written a
-  subject no run presents, locking the workspace out of Azure. The default is
-  now `Default Project`, the parameter help and `infra/README.md` say where
-  the workspace lives, and the owner steps pass the project explicitly.
+- **`bootstrap-terraform-oidc.ps1` no longer replaces a federated credential
+  whose subject differs without being told to.** On 2026-10-07 the
+  `hcw-azure` workspace was found in HCP Terraform's `Default Project` while
+  the identity's credentials, the script default, `infra/backend.tf` and the
+  deployment runbook all name `Site`; every run failed at Azure sign-in with
+  `AADSTS700213` naming the presented subject. The script's old behaviour on
+  a mismatch was to delete and recreate the credential for whatever project
+  it was given, which turns a wrong argument into a lockout. A mismatch now
+  stops with both subjects printed and the two ways to agree: move the
+  workspace back into the project the identity names (no Azure change), or
+  re-run with `-TfcProject` and the new `-ReplaceFederatedCredentials`
+  switch. `terraform-identity-grants.test.mjs` pins the default to the project
+  `backend.tf` and the runbook name, so the three cannot drift.
 - **The first digest pull request after #986 refused its own files.**
   `scripts/open-lab-pin-pr.mjs` read `git status --porcelain` through a
   helper that trims its output, so the first line lost its leading space and

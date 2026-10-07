@@ -16,7 +16,7 @@ before any plan or apply.
 
 - **One environment: production.** There is no dev/staging state (ADR-0009).
   `var.environment` exists for naming, not for a second workspace.
-- **State lives in HCP Terraform Cloud** — org `hcw`, project `Default Project` (the org's `Site` project is empty),
+- **State lives in HCP Terraform Cloud** — org `hcw`, project `Site`,
   workspace `hcw-azure` (`backend.tf`). The org is `hcw` and not
   `HybridCloudWorks`; this line said the latter, which is the exact assumption
   `backend.tf` records as having made every run 404 before it started. State,
