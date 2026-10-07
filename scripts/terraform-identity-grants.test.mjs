@@ -76,6 +76,31 @@ function appResourceGroupKeys() {
 
 const SLOT_BY_PROVIDER = { '': 'app', mgmt: 'mgmt', conn: 'conn' };
 
+/** Which subscription slot a resource block lands in, from its provider alias. */
+function blockSlot(label, body) {
+  const alias = body.match(/^\s*provider\s*=\s*azurerm\.(\w+)/m)?.[1] ?? '';
+  const slot = SLOT_BY_PROVIDER[alias];
+  if (!slot) throw new Error(`azurerm_resource_group.${label} uses provider alias "${alias}", which has no slot`);
+  return slot;
+}
+
+/** A name template with `${each.key}` and the naming variables substituted. */
+function resolveName(label, template, key, values) {
+  return template.replace(/\$\{([^}]+)\}/g, (whole, expr) => {
+    if (expr === 'each.key' && key) return key;
+    if (expr in values) return values[expr];
+    throw new Error(`azurerm_resource_group.${label}: cannot resolve ${whole} in "${template}"`);
+  });
+}
+
+/** The names one azurerm_resource_group block creates. */
+function blockNames(label, body, values) {
+  const template = body.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1];
+  if (!template) throw new Error(`azurerm_resource_group.${label} has no literal name template`);
+  const keys = /for_each\s*=\s*local\.app_resource_groups/.test(body) ? appResourceGroupKeys() : [null];
+  return keys.map((key) => resolveName(label, template, key, values));
+}
+
 /** slot -> sorted resource group names, as infra/ would create them with its defaults. */
 function declaredResourceGroups() {
   const values = {
@@ -83,27 +108,13 @@ function declaredResourceGroups() {
     'var.environment': stringDefault('environment'),
     'var.region_abbreviation': stringDefault('region_abbreviation'),
   };
-  const bySlot = { app: [], mgmt: [], conn: [] };
   const blocks = resourceBlocks(source, 'azurerm_resource_group');
   if (blocks.length === 0) throw new Error('no azurerm_resource_group blocks found — the regex has rotted');
+  const bySlot = { app: [], mgmt: [], conn: [] };
   for (const { label, body } of blocks) {
-    const alias = (body.match(/^\s*provider\s*=\s*azurerm\.(\w+)/m) ?? [, ''])[1];
-    const slot = SLOT_BY_PROVIDER[alias];
-    if (!slot) throw new Error(`azurerm_resource_group.${label} uses provider alias "${alias}", which has no slot`);
-    const template = (body.match(/^\s*name\s*=\s*"([^"]+)"/m) ?? [])[1];
-    if (!template) throw new Error(`azurerm_resource_group.${label} has no literal name template`);
-    const keys = /for_each\s*=\s*local\.app_resource_groups/.test(body) ? appResourceGroupKeys() : [null];
-    for (const key of keys) {
-      const name = template.replace(/\$\{([^}]+)\}/g, (whole, expr) => {
-        if (expr === 'each.key' && key) return key;
-        if (expr in values) return values[expr];
-        throw new Error(`azurerm_resource_group.${label}: cannot resolve ${whole} in "${template}"`);
-      });
-      bySlot[slot].push(name);
-    }
+    bySlot[blockSlot(label, body)].push(...blockNames(label, body, values));
   }
-  for (const slot of Object.keys(bySlot)) bySlot[slot].sort();
-  return bySlot;
+  return Object.fromEntries(Object.entries(bySlot).map(([slot, names]) => [slot, names.sort()]));
 }
 
 /** The names in a PowerShell `$Name = @( 'a', 'b' )` array. */

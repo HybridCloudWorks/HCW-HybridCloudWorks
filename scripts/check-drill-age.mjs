@@ -30,7 +30,7 @@
  * Usage: node scripts/check-drill-age.mjs [--runbook <file>] [--today YYYY-MM-DD]
  *          [--max-age-days <n>] [--summary <file>]
  */
-import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -53,40 +53,46 @@ export function cells(line) {
 }
 
 const isSeparator = (row) => row.length > 0 && row.every((c) => /^:?-{3,}:?$/.test(c));
+const isRow = (line) => line.trim().startsWith('|');
+const isFence = (line) => /^\s*(```|~~~)/.test(line);
+const isDateHeader = (line, next) => isRow(line) && cells(line)[0] === 'Date' && isSeparator(cells(next ?? ''));
 
 /**
- * The data rows of the Drills table: the first Markdown table under the
- * `## Drills` heading whose first header cell is `Date`, outside any fenced
- * code block. Throws DrillTableError when there is none.
+ * The lines of the `## Drills` section, up to the next `#` or `##` heading,
+ * with fenced code blocks (and their fences) removed.
  */
-export function drillRows(markdown) {
+export function drillSection(markdown) {
   const lines = markdown.split(/\r?\n/);
   const start = lines.findIndex((l) => /^##\s+Drills\s*$/.test(l));
   if (start === -1) throw new DrillTableError('no "## Drills" heading');
 
+  const section = [];
   let fenced = false;
-  let table = null;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    const line = lines[i];
-    if (/^\s*(```|~~~)/.test(line)) {
-      fenced = !fenced;
-      continue;
-    }
-    if (fenced) continue;
-    if (/^#{1,2}\s/.test(line)) break;
-    const isRow = line.trim().startsWith('|');
-    if (table) {
-      if (!isRow) break;
-      table.push(line);
-      continue;
-    }
-    if (isRow && cells(line)[0] === 'Date' && isSeparator(cells(lines[i + 1] ?? ''))) {
-      table = [];
-      i += 1;
-    }
+  for (const line of lines.slice(start + 1)) {
+    if (isFence(line)) fenced = !fenced;
+    else if (fenced) continue;
+    else if (/^#{1,2}\s/.test(line)) break;
+    else section.push(line);
   }
-  if (!table) throw new DrillTableError('no table with "Date" as its first column under "## Drills"');
-  return table.map((line) => ({ line, cells: cells(line) }));
+  return section;
+}
+
+/**
+ * The data rows of the Drills table: the first Markdown table in the Drills
+ * section whose first header cell is `Date`. Throws DrillTableError when
+ * there is none.
+ */
+export function drillRows(markdown) {
+  const section = drillSection(markdown);
+  const header = section.findIndex((line, i) => isDateHeader(line, section[i + 1]));
+  if (header === -1) throw new DrillTableError('no table with "Date" as its first column under "## Drills"');
+
+  const rows = [];
+  for (const line of section.slice(header + 2)) {
+    if (!isRow(line)) break;
+    rows.push({ line, cells: cells(line) });
+  }
+  return rows;
 }
 
 /** `2026-10-20` -> its UTC midnight in ms, or null when it is not a real date. */
@@ -111,23 +117,27 @@ export function todayUtc(now = new Date()) {
  * Returns { status: 'current' | 'stale' | 'none', newest, ageDays, drills }.
  * Throws DrillTableError for a table it cannot read.
  */
+/** A row's drill date, null for a placeholder; throws for anything else unreadable. */
+function rowDate({ line, cells: row }, today, todayMs) {
+  const first = row[0] ?? '';
+  if (PLACEHOLDERS.has(first)) return null;
+  const ms = parseDate(first);
+  if (ms === null) {
+    throw new DrillTableError(`Date cell "${first}" is not a YYYY-MM-DD calendar date: ${line.trim()}`);
+  }
+  if (ms > todayMs) {
+    throw new DrillTableError(`Date cell "${first}" is after today (${today}): ${line.trim()}`);
+  }
+  return { text: first, ms };
+}
+
 export function evaluate(markdown, { today, maxAgeDays = MAX_AGE_DAYS } = {}) {
   const todayMs = parseDate(today);
   if (todayMs === null) throw new DrillTableError(`--today "${today}" is not a YYYY-MM-DD date`);
 
-  const dates = [];
-  for (const { line, cells: row } of drillRows(markdown)) {
-    const first = row[0] ?? '';
-    if (PLACEHOLDERS.has(first)) continue;
-    const ms = parseDate(first);
-    if (ms === null) {
-      throw new DrillTableError(`Date cell "${first}" is not a YYYY-MM-DD calendar date: ${line.trim()}`);
-    }
-    if (ms > todayMs) {
-      throw new DrillTableError(`Date cell "${first}" is after today (${today}): ${line.trim()}`);
-    }
-    dates.push({ text: first, ms });
-  }
+  const dates = drillRows(markdown)
+    .map((row) => rowDate(row, today, todayMs))
+    .filter(Boolean);
 
   if (dates.length === 0) return { status: 'none', newest: null, ageDays: null, drills: 0 };
   const newest = dates.reduce((a, b) => (b.ms > a.ms ? b : a));
@@ -176,27 +186,44 @@ function usage() {
   ].join('\n');
 }
 
+function positiveInteger(text) {
+  const n = Number(text);
+  if (!Number.isInteger(n) || n < 1) throw new DrillTableError('--max-age-days must be a positive integer');
+  return n;
+}
+
+/** Each value-taking flag and the option it sets. */
+const FLAGS = {
+  '--runbook': (options, v) => ({ ...options, runbook: v }),
+  '--today': (options, v) => ({ ...options, today: v }),
+  '--summary': (options, v) => ({ ...options, summary: v }),
+  '--max-age-days': (options, v) => ({ ...options, maxAgeDays: positiveInteger(v) }),
+};
+
 export function parseArgs(argv) {
-  const options = { runbook: RUNBOOK, today: todayUtc(), maxAgeDays: MAX_AGE_DAYS, summary: null, help: false };
+  let options = { runbook: RUNBOOK, today: todayUtc(), maxAgeDays: MAX_AGE_DAYS, summary: null, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const flag = argv[i];
-    const value = () => {
-      const v = argv[i + 1];
-      if (v === undefined || v.startsWith('--')) throw new DrillTableError(`${flag} needs a value`);
-      i += 1;
-      return v;
-    };
-    if (flag === '--help' || flag === '-h') options.help = true;
-    else if (flag === '--runbook') options.runbook = value();
-    else if (flag === '--today') options.today = value();
-    else if (flag === '--summary') options.summary = value();
-    else if (flag === '--max-age-days') {
-      const n = Number(value());
-      if (!Number.isInteger(n) || n < 1) throw new DrillTableError('--max-age-days must be a positive integer');
-      options.maxAgeDays = n;
-    } else throw new DrillTableError(`Unknown argument: ${flag}`);
+    if (flag === '--help' || flag === '-h') {
+      options.help = true;
+      continue;
+    }
+    const set = FLAGS[flag];
+    if (!set) throw new DrillTableError(`Unknown argument: ${flag}`);
+    const value = argv[i + 1];
+    if (value === undefined || value.startsWith('--')) throw new DrillTableError(`${flag} needs a value`);
+    options = set(options, value);
+    i += 1;
   }
   return options;
+}
+
+/** Exit 2 with the reason, in the summary too when one was asked for. */
+function cannotEvaluate(options, error) {
+  const message = `Cannot evaluate the Drills table in ${options.runbook}: ${error.message}`;
+  console.error(message);
+  if (options.summary) writeFileSync(options.summary, `## Cosmos restore drill age\n\n${message}\n`);
+  return 2;
 }
 
 export function main(argv) {
@@ -204,8 +231,7 @@ export function main(argv) {
   try {
     options = parseArgs(argv);
   } catch (error) {
-    console.error(error.message);
-    console.error(usage());
+    console.error(`${error.message}\n${usage()}`);
     return 2;
   }
   if (options.help) {
@@ -215,20 +241,13 @@ export function main(argv) {
 
   let result;
   try {
-    result = evaluate(readFileSync(options.runbook, 'utf8'), {
-      today: options.today,
-      maxAgeDays: options.maxAgeDays,
-    });
+    result = evaluate(readFileSync(options.runbook, 'utf8'), options);
   } catch (error) {
-    const message = `Cannot evaluate the Drills table in ${options.runbook}: ${error.message}`;
-    console.error(message);
-    if (options.summary) writeFileSync(options.summary, `## Cosmos restore drill age\n\n${message}\n`);
-    return 2;
+    return cannotEvaluate(options, error);
   }
 
   console.log(verdictLine(result, options.maxAgeDays));
   if (options.summary) writeFileSync(options.summary, renderMarkdown(result, options.maxAgeDays));
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `status=${result.status}\n`);
   return result.status === 'current' ? 0 : 1;
 }
 
