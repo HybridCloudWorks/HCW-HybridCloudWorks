@@ -258,7 +258,7 @@ describe('the tab', () => {
     expect(connected).not.toContain('Anthropic');
   });
 
-  it('counts no keyed service as connected while the key status read has failed', () => {
+  it('keeps recorded verdicts and reads keyed services without one as unknown while the key status read has failed', () => {
     secretStatus.mockReturnValue({
       data: null,
       loading: false,

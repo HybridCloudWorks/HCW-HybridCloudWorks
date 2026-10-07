@@ -130,7 +130,7 @@ export default function IntegrationsOverview({ tests, onOpenGroup }) {
         data={data}
         error={error}
         onRetry={reload}
-        fallback="only test results are shown"
+        fallback="a status with no recorded test may be incomplete"
       />
 
       <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-label="Services">

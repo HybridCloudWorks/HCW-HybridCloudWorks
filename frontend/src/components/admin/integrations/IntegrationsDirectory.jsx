@@ -188,7 +188,7 @@ export default function IntegrationsDirectory({ tests }) {
         data={data}
         error={error}
         onRetry={reload}
-        fallback="connection shows test results alone"
+        fallback="connection shows recorded tests and key-free services only; a keyed service with no recorded test reads as not yet tested"
       />
 
       {shown.length === 0 ? (
