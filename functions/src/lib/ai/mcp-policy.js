@@ -31,6 +31,7 @@ export function readMcpSecret(env, name) {
 export const MCP_KEY_ENV_PATTERN = /^MCP_[A-Z0-9_]+$/;
 export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
   'FIRECRAWL_API_KEY',
+  'PUBLER_API_KEY',
   'REPLICATE_API_KEY',
   'VPS_API_TOKEN',
 ]);
@@ -49,6 +50,10 @@ export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
  */
 export const INTEGRATION_KEY_HOSTS = Object.freeze({
   FIRECRAWL_API_KEY: Object.freeze(['mcp.firecrawl.dev', 'api.firecrawl.dev']),
+  // Publer's MCP server only (2026-10-07). The same key also opens Publer's
+  // REST API at app.publer.com, but that is publerProxy's route, not an MCP
+  // server's, so it is deliberately not listed: the MCP binding is one host.
+  PUBLER_API_KEY: Object.freeze(['mcp.publer.com']),
   REPLICATE_API_KEY: Object.freeze(['mcp.replicate.com', 'api.replicate.com']),
   VPS_API_TOKEN: Object.freeze(['localhost', '127.0.0.1', '[::1]']),
 });
@@ -126,6 +131,18 @@ export function resolveMcpAuthHeaders({ oauthToken, apiKeyEnvVar, url, env = pro
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
+ * Hosts whose MCP URL may carry no query string (2026-10-07). Publer's
+ * settings page hands out its server URL as `https://mcp.publer.com?api_key=`
+ * followed by the key, and its server accepts the key that way. Pasted into
+ * the URL field, the key would sit in Cosmos in plain text, be returned on
+ * every read of the server list, and be copied into the audit row's
+ * before/after. The key belongs in PUBLER_API_KEY, which the server reads
+ * from Key Vault and sends as a header, and Publer's MCP takes no other
+ * query parameter, so any query on this host is refused.
+ */
+const NO_QUERY_HOSTS = new Set(['mcp.publer.com']);
+
+/**
  * Reject malformed or credential-bearing URLs before making an outbound call.
  * https is required (ADR 0033): a bearer token over plain http is readable on
  * the wire. The one exception is a loopback host, where no wire is crossed —
@@ -146,6 +163,11 @@ export function validateMcpUrl(value) {
   }
   if (parsed.username || parsed.password) {
     throw new Error('MCP server URL must not contain embedded credentials');
+  }
+  if (NO_QUERY_HOSTS.has(parsed.hostname) && parsed.search) {
+    throw new Error(
+      `MCP server URL for ${parsed.hostname} must not carry a query string; the key goes in its app setting, not the URL`
+    );
   }
   return parsed.toString();
 }

@@ -262,6 +262,23 @@ export const DEFAULT_MCP_SERVERS = [
     notes:
       'Requires the VPS_API_TOKEN secret (fetched from Notion DB). The hostinger-api-mcp server must be deployed as an HTTP endpoint for cloud proxy access.',
   },
+  {
+    // Publer's own MCP server (2026-10-07). The URL carries no `?api_key=`:
+    // Publer's settings page shows one, but the key is PUBLER_API_KEY, read
+    // server-side, and mcp-policy.js refuses a query string on this host.
+    id: 'publer-mcp',
+    name: 'Publer MCP',
+    description: 'Read Publer accounts, drafts, posts and analytics through Publer’s MCP server',
+    url: 'https://mcp.publer.com',
+    transport: 'http',
+    enabled: false,
+    apiKeyEnvVar: 'PUBLER_API_KEY',
+    tools: [],
+    status: 'untested',
+    order: 12,
+    notes:
+      'Uses PUBLER_API_KEY (the same key as the Social Hub), bound to mcp.publer.com only. The workspace is chosen through the tools, not a header. Sync lists tools even with a bad key; get_publer_user is the key check. Tools that create, schedule, publish, reschedule, update or delete posts are live — see docs/runbooks/publer.md before calling anything but the read tools.',
+  },
 ];
 
 /**

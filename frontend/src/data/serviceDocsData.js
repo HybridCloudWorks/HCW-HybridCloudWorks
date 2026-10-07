@@ -2386,6 +2386,90 @@ export const SERVICE_DOCS = {
     },
     references: [{ label: 'Hostinger API Repository', url: 'https://github.com/hostinger/api/' }],
   },
+
+  // ── Publer ───────────────────────────────────────────────────────────────
+  'publer-mcp': {
+    id: 'publer-mcp',
+    name: 'Publer MCP',
+    type: 'mcp_server',
+    tagline:
+      'Publer’s own MCP server: accounts, drafts, posts, analytics and the Publer help corpus as tools.',
+    requirements: [
+      {
+        label: 'Publer plan with MCP',
+        detail: 'Settings → AI & Automations → MCP must be available on the account',
+        required: true,
+      },
+      {
+        label: 'PUBLER_API_KEY',
+        detail: 'The Social Hub key, seeded on the Keys tab. The MCP reads it server-side.',
+        required: true,
+      },
+    ],
+    hcwUses: [
+      {
+        feature: 'AI Engine Playground',
+        usage:
+          'Read the Publer account, connected accounts, drafts and analytics. Nothing on this platform calls a Publer MCP tool on its own.',
+        files: ['src/pages/admin/AIEnginePage.jsx'],
+        status: HCW_STATUS.AVAILABLE,
+      },
+    ],
+    sections: {
+      install: {
+        title: 'Configure & Setup',
+        steps: [
+          {
+            heading: '1. Key',
+            body: 'PUBLER_API_KEY is already the Social Hub key. Its light on Integrations → Keys must be green. Do not paste Publer’s “Server URL”: it carries the key as ?api_key=, and the URL field refuses a query string on mcp.publer.com.',
+            codes: [],
+          },
+          {
+            heading: '2. Sync',
+            body: 'Go to /admin/ai-engine?tab=mcp → Publer MCP → Sync Tools. About 47 tools is right. Sync succeeds even with a bad key, so it proves the connection, not the key.',
+            codes: [],
+          },
+          {
+            heading: '3. Enable',
+            body: 'Toggle Publer MCP on. The Playground only lists enabled servers that have synced tools.',
+            codes: [],
+          },
+        ],
+      },
+      use: {
+        title: 'Use',
+        steps: [
+          {
+            heading: 'Prove the key (read-only)',
+            body: 'Playground → MCP Tool → Publer MCP → get_publer_user. Good: your Publer name and plan. PERMISSION_DENIED with “Invalid API key or not active for this account” means the key is wrong or the plan has no MCP.',
+            codes: [{ lang: 'json', label: 'Arguments', content: '{}' }],
+          },
+          {
+            heading: 'Never call from here',
+            body: 'submit_publer_posts, publish_publer_draft, update_publer_post, reschedule_publer_post, change_publer_post_state, confirm_delete_publer_posts, create_publer_post_from_file, create_publer_photo_draft, create_publer_ideas and the upload_publer_* tools write to Publer. The Playground has no confirmation step.',
+            codes: [],
+          },
+        ],
+      },
+      uninstall: {
+        title: 'Disconnect',
+        steps: [
+          {
+            heading: 'Disable',
+            body: 'Toggle Publer MCP off in the AI Engine. The key stays: the Social Hub and the calendar sync still use it.',
+            codes: [],
+          },
+        ],
+      },
+    },
+    references: [
+      {
+        label: 'Publer: set up and use the MCP server',
+        url: 'https://publer.com/help/en/article/how-to-set-up-and-use-publers-mcp-server-14orlq0/',
+      },
+      { label: 'Publer API documentation', url: 'https://publer.com/docs' },
+    ],
+  },
 };
 
 export default SERVICE_DOCS;

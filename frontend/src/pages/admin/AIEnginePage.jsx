@@ -643,6 +643,7 @@ function McpServerCard({ server, onToggle, onSync, onRemove }) {
     'microsoftdocs-mcp',
     'drawio-mcp',
     'hostinger-mcp',
+    'publer-mcp',
   ].includes(server.id);
 
   return (

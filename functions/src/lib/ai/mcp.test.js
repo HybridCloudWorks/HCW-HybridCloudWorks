@@ -348,3 +348,125 @@ describe('mcpProxy', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('Publer MCP binding (2026-10-07)', () => {
+  const PUBLER_MCP_URL = 'https://mcp.publer.com/';
+
+  it('accepts PUBLER_API_KEY at mcp.publer.com and sends it as a bearer there', () => {
+    expect(validateMcpApiKeyEnvVar('PUBLER_API_KEY')).toBe('PUBLER_API_KEY');
+    expect(INTEGRATION_KEY_HOSTS.PUBLER_API_KEY).toEqual(['mcp.publer.com']);
+    expect(validateMcpKeyBinding({ url: PUBLER_MCP_URL, apiKeyEnvVar: 'PUBLER_API_KEY' })).toBe(
+      'PUBLER_API_KEY'
+    );
+    expect(
+      validateMcpKeyBinding({ url: 'https://MCP.Publer.com', apiKeyEnvVar: 'PUBLER_API_KEY' })
+    ).toBe('PUBLER_API_KEY');
+    // Publer's server names "Authorization: Bearer YOUR_KEY" in its own
+    // missing-key error, beside the settings page's "Bearer-API", so the
+    // shared resolver's shape is one it accepts.
+    expect(
+      resolveMcpAuthHeaders({
+        apiKeyEnvVar: 'PUBLER_API_KEY',
+        url: PUBLER_MCP_URL,
+        env: { PUBLER_API_KEY: 'pk' },
+      })
+    ).toEqual({ Authorization: 'Bearer pk' });
+  });
+
+  it('refuses PUBLER_API_KEY at every other host, the REST host included', () => {
+    for (const url of [
+      'https://app.publer.com/api/v1',
+      'https://publer.com/mcp',
+      'https://mcp.publer.com.attacker.example/',
+      'https://attacker.example/mcp',
+      'http://localhost:8100',
+    ]) {
+      expect(() => validateMcpKeyBinding({ url, apiKeyEnvVar: 'PUBLER_API_KEY' })).toThrow(
+        /PUBLER_API_KEY may only be sent to mcp\.publer\.com/
+      );
+      expect(
+        resolveMcpAuthHeaders({
+          apiKeyEnvVar: 'PUBLER_API_KEY',
+          url,
+          env: { PUBLER_API_KEY: 'pk' },
+        })
+      ).toEqual({});
+    }
+    // The workspace id is an identifier the REST proxy sends, never an MCP key.
+    expect(() => validateMcpApiKeyEnvVar('PUBLER_WORKSPACE_ID')).toThrow(/not allowed/);
+  });
+
+  it('refuses a Publer MCP URL carrying the key as a query string, without echoing it', () => {
+    expect(validateMcpUrl('https://mcp.publer.com')).toBe(PUBLER_MCP_URL);
+    let message = '';
+    try {
+      validateMcpUrl('https://mcp.publer.com?api_key=the-publer-key');
+    } catch (error) {
+      message = error.message;
+    }
+    expect(message).toMatch(/must not carry a query string/);
+    expect(message).not.toContain('the-publer-key');
+  });
+
+  it('leaves every other key, host and URL rule as it was', () => {
+    expect([...KNOWN_INTEGRATION_KEY_NAMES]).toEqual([
+      'FIRECRAWL_API_KEY',
+      'PUBLER_API_KEY',
+      'REPLICATE_API_KEY',
+      'VPS_API_TOKEN',
+    ]);
+    expect(INTEGRATION_KEY_HOSTS).toEqual({
+      FIRECRAWL_API_KEY: ['mcp.firecrawl.dev', 'api.firecrawl.dev'],
+      PUBLER_API_KEY: ['mcp.publer.com'],
+      REPLICATE_API_KEY: ['mcp.replicate.com', 'api.replicate.com'],
+      VPS_API_TOKEN: ['localhost', '127.0.0.1', '[::1]'],
+    });
+    // A query string elsewhere is untouched by the Publer rule.
+    expect(validateMcpUrl('https://example.test/mcp?profile=a')).toBe(
+      'https://example.test/mcp?profile=a'
+    );
+    // No other shared key gained mcp.publer.com.
+    for (const name of ['FIRECRAWL_API_KEY', 'REPLICATE_API_KEY', 'VPS_API_TOKEN']) {
+      expect(() => validateMcpKeyBinding({ url: PUBLER_MCP_URL, apiKeyEnvVar: name })).toThrow(
+        /may only be sent to/
+      );
+    }
+    // MCP_* still binds to no host, Publer's included.
+    expect(validateMcpKeyBinding({ url: PUBLER_MCP_URL, apiKeyEnvVar: 'MCP_PUBLER' })).toBe(
+      'MCP_PUBLER'
+    );
+  });
+
+  it('syncs the Publer server over Streamable HTTP with the key from the app setting', async () => {
+    const store = makeStore({
+      id: 'publer-mcp',
+      url: 'https://mcp.publer.com',
+      transport: 'http',
+      apiKeyEnvVar: 'PUBLER_API_KEY',
+      enabled: false,
+    });
+    const fetch = vi.fn(async (url, options) => {
+      expect(url).toBe(PUBLER_MCP_URL);
+      expect(options.headers.Authorization).toBe('Bearer pk');
+      // Publer answers tools/list as one SSE frame (measured 2026-10-07).
+      return response(
+        'event: message\ndata: {"result":{"tools":[{"name":"get_publer_user","description":"Who","inputSchema":{"type":"object"}}]},"jsonrpc":"2.0","id":1}\n\n',
+        200,
+        { 'content-type': 'text/event-stream' }
+      );
+    });
+    const handlers = createMcpHandlers({
+      guard: allowGuard,
+      store,
+      env: { PUBLER_API_KEY: 'pk' },
+      fetch,
+      now: fixedNow,
+    });
+    const result = await handlers.syncMcpTools(request({ serverId: 'publer-mcp' }), context);
+    expect(JSON.parse(result.body)).toEqual({
+      ok: true,
+      tools: [{ name: 'get_publer_user', description: 'Who', inputSchema: { type: 'object' } }],
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+});
