@@ -146,7 +146,8 @@ This project has not cut a tagged release; entries are grouped under
   from GHCR first; `capabilities.js` leaves the push filter so that merge
   does not republish. Its header says what a rebuild changes on its own
   (the Debian packages of `full`) and what it cannot (the base, its Python,
-  every tool in `versions.env`). The `hardening` role installs
+  every tool in `versions.env`), and the Building images guide on the site
+  says the same. The `hardening` role installs
   `hcw-held-upgradable.timer`, daily at 07:15: one `daemon.warning` line
   tagged `hcw-held-upgradable` per held package apt could upgrade, which
   the Arc data collection rule ships, and a `notice` line when none, with
