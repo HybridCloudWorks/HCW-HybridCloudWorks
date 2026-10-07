@@ -20,6 +20,13 @@ is no Caddy route and nothing public. Off until `portainer_enabled` is true.
    9000 does not listen even inside the container; neither 9000 nor the Edge
    tunnel's 8000 is published), `no-new-privileges` and a 512 MiB memory
    limit. It then waits for `https://127.0.0.1:9443/api/system/status`.
+   Since 2026-10-07 the container also runs with `--userns=host`: the
+   daemon remaps every container's root to an unprivileged range (LAB-5,
+   `../docker/README.md`), and a remapped root cannot open the socket that
+   is Portainer's whole purpose. Its volume was carried into the remapped
+   data root as it was, on the run that turned the remap on. Portainer shows
+   the host daemon only; Coder's workspaces run on the `coder_sandbox`
+   daemon, which it does not see.
 3. With it false: removes the container and keeps the volume, so turning it
    back on brings back the same administrator, settings and licence.
 

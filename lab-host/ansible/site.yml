@@ -68,9 +68,15 @@
     # install, so the host shows up in Azure even when a later role fails.
     # It does nothing while arc_enabled is false.
     - role: arc
+    # Restarts the daemon at once when its configuration changes (user
+    # namespaces since 2026-10-07, LAB-5), so every role after it creates its
+    # containers in the daemon's current data root.
     - role: docker
     - role: node_exporter
     - role: caddy
+    # The rootless daemon Coder's workspaces run on, before the Compose
+    # project whose proxy mounts its socket directory (LAB-5).
+    - role: coder_sandbox
     - role: coder
     - role: labs_agent
     # Straight after the agent: it runs its plan on the Node.js labs_agent
@@ -84,3 +90,12 @@
     # 2026-09-26).
     - role: portainer
     - role: vault
+
+  # After every role and the handlers they notified (the agent's restart out
+  # of the docker group among them): the container-runtime privilege
+  # separation the estate review's LAB-5 asks for, checked on the host as it
+  # now is, failing the run with what to do (roles/privilege_checks).
+  post_tasks:
+    - name: Check the container runtime's privilege separation
+      ansible.builtin.import_role:
+        name: privilege_checks

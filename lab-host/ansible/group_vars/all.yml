@@ -103,6 +103,23 @@ docker_buildx_version: "{{ docker_release_pins[ansible_facts['distribution_relea
 docker_compose_version: "{{ docker_release_pins[ansible_facts['distribution_release']].compose }}"
 docker_apt_key_checksum: sha256:1500c1f56fa9e26b9b8f42452a553675796ade0807cdce11975eb98170b3a570
 
+# The named volumes that hold this host's state, carried once into the
+# daemon's user-namespaced data root on the run that turns userns-remap on
+# (LAB-5, 2026-10-07; roles/docker/README.md, "User namespaces"). Coder's
+# PostgreSQL runs remapped, so its files are shifted into the remapped range;
+# Portainer runs with --userns=host to reach the socket, so its files are
+# copied as they are. The pre-remap copies stay where they were. A learner's
+# workspace volume is not here: workspaces moved to the coder_sandbox daemon.
+docker_userns_carry_volumes:
+  - name: coder-postgres-data
+    remapped: true
+  - name: portainer-data
+    remapped: false
+# The switch itself, on since 2026-10-07. `-e docker_userns_remap=false` on
+# the bootstrap.sh line is the way back (docs/runbooks/labs-host.md, "Taking
+# it back"); the end-of-run checks then warn instead of failing on it.
+docker_userns_remap: true
+
 # Caddy is host-native (ADR 0032) and built with xcaddy inside the official
 # builder image, because the caddyserver.com download API always builds the
 # latest release and ignores a version parameter (verified 2026-09-25). These
@@ -194,6 +211,12 @@ coder_postgres_image_digest: sha256:5a5a84b19854a9ffaa54082c166ff4ec27473a361e49
 coder_docker_proxy_image: tecnativa/docker-socket-proxy
 coder_docker_proxy_image_tag: "0.3.0"
 coder_docker_proxy_image_digest: sha256:9e4b9e7517a6b660f2cc903a19b257b1852d5b3344794e3ea334ff00ae677ac2
+# Since 2026-10-07 (LAB-5) that proxy opens the socket of the coder_sandbox
+# role's rootless daemon, not the host's: Coder's workspaces run there, as the
+# unprivileged user hcw-coder-docker, and a privileged container a compromised
+# server asks for is privileged inside that user's namespace only. Tied to
+# coder_enabled, so turning Coder off stops that daemon too.
+coder_sandbox_enabled: "{{ coder_enabled }}"
 
 # vps-agent runs host-native as a systemd service (ADR 0032) from a checkout of
 # this repository. Its commit is the one this playbook runs from: the lookup
@@ -222,6 +245,17 @@ labs_agent_node_version: "26.10.0-1nodesource1"
 # the key that apt trusts for the pinned nodejs package.
 labs_agent_node_apt_key_checksum: sha256:b42e0321dabdc24e892115da705cf061167eac12a317f23d329862d0aa0a271d
 labs_agent_id: vps-hostinger-01
+# The agent's Docker socket proxy (LAB-5, 2026-10-07): HAProxy from Docker's
+# official image with the allowlist in
+# roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2, which the agent
+# reaches instead of the docker group. 3.4 is HAProxy's newest LTS line
+# (endoflife.date, supported to 2031-04-01) and 3.4.6 its newest release; the
+# image index digest of haproxy:3.4.6-alpine was read 2026-10-07 from the
+# registry's Docker-Content-Digest and the Docker Hub API, which agreed, and
+# haproxy:3.4-alpine resolved to the same index that day.
+labs_agent_docker_proxy_image: haproxy
+labs_agent_docker_proxy_image_tag: "3.4.6-alpine"
+labs_agent_docker_proxy_image_digest: sha256:7af8255207ee9964ccb4eec8ce4b7a40b777769665e3ae83897fb01b24d8a43a
 
 # node_exporter release tarball, linux-amd64, from the release's sha256sums.txt.
 node_exporter_version: 1.12.1

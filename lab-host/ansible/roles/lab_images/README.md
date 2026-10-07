@@ -33,9 +33,13 @@ the host can hold them before any job asks.
    step, naming the entry (`IMAGES.alpine in .../capabilities.js is ...`).
 3. **Pulls by `repository@digest`**, with
    `community.docker.docker_image_pull` and `pull: not_present`: every
-   capability image, and the workspace image while
-   `lab_images_pull_workspace` is true (it defaults to `coder_enabled`). A
-   digest already on the host is `ok`, with no registry call. The tag is
+   capability image into the host daemon, which runs the jobs, and the
+   workspace image into the `coder_sandbox` daemon, which runs the
+   workspaces, while `lab_images_pull_workspace` is true (it defaults to
+   `coder_enabled`). Since 2026-10-07 (LAB-5) the plan runs once per
+   daemon, `--scope jobs` against the host's listing and `--scope
+   workspaces` against the sandbox's, and each daemon's pins are its own
+   images only. A digest already there is `ok`, with no registry call. The tag is
    dropped from the pull because Docker ignores the tag of a reference that
    carries a digest, and because the module splits `name:tag@digest` at the
    `@` and then looks for a repository literally named `name:tag`, so the
@@ -49,8 +53,10 @@ the host can hold them before any job asks.
    references is a pin: each of its references in those repositories goes,
    tags before digests, with `docker image rm`. A reference in any other
    repository is never listed, so an image that also carries one keeps its
-   data, and no image outside those repositories is touched. The pinned
-   workspace image is kept while Coder is off, because it is still a pin.
+   data, and no image outside those repositories is touched. A workspace
+   image left on the host daemon is removed there (it is not that daemon's
+   pin), and a capability image would be removed from the sandbox daemon
+   the same way.
 5. **Keeps an image a container still uses**, running or stopped (a job in
    flight on the old digest, a Coder workspace on an older template
    version), and prints which container holds it. The next run removes it.
@@ -96,6 +102,7 @@ run moves the checkout first and then removes it.
 
 ## Variables
 
-`lab_images_checkouts`, `lab_images_pull_workspace` and `lab_images_node`,
-in `defaults/main.yml`; `meta/argument_specs.yml` is the contract. Nothing
+`lab_images_checkouts`, `lab_images_pull_workspace`,
+`lab_images_sandbox_docker_host` and `lab_images_node`, in
+`defaults/main.yml`; `meta/argument_specs.yml` is the contract. Nothing
 here is a pin: the pins are the two files above.

@@ -19,6 +19,13 @@ Environment=NODE_ENV=production
 # it into the job container. PrivateTmp below gives this unit a /tmp the
 # Docker daemon cannot see, so TMPDIR points at a real host directory instead.
 Environment=TMPDIR={{ labs_agent_tmp_dir }}
+# The docker CLI the runner spawns reaches Docker through the agent's own
+# socket proxy, never the daemon's socket: this user is in no docker group
+# (LAB-5, 2026-10-07; roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2
+# is the allowlist). Until Docker has started the proxy there is no socket,
+# so the start fails here and Restart= tries again ten seconds later.
+Environment=DOCKER_HOST={{ labs_agent_docker_host }}
+ExecStartPre=/usr/bin/test -S {{ labs_agent_docker_proxy_socket }}
 ExecStart=/usr/bin/node index.js
 Restart=on-failure
 RestartSec=10
@@ -27,8 +34,8 @@ PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
 # Added 2026-10-06 (LAB-5): the agent is a Node process that spawns the
-# docker CLI, which needs AF_UNIX for the socket and AF_INET/AF_INET6 for the
-# API; nothing else. @system-service is the systemd set a service needs;
+# docker CLI, which needs AF_UNIX for the proxy's socket and AF_INET/AF_INET6
+# for the API; nothing else. @system-service is the systemd set a service needs;
 # the rest closes kernel tunables, modules, cgroups, setuid and realtime.
 # MemoryDenyWriteExecute is deliberately NOT set: V8 JIT needs W^X memory.
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

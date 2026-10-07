@@ -1,0 +1,25 @@
+---
+# The rootless Docker daemon Coder's workspaces run on (LAB-5, 2026-10-07).
+# group_vars/all.yml ties coder_sandbox_enabled to coder_enabled.
+coder_sandbox_enabled: true
+
+# The unprivileged user the daemon runs as. Everything a workspace can reach
+# on the host is this user's: a container escape, or a privileged container a
+# compromised Coder server asks for, lands here, never as root.
+coder_sandbox_user: hcw-coder-docker
+coder_sandbox_home: /var/lib/hcw-coder-docker
+
+# The user's subordinate uid and gid range, which the daemon maps container
+# ids into. 65536 is the size rootless Docker requires and the size
+# userns-remap gives dockremap.
+coder_sandbox_subid_count: 65536
+
+# The user unit's name, under /etc/systemd/user.
+coder_sandbox_unit_name: hcw-coder-docker
+
+coder_sandbox_log_opts:
+  max-size: "10m"
+  max-file: "3"
+
+# How long to wait for the daemon's socket after starting the user manager.
+coder_sandbox_start_timeout: 120

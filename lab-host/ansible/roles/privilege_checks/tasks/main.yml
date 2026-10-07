@@ -1,0 +1,247 @@
+---
+# The end-of-run checks for the lab host's container-runtime privilege
+# separation (LAB-5, 2026-10-07): what the estate review's next pass will
+# check, checked by every bootstrap.sh run, failing the run with what to do.
+# site.yml runs this from post_tasks, after every role and its handlers, so
+# the agent has been restarted out of the docker group and lab_images has
+# pulled the image the check job runs on.
+
+# 1. The agent user is in no docker group.
+- name: Read the groups the agent user is in
+  ansible.builtin.command:
+    argv:
+      - id
+      - --name
+      - --groups
+      - "{{ privilege_checks_agent_user }}"
+  register: privilege_checks_agent_groups
+  changed_when: false
+  check_mode: false
+
+- name: Refuse an agent user in the docker group
+  ansible.builtin.assert:
+    that:
+      - "'docker' not in privilege_checks_agent_groups.stdout.split()"
+    fail_msg: >-
+      {{ privilege_checks_agent_user }} is in the groups {{ privilege_checks_agent_groups.stdout }}. The
+      docker group is root on this host, and the agent reaches Docker through
+      hcw-labs-agent-docker-proxy instead (LAB-5). The labs_agent role takes it out of the group;
+      if this run did not, run sudo gpasswd -d {{ privilege_checks_agent_user }} docker and re-run
+      bootstrap.sh.
+    quiet: true
+
+- name: Read who else is in the docker group
+  ansible.builtin.getent:
+    database: group
+    key: docker
+
+- name: Say who else holds the docker group, which is root on this host
+  ansible.builtin.debug:
+    msg: >-
+      The docker group has the members {{ ansible_facts['getent_group']['docker'][2] }}. Each of them is
+      root on this host; nothing in this playbook adds anyone to it. Remove a member with sudo gpasswd
+      -d followed by the user name and the word docker, unless it is meant to be there.
+  when: ansible_facts['getent_group']['docker'][2] | length > 0
+
+# 2. The host daemon remaps user namespaces.
+- name: Read the host daemon's security options
+  community.docker.docker_host_info:
+  register: privilege_checks_host
+  check_mode: false
+
+- name: Refuse a host daemon that is not remapping user namespaces
+  ansible.builtin.assert:
+    that:
+      - "'name=userns' in privilege_checks_host.host_info.SecurityOptions"
+    fail_msg: >-
+      docker info reports the security options
+      {{ privilege_checks_host.host_info.SecurityOptions | join(', ') }}, without name=userns, so a
+      container's root is root on this host. /etc/docker/daemon.json should set userns-remap to
+      default (roles/docker); read sudo journalctl -u docker -n 50 --no-pager for why the daemon
+      did not take it, and re-run bootstrap.sh.
+    quiet: true
+  when:
+    - not ansible_check_mode
+    - privilege_checks_userns_required | bool
+
+- name: Say that user-namespace remapping is off by this run's own choice
+  ansible.builtin.debug:
+    msg: >-
+      This run was given docker_userns_remap=false, the way back in the Labs host runbook, so the host
+      daemon runs without user-namespace remapping and a container's root is root on this host
+      (LAB-5 is open again). Run bootstrap.sh without the flag to turn it back on.
+  when: not privilege_checks_userns_required | bool
+
+# 3. The agent's proxy: its socket is root's and the agent group's only, and
+# the container is the narrow one the role describes.
+- name: Read the agent proxy's socket
+  ansible.builtin.stat:
+    path: "{{ privilege_checks_agent_socket }}"
+  register: privilege_checks_socket
+
+- name: Refuse an agent proxy socket that anyone but root and the agent's group can open
+  ansible.builtin.assert:
+    that:
+      - privilege_checks_socket.stat.exists
+      - privilege_checks_socket.stat.issock
+      - privilege_checks_socket.stat.pw_name == 'root'
+      - privilege_checks_socket.stat.gr_name == privilege_checks_agent_user
+      - privilege_checks_socket.stat.mode == '0660'
+    fail_msg: >-
+      {{ privilege_checks_agent_socket }} is
+      {{ 'missing' if not privilege_checks_socket.stat.exists else
+         (privilege_checks_socket.stat.pw_name ~ ':' ~ privilege_checks_socket.stat.gr_name ~ ' '
+          ~ privilege_checks_socket.stat.mode) }}; it must be a socket owned root:{{ privilege_checks_agent_user }}
+      with mode 0660. Read sudo docker logs {{ privilege_checks_agent_proxy_container }} for why, and
+      re-run bootstrap.sh.
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Read the agent proxy container
+  community.docker.docker_container_info:
+    name: "{{ privilege_checks_agent_proxy_container }}"
+  register: privilege_checks_agent_proxy
+  check_mode: false
+
+- name: Refuse an agent proxy that is not running as the role describes
+  ansible.builtin.assert:
+    that:
+      - privilege_checks_agent_proxy.exists
+      - privilege_checks_agent_proxy.container.State.Running
+      - privilege_checks_agent_proxy.container.HostConfig.NetworkMode == 'none'
+      - privilege_checks_agent_proxy.container.HostConfig.ReadonlyRootfs
+      - privilege_checks_agent_proxy.container.HostConfig.CapDrop == ['ALL']
+      - privilege_checks_agent_proxy.container.HostConfig.Privileged == false
+    fail_msg: >-
+      {{ privilege_checks_agent_proxy_container }} is not running with no network, a read-only root
+      filesystem and every capability dropped (roles/labs_agent/tasks/docker_proxy.yml). Remove it
+      with sudo docker rm -f {{ privilege_checks_agent_proxy_container }} and re-run bootstrap.sh,
+      which creates it again.
+    quiet: true
+  when: not ansible_check_mode
+
+# 4. A job still runs, as the agent user, through the proxy; and the proxy
+# refuses a call a job never makes and a privileged container.
+- name: Install the agent proxy check
+  ansible.builtin.copy:
+    src: hcw-labs-agent-proxy-check.mjs
+    dest: /usr/local/libexec/hcw-labs-agent-proxy-check.mjs
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Run one job as the agent user through its proxy, and try two things the proxy must refuse
+  ansible.builtin.command:
+    argv:
+      - runuser
+      - -u
+      - "{{ privilege_checks_agent_user }}"
+      - --
+      # The unit's two variables, set here rather than inherited, because
+      # runuser resets part of the environment.
+      - env
+      - "DOCKER_HOST=unix://{{ privilege_checks_agent_socket }}"
+      - "TMPDIR={{ privilege_checks_agent_tmp_dir }}"
+      - /usr/bin/node
+      - /usr/local/libexec/hcw-labs-agent-proxy-check.mjs
+      - "{{ privilege_checks_agent_app_dir }}"
+      - 64m
+      - "0.5"
+      - "32"
+  register: privilege_checks_agent_run
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Refuse a host where a job cannot run through the proxy, or the proxy lets the wrong call through
+  ansible.builtin.assert:
+    that:
+      - privilege_checks_agent_run.rc == 0
+    fail_msg: >-
+      The agent proxy check did not come out as expected (exit {{ privilege_checks_agent_run.rc }}): a
+      shell-echo job run as {{ privilege_checks_agent_user }} through {{ privilege_checks_agent_socket }}
+      must print its payload, and docker ps and a privileged docker run must be refused. What it saw:
+      {{ privilege_checks_agent_run.stdout | default('') }} {{ privilege_checks_agent_run.stderr | default('') }}
+      A job failing points at the proxy's allowlist (roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2)
+      or at a missing image (the lab_images role); a refusal missing means the proxy is not the one
+      the role writes. Read sudo docker logs {{ privilege_checks_agent_proxy_container }}.
+    quiet: true
+  when: not ansible_check_mode
+
+- name: Show what the agent proxy check saw
+  ansible.builtin.debug:
+    msg: "{{ privilege_checks_agent_run.stdout | from_json }}"
+  when:
+    - not ansible_check_mode
+    - privilege_checks_agent_run.rc == 0
+
+# 5. Coder's proxy holds the policy the repository's Compose file says, and
+# the sandbox daemon's socket, never the host's; the daemon behind it is
+# rootless.
+- name: Read the Compose file this host runs
+  ansible.builtin.slurp:
+    src: "{{ privilege_checks_coder_compose_file }}"
+  register: privilege_checks_compose
+  when: privilege_checks_coder_enabled | bool
+
+- name: Read Coder's proxy container
+  community.docker.docker_container_info:
+    name: coder-docker-proxy
+  register: privilege_checks_coder_proxy
+  check_mode: false
+  when: privilege_checks_coder_enabled | bool
+
+# The Compose file's environment for the proxy, as the KEY=value strings
+# Docker reports in Config.Env. Every one must be there; the image's own
+# defaults for keys the file does not set may be there too.
+- name: Record the allowlist the Compose file sets for Coder's proxy
+  ansible.builtin.set_fact:
+    privilege_checks_coder_policy_expected: >-
+      {{ privilege_checks_coder_env.keys() | zip(privilege_checks_coder_env.values()) | map('join', '=') | list }}
+  vars:
+    privilege_checks_coder_env: "{{ (privilege_checks_compose.content | b64decode | from_yaml).services['coder-docker-proxy'].environment }}"
+  when: privilege_checks_coder_enabled | bool
+
+- name: Refuse a Coder proxy whose allowlist or socket is not the repository's
+  ansible.builtin.assert:
+    that:
+      - privilege_checks_coder_proxy.exists
+      - privilege_checks_coder_proxy.container.State.Running
+      - privilege_checks_coder_policy_expected | difference(privilege_checks_coder_proxy.container.Config.Env) | length == 0
+      - privilege_checks_coder_proxy.container.HostConfig.Privileged == false
+      - privilege_checks_coder_proxy.container.Mounts | map(attribute='Source') | list == [privilege_checks_sandbox_socket_dir]
+    fail_msg: >-
+      coder-docker-proxy is not the one {{ privilege_checks_coder_compose_file }} describes: the policy
+      {{ privilege_checks_coder_policy_expected | difference(privilege_checks_coder_proxy.container.Config.Env | default([])) }}
+      is missing from its environment, or it mounts
+      {{ privilege_checks_coder_proxy.container.Mounts | default([]) | map(attribute='Source') | list }} where it
+      must mount {{ privilege_checks_sandbox_socket_dir }} alone (never the host's Docker socket). Recreate it
+      from the repository's file with sudo docker compose --project-directory /etc/hcw/coder up -d
+      --force-recreate coder-docker-proxy, then re-run bootstrap.sh.
+    quiet: true
+  when:
+    - privilege_checks_coder_enabled | bool
+    - not ansible_check_mode
+
+- name: Read the sandbox daemon's security options
+  community.docker.docker_host_info:
+    docker_host: "{{ privilege_checks_sandbox_docker_host }}"
+  register: privilege_checks_sandbox
+  check_mode: false
+  when:
+    - privilege_checks_coder_enabled | bool
+    - not ansible_check_mode
+
+- name: Refuse a sandbox daemon that is not rootless
+  ansible.builtin.assert:
+    that:
+      - "'name=rootless' in privilege_checks_sandbox.host_info.SecurityOptions"
+    fail_msg: >-
+      The daemon Coder's workspaces run on ({{ privilege_checks_sandbox_docker_host }}) reports
+      {{ privilege_checks_sandbox.host_info.SecurityOptions | join(', ') }}, without name=rootless, so a
+      workspace escape would not be contained (roles/coder_sandbox). Re-run bootstrap.sh and read the
+      coder_sandbox role's output.
+    quiet: true
+  when:
+    - privilege_checks_coder_enabled | bool
+    - not ansible_check_mode

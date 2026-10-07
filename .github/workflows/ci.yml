@@ -108,7 +108,10 @@ jobs:
           # are what lab-image-avm-vendoring.test.mjs imports: the builder's
           # pins, and its port of the image's rewrite rule. The vps-agent
           # files are what lab-job-types.test.mjs imports (capabilities.js)
-          # and lab-job-limits.test.mjs reads (index.js, .env.example).
+          # and lab-job-limits.test.mjs reads (index.js, .env.example), and
+          # what lab-host-docker-proxy.test.mjs imports to hold the agent's
+          # Docker proxy to the argv a job really sends (docker-runner.js,
+          # capabilities.js; LAB-5).
           # LabPanePage.jsx is what lab-host-visitor-copy.test.mjs reads: the
           # lab host's "Coder stopped" answer, and the lab launcher's, is the
           # pane's own sentence. catalogue.js is what
@@ -116,7 +119,7 @@ jobs:
           # are the catalogue's.
           - name: scripts (operations)
             dir: scripts
-            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|frontend/src/(pages/shared/LabPanePage\.jsx|data/labs/catalogue\.js)$|vps-agent/(index\.js|\.env\.example|lib/capabilities\.js)$)'
+            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|frontend/src/(pages/shared/LabPanePage\.jsx|data/labs/catalogue\.js)$|vps-agent/(index\.js|\.env\.example|lib/(capabilities|docker-runner)\.js)$)'
             lint: npm run lint
             test: npm test
           # vps-agent shells out to `docker run` with a payload that reached
@@ -438,10 +441,86 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: bash roles/hardening/tests/hcw-held-upgradable.test.sh
 
+      # /usr/local/libexec/hcw-docker-volume-carry copies Coder's PostgreSQL
+      # cluster into the daemon's user-namespaced data root on the run that
+      # turns userns-remap on (LAB-5), so the file the docker role installs
+      # is run here as it ships, against a tree shaped like that cluster:
+      # owners shifted, modes and hard links kept, the source untouched, a
+      # non-empty destination refused. As root, because it chowns.
+      - name: hcw-docker-volume-carry test
+        if: steps.changes.outputs.relevant == 'true'
+        run: sudo bash roles/docker/tests/hcw-docker-volume-carry.test.sh
+
+      # The lab agent's Docker socket proxy is HAProxy with a configuration
+      # this repository writes (LAB-5). scripts/lab-host-docker-proxy.test.mjs
+      # evaluates its rules; this renders it with this job's ansible-core and
+      # has HAProxy itself parse it, at the image digest the host runs, so a
+      # line HAProxy would refuse fails here rather than leaving the agent
+      # without Docker on the host.
+      - name: Agent Docker proxy configuration parses
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/hcw-labs-agent-docker-proxy.cfg"
+          ansible localhost -c local -e ansible_become=false -m ansible.builtin.template \
+            -a "src=roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2 dest=$out" \
+            -e labs_agent_docker_proxy_socket=/run/hcw-labs-agent-docker/docker.sock \
+            -e labs_agent_docker_proxy_gid=999 \
+            -e labs_agent_tmp_dir=/var/lib/hcw-labs-agent/tmp
+          digest="$(sed -n 's/^labs_agent_docker_proxy_image_digest: \(sha256:[0-9a-f]\{64\}\)$/\1/p' group_vars/all.yml)"
+          test -n "$digest"
+          docker run --rm --network none -v "$out:/usr/local/etc/haproxy/haproxy.cfg:ro" "haproxy@${digest}" \
+            haproxy -c -f /usr/local/etc/haproxy/haproxy.cfg
+
+      - name: Set up Node.js for the agent proxy run
+        if: steps.changes.outputs.relevant == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+
+      # The same file, run: the proxy container as the labs_agent role runs
+      # it (root with no capabilities, no network, read-only, the socket
+      # given to one group) in front of this runner's Docker, and the
+      # privilege_checks role's script driving it the way the host's
+      # end-of-run check does: one shell-echo job through the agent's own
+      # runInDocker, which must print its payload, then `docker ps` and a
+      # privileged `docker run`, which must be refused. The parse above
+      # cannot see whether the real docker CLI's calls pass; this does.
+      - name: Agent Docker proxy passes a job and refuses the rest
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          set -euo pipefail
+          gid="$(id -g)"
+          socket_dir=/run/hcw-labs-agent-docker
+          tmp_dir=/var/lib/hcw-labs-agent/tmp
+          sudo install -d -o root -g "$gid" -m 0750 "$socket_dir"
+          sudo install -d -o "$(id -u)" -g "$gid" -m 0750 "$tmp_dir"
+          out="$RUNNER_TEMP/hcw-labs-agent-docker-proxy.run.cfg"
+          ansible localhost -c local -e ansible_become=false -m ansible.builtin.template \
+            -a "src=roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2 dest=$out" \
+            -e "labs_agent_docker_proxy_socket=$socket_dir/docker.sock" \
+            -e "labs_agent_docker_proxy_gid=$gid" \
+            -e "labs_agent_tmp_dir=$tmp_dir"
+          digest="$(sed -n 's/^labs_agent_docker_proxy_image_digest: \(sha256:[0-9a-f]\{64\}\)$/\1/p' group_vars/all.yml)"
+          docker run -d --name hcw-labs-agent-docker-proxy --user 0:0 --group-add "$gid" --cap-drop ALL \
+            --security-opt no-new-privileges:true --read-only --network none \
+            -v /var/run/docker.sock:/var/run/docker.sock:ro -v "$out:/usr/local/etc/haproxy/haproxy.cfg:ro" \
+            -v "$socket_dir:$socket_dir" "haproxy@${digest}"
+          for _ in $(seq 30); do [ -S "$socket_dir/docker.sock" ] && break; sleep 1; done
+          # The proxy refuses pulls, as on the host, where lab_images pulls first.
+          alpine="$(node --input-type=module -e "import('$GITHUB_WORKSPACE/vps-agent/lib/capabilities.js').then((m) => console.log(m.IMAGES.alpine))")"
+          docker pull --quiet "$alpine"
+          if ! DOCKER_HOST="unix://$socket_dir/docker.sock" TMPDIR="$tmp_dir" \
+            node roles/privilege_checks/files/hcw-labs-agent-proxy-check.mjs "$GITHUB_WORKSPACE/vps-agent" 64m 0.5 32; then
+            docker logs hcw-labs-agent-docker-proxy
+            exit 1
+          fi
+
   # lab-host/coder/ is the Coder deployment on the lab host (#679): the
   # Compose file, the hcw-lab workspace template and the test that holds
-  # both to the ADR 0032 boundary (the socket in the server only, nothing
-  # privileged, no host path, a workspace network of its own, uid 65534).
+  # both to the ADR 0032 boundary (no service holding the host's socket,
+  # the proxy holding the rootless sandbox daemon's, nothing privileged, no
+  # host path, a workspace network of its own, uid 65534).
   # Four checks that fail on different things: node --test reads the two
   # files as text, `docker compose config` parses the Compose file, and
   # terraform fmt and validate parse the template with its pinned providers

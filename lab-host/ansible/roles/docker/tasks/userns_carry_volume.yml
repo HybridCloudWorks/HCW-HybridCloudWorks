@@ -1,0 +1,101 @@
+---
+# One named volume, docker_carry ({name, remapped}). The pre-remap data is
+# copied, never moved: /var/lib/docker/volumes/<name> is left exactly as it
+# was, so taking userns-remap out of daemon.json again brings the old root
+# and its data straight back. The marker makes this happen once; without it
+# a later run would find the volume in the remapped root and leave it alone
+# anyway, but the marker is what tells an interrupted carry from a finished
+# one.
+- name: Look for the volume's data under the pre-remap root, {{ docker_carry.name }}
+  ansible.builtin.stat:
+    path: "{{ docker_legacy_root }}/volumes/{{ docker_carry.name }}/_data"
+  register: docker_carry_legacy
+
+- name: Look for the record that the volume was carried, {{ docker_carry.name }}
+  ansible.builtin.stat:
+    path: "{{ docker_userns_carry_state_dir }}/{{ docker_carry.name }}.done"
+  register: docker_carry_marker
+
+# A copy carried earlier, with the pre-remap data written since: the remap
+# was turned off (a revert) and the stack ran on the old root, then turned
+# on again. The remapped copy is then older than the data, and using it
+# would quietly roll Coder back to the first switch, so the run stops.
+- name: Look for pre-remap data written after the carry, {{ docker_carry.name }}
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ docker_carry_legacy.stat.path }}"
+      - -newer
+      - "{{ docker_carry_marker.stat.path }}"
+      - -print
+      - -quit
+  register: docker_carry_newer
+  changed_when: false
+  when:
+    - docker_carry_legacy.stat.isdir | default(false)
+    - docker_carry_marker.stat.exists
+
+- name: Refuse a remapped copy that is older than the data it was carried from, {{ docker_carry.name }}
+  ansible.builtin.assert:
+    that:
+      - docker_carry_newer.stdout | length == 0
+    fail_msg: >-
+      {{ docker_carry_legacy.stat.path }} has changed since it was carried into the remapped data
+      root ({{ docker_carry_newer.stdout }} is newer than
+      {{ docker_carry_marker.stat.path }}), so the copy the daemon now uses is older than the data.
+      To carry it again: stop the container that uses {{ docker_carry.name }}, run sudo docker volume rm
+      {{ docker_carry.name }} and sudo rm {{ docker_carry_marker.stat.path }}, and re-run bootstrap.sh.
+      To keep using the older copy instead, mark the newer data as seen with sudo touch
+      {{ docker_carry_marker.stat.path }}, and re-run.
+    quiet: true
+  when:
+    - docker_carry_legacy.stat.isdir | default(false)
+    - docker_carry_marker.stat.exists
+
+# No compose labels: Compose 5 reuses a same-named volume it did not create
+# untouched (with a warning), and would treat one labelled as its own as
+# managed state to reconcile.
+- name: Create the volume in the remapped root, {{ docker_carry.name }}
+  community.docker.docker_volume:
+    name: "{{ docker_carry.name }}"
+    labels:
+      hcw.userns-carry: "{{ docker_legacy_root }}/volumes/{{ docker_carry.name }}"
+  register: docker_carry_volume
+  when:
+    - docker_carry_legacy.stat.isdir | default(false)
+    - not docker_carry_marker.stat.exists
+
+# Refuses, and changes nothing, when the new volume already holds data: that
+# means a container started on it before the carry (a run interrupted after
+# the restart), and the message says how to start again.
+- name: Copy the data in, shifting ownership into the remapped range when its container is remapped, {{ docker_carry.name }}
+  ansible.builtin.command:
+    argv:
+      - /usr/local/libexec/hcw-docker-volume-carry
+      - --from
+      - "{{ docker_carry_legacy.stat.path }}"
+      - --to
+      - "{{ docker_carry_volume.volume.Mountpoint }}"
+      - --uid-shift
+      - "{{ docker_userns_uid_base if docker_carry.remapped | bool else 0 }}"
+      - --gid-shift
+      - "{{ docker_userns_gid_base if docker_carry.remapped | bool else 0 }}"
+  changed_when: true
+  when:
+    - docker_carry_legacy.stat.isdir | default(false)
+    - not docker_carry_marker.stat.exists
+
+- name: Record that the volume was carried, {{ docker_carry.name }}
+  ansible.builtin.copy:
+    dest: "{{ docker_userns_carry_state_dir }}/{{ docker_carry.name }}.done"
+    content: |
+      from={{ docker_carry_legacy.stat.path }}
+      to={{ docker_carry_volume.volume.Mountpoint }}
+      uid_shift={{ docker_userns_uid_base if docker_carry.remapped | bool else 0 }}
+      gid_shift={{ docker_userns_gid_base if docker_carry.remapped | bool else 0 }}
+    owner: root
+    group: root
+    mode: "0600"
+  when:
+    - docker_carry_legacy.stat.isdir | default(false)
+    - not docker_carry_marker.stat.exists

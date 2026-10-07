@@ -21,6 +21,13 @@
 # generates itself) and, unless told not to, on 9000 over plain HTTP too.
 # Nothing publishes 9000 or the Edge tunnel's 8000, and the flag means 9000
 # does not even listen inside the container.
+#
+# userns_mode host (LAB-5, 2026-10-07): the daemon remaps every container's
+# root to an unprivileged range (roles/docker), and Portainer's whole job is
+# the socket, which a remapped root cannot open. It is one of three of this
+# host's own containers that opt out; its volume was carried into the
+# remapped data root as it was, for that reason (group_vars,
+# docker_userns_carry_volumes).
 - name: Run Portainer, published on the host's loopback only
   community.docker.docker_container:
     name: "{{ portainer_container_name }}"
@@ -28,6 +35,7 @@
     pull: missing
     state: started
     restart_policy: unless-stopped
+    userns_mode: host
     command:
       - --http-disabled
     published_ports:

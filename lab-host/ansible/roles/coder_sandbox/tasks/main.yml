@@ -1,0 +1,320 @@
+---
+# A rootless Docker daemon for Coder's workspaces (LAB-5, 2026-10-07). The
+# host daemon runs the host's own containers; this one runs every workspace,
+# and Coder's server reaches it, and only it, through coder-docker-proxy. A
+# workspace escape, or a privileged container that a compromised Coder
+# server creates, is then the unprivileged user below inside its own user
+# namespace: rootless Docker cannot grant more than the user it runs as.
+# README.md beside this file says why this and not an authorisation plugin.
+
+- name: Install what rootless Docker needs from Ubuntu
+  ansible.builtin.apt:
+    name:
+      # newuidmap and newgidmap, which map the subordinate range below.
+      - uidmap
+      # The user's D-Bus, through which dockerd asks the user manager for
+      # cgroups; without it no memory or CPU limit applies.
+      - dbus-user-session
+      # The network driver dockerd-rootless.sh prefers when installed.
+      - slirp4netns
+    state: present
+
+# Ubuntu 24.04 and later stop unprivileged processes from creating user
+# namespaces unless an AppArmor profile allows the binary. Ubuntu's apparmor
+# package ships that profile for /usr/bin/rootlesskit
+# (/etc/apparmor.d/rootlesskit, `userns,`), and the docker-ce-rootless-extras
+# deb ships none (read 2026-10-07), so the profile is checked, not written.
+- name: Read whether unprivileged user namespaces are restricted
+  ansible.builtin.slurp:
+    src: /proc/sys/kernel/apparmor_restrict_unprivileged_userns
+  register: coder_sandbox_userns_restricted
+  failed_when: false
+
+- name: Look for Ubuntu's AppArmor profile for rootlesskit
+  ansible.builtin.stat:
+    path: /etc/apparmor.d/rootlesskit
+  register: coder_sandbox_rootlesskit_profile
+
+- name: Refuse to run rootless Docker where AppArmor would stop rootlesskit
+  ansible.builtin.assert:
+    that:
+      - >-
+        (coder_sandbox_userns_restricted.content | default('MAo=') | b64decode | trim) == '0'
+        or coder_sandbox_rootlesskit_profile.stat.exists
+    fail_msg: >-
+      kernel.apparmor_restrict_unprivileged_userns is 1 on this host and
+      /etc/apparmor.d/rootlesskit is missing, so rootlesskit cannot create the user namespace
+      Coder's workspaces run in. Ubuntu's apparmor package provides that profile: run
+      sudo apt-get install --reinstall apparmor, then re-run bootstrap.sh.
+    quiet: true
+
+- name: Create the sandbox daemon's group
+  ansible.builtin.group:
+    name: "{{ coder_sandbox_user }}"
+    system: true
+    state: present
+
+# No supplementary groups at all, the docker group above all: this user's
+# daemon is the only Docker it can reach.
+- name: Create the user the sandbox daemon runs as
+  ansible.builtin.user:
+    name: "{{ coder_sandbox_user }}"
+    group: "{{ coder_sandbox_user }}"
+    groups: []
+    append: false
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ coder_sandbox_home }}"
+    create_home: true
+    state: present
+
+- name: Read the user's uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ coder_sandbox_user }}"
+
+- name: Record the uid
+  ansible.builtin.set_fact:
+    coder_sandbox_uid: "{{ ansible_facts['getent_passwd'][coder_sandbox_user][1] }}"
+
+- name: Keep the user's home its own and private
+  ansible.builtin.file:
+    path: "{{ coder_sandbox_home }}"
+    state: directory
+    owner: "{{ coder_sandbox_user }}"
+    group: "{{ coder_sandbox_user }}"
+    mode: "0700"
+
+# A system user gets no subordinate ids from useradd. The range is placed
+# after every range already in the file (dockremap's, which the docker role's
+# restart has just allocated, and any login user's), so none overlaps: an
+# overlap would map two daemons' containers onto the same host uids.
+- name: Read the subordinate id ranges already allocated
+  ansible.builtin.command:
+    argv:
+      - awk
+      - -F
+      - ":"
+      - -v
+      - "user={{ coder_sandbox_user }}"
+      - >-
+        BEGIN { next_start = 100000; own = 0 }
+        /^[^#]/ && NF == 3 { if ($1 == user) own = 1; end = $2 + $3; if (end > next_start) next_start = end }
+        END { print own, next_start }
+      - "{{ item }}"
+  loop:
+    - /etc/subuid
+    - /etc/subgid
+  register: coder_sandbox_subids
+  changed_when: false
+
+- name: Give the user a subordinate uid range
+  ansible.builtin.command:
+    argv:
+      - usermod
+      - --add-subuids
+      - "{{ start }}-{{ start | int + coder_sandbox_subid_count | int - 1 }}"
+      - "{{ coder_sandbox_user }}"
+  vars:
+    start: "{{ coder_sandbox_subids.results[0].stdout.split()[1] }}"
+  when: coder_sandbox_subids.results[0].stdout.split()[0] == '0'
+  register: coder_sandbox_subuid_added
+  changed_when: true
+
+- name: Give the user a subordinate gid range
+  ansible.builtin.command:
+    argv:
+      - usermod
+      - --add-subgids
+      - "{{ start }}-{{ start | int + coder_sandbox_subid_count | int - 1 }}"
+      - "{{ coder_sandbox_user }}"
+  vars:
+    start: "{{ coder_sandbox_subids.results[1].stdout.split()[1] }}"
+  when: coder_sandbox_subids.results[1].stdout.split()[0] == '0'
+  register: coder_sandbox_subgid_added
+  changed_when: true
+
+# By default a user manager gets only the memory and pids controllers. The
+# workspace template sets cpu_quota, cpu_period and cpu_shares, which need
+# cpu, so all five are delegated (the drop-in Docker's rootless guide gives).
+# It applies to every user manager, and only adds controllers to them.
+- name: Create the drop-in directory for user managers
+  ansible.builtin.file:
+    path: /etc/systemd/system/user@.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Delegate the cpu, cpuset, io, memory and pids controllers to user managers
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/user@.service.d/delegate.conf
+    content: |
+      # {{ ansible_managed }}
+      # The coder_sandbox role's rootless Docker sets CPU limits on workspaces (LAB-5).
+      [Service]
+      Delegate=cpu cpuset io memory pids
+    owner: root
+    group: root
+    mode: "0644"
+  register: coder_sandbox_delegate
+
+# At boot, before docker.service starts coder-docker-proxy (which mounts it)
+# and before the user manager starts the daemon (whose rootlesskit copies
+# /run up at start and so must find it already there).
+- name: Have systemd-tmpfiles create the socket directory at every boot
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/hcw-coder-docker.conf
+    content: |
+      # {{ ansible_managed }}
+      d {{ coder_sandbox_socket_dir }} 0750 {{ coder_sandbox_user }} {{ coder_sandbox_user }} -
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Create the socket directory now
+  ansible.builtin.file:
+    path: "{{ coder_sandbox_socket_dir }}"
+    state: directory
+    owner: "{{ coder_sandbox_user }}"
+    group: "{{ coder_sandbox_user }}"
+    mode: "0750"
+
+# Root-owned and group-readable: the daemon reads its configuration and
+# cannot rewrite it.
+- name: Create the daemon's configuration directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: "{{ coder_sandbox_user }}"
+    mode: "0750"
+  loop:
+    - "{{ coder_sandbox_home }}/.config"
+    - "{{ coder_sandbox_home }}/.config/docker"
+
+- name: Write the daemon's configuration
+  ansible.builtin.copy:
+    dest: "{{ coder_sandbox_home }}/.config/docker/daemon.json"
+    content: "{{ coder_sandbox_daemon_config | to_nice_json(indent=2) }}\n"
+    owner: root
+    group: "{{ coder_sandbox_user }}"
+    mode: "0640"
+  register: coder_sandbox_config
+
+# In /etc/systemd/user so the user cannot edit it, and enabled for every
+# user manager the way `systemctl --global enable` does it; ConditionUser in
+# the unit makes this user's manager the only one that runs it.
+- name: Install the daemon's systemd user unit
+  ansible.builtin.template:
+    src: hcw-coder-docker.service.j2
+    dest: "/etc/systemd/user/{{ coder_sandbox_unit_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  register: coder_sandbox_unit
+
+- name: Create the user units' default.target.wants directory
+  ansible.builtin.file:
+    path: /etc/systemd/user/default.target.wants
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Enable the unit for the user manager
+  ansible.builtin.file:
+    src: "/etc/systemd/user/{{ coder_sandbox_unit_name }}.service"
+    dest: "/etc/systemd/user/default.target.wants/{{ coder_sandbox_unit_name }}.service"
+    state: link
+    owner: root
+    group: root
+
+# Lingering starts the user's manager at boot with no login, and keeps it.
+- name: Let the user's manager run without a login
+  ansible.builtin.command:
+    argv:
+      - loginctl
+      - enable-linger
+      - "{{ coder_sandbox_user }}"
+    creates: "/var/lib/systemd/linger/{{ coder_sandbox_user }}"
+  when: coder_sandbox_enabled | bool
+
+- name: Restart the user's manager so the daemon takes the changed unit, configuration, ids or controllers
+  ansible.builtin.systemd_service:
+    name: "user@{{ coder_sandbox_uid }}.service"
+    state: restarted
+    daemon_reload: true
+  when:
+    - coder_sandbox_enabled | bool
+    - >-
+      coder_sandbox_unit is changed or coder_sandbox_config is changed
+      or coder_sandbox_delegate is changed or coder_sandbox_subuid_added is changed
+      or coder_sandbox_subgid_added is changed
+
+- name: Start the user's manager, which starts the daemon
+  ansible.builtin.systemd_service:
+    name: "user@{{ coder_sandbox_uid }}.service"
+    state: started
+    daemon_reload: true
+  when: coder_sandbox_enabled | bool
+
+- name: Wait for the sandbox daemon's socket
+  ansible.builtin.wait_for:
+    path: "{{ coder_sandbox_socket }}"
+    timeout: "{{ coder_sandbox_start_timeout }}"
+  when:
+    - coder_sandbox_enabled | bool
+    - not ansible_check_mode
+
+- name: Read the sandbox daemon's information
+  community.docker.docker_host_info:
+    docker_host: "{{ coder_sandbox_docker_host }}"
+  register: coder_sandbox_info
+  check_mode: false
+  when:
+    - coder_sandbox_enabled | bool
+    - not ansible_check_mode
+
+# The template's hard limits (2 GiB, one CPU, no swap on top) are what keep
+# five workspaces inside the host's memory (the coder role's capacity
+# assertion). A rootless daemon without the controllers would start
+# workspaces with no limit, or refuse to start them at all.
+- name: Refuse a sandbox daemon that is not rootless or cannot enforce the workspace limits
+  ansible.builtin.assert:
+    that:
+      - "'name=rootless' in coder_sandbox_info.host_info.SecurityOptions"
+      - coder_sandbox_info.host_info.CgroupVersion | string == '2'
+      - coder_sandbox_info.host_info.CgroupDriver == 'systemd'
+      - coder_sandbox_info.host_info.MemoryLimit | bool
+      - coder_sandbox_info.host_info.CpuCfsQuota | bool
+      - coder_sandbox_info.host_info.PidsLimit | bool
+    fail_msg: >-
+      The sandbox daemon on {{ coder_sandbox_socket }} reports the security options
+      {{ coder_sandbox_info.host_info.SecurityOptions | join(', ') }}, cgroup
+      v{{ coder_sandbox_info.host_info.CgroupVersion }} with the
+      {{ coder_sandbox_info.host_info.CgroupDriver }} driver, memory limits
+      {{ coder_sandbox_info.host_info.MemoryLimit }}, CPU quota
+      {{ coder_sandbox_info.host_info.CpuCfsQuota }} and pids limits
+      {{ coder_sandbox_info.host_info.PidsLimit }}. Coder's workspaces need it rootless with all
+      three limits. Read why with sudo journalctl _UID={{ coder_sandbox_uid }} -n 80 --no-pager
+      and re-run bootstrap.sh.
+    quiet: true
+  when:
+    - coder_sandbox_enabled | bool
+    - not ansible_check_mode
+
+- name: Turn lingering off while Coder is disabled, which stops the sandbox daemon
+  ansible.builtin.command:
+    argv:
+      - loginctl
+      - disable-linger
+      - "{{ coder_sandbox_user }}"
+    removes: "/var/lib/systemd/linger/{{ coder_sandbox_user }}"
+  when: not coder_sandbox_enabled | bool
+
+- name: Stop the user's manager while Coder is disabled
+  ansible.builtin.systemd_service:
+    name: "user@{{ coder_sandbox_uid }}.service"
+    state: stopped
+  when: not coder_sandbox_enabled | bool

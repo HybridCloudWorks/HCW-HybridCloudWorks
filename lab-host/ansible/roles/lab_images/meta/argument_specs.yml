@@ -6,9 +6,10 @@ argument_specs:
       - Reads the pins from checkouts of this repository with files/lab-images.mjs, which imports
         IMAGES from vps-agent/lib/capabilities.js and reads the workspace image from
         lab-host/coder/templates/hcw-lab/main.tf, so a pin bump needs no edit here.
-      - Pulls each capability image (and the workspace image while lab_images_pull_workspace is
-        true) by repository@digest with community.docker.docker_image_pull, pull not_present, so a
-        digest already on the host is ok.
+      - Pulls each capability image into the host daemon, and the workspace image into the
+        coder_sandbox daemon while lab_images_pull_workspace is true (LAB-5), by
+        repository@digest with community.docker.docker_image_pull, pull not_present, so a digest
+        already there is ok. Each daemon's plan pins only its own images.
       - Removes, with docker image rm, every reference in the lab's own repositories (those the
         pins name, and ghcr.io/hybridcloudworks/hcw-lab*) on an image none of whose references is
         a pin, unless a container still uses the image. No other repository is touched.
@@ -28,8 +29,13 @@ argument_specs:
         type: bool
         required: false
         description:
-          - Pull the Coder workspace image too. Defaults to coder_enabled. The pinned workspace
-            image is kept once present either way.
+          - Plan the Coder workspace image on the sandbox daemon (pull it, remove superseded
+            ones). Defaults to coder_enabled, because that daemon stops while Coder is off.
+      lab_images_sandbox_docker_host:
+        type: str
+        required: false
+        default: unix:///run/hcw-coder-docker/docker.sock
+        description: The coder_sandbox daemon's socket, where workspace images are held.
       lab_images_node:
         type: path
         required: false

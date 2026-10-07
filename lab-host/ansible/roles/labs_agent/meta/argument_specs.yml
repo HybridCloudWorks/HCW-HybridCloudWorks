@@ -3,8 +3,11 @@ argument_specs:
   main:
     short_description: Run vps-agent as a systemd service from a checkout of the repository at a given commit
     description:
-      - Creates the agent user (in the docker group, because the agent's job is docker run),
-        installs Node.js 26 from NodeSource at a pinned version, checks the repository out at
+      - Creates the agent user in no group but its own (never the docker group, which is root
+        on the host; LAB-5), runs hcw-labs-agent-docker-proxy, HAProxy with the allowlist in
+        templates/docker-proxy.haproxy.cfg.j2, on a Unix socket only the agent's group may
+        open, and points the unit's DOCKER_HOST at it.
+      - Installs Node.js 26 from NodeSource at a pinned version, checks the repository out at
         labs_agent_repo_ref (by default the commit the playbook runs from) and runs
         npm ci --omit=dev once per commit and Node.js pin.
       - Generates the agent's private key and self-signed certificate on the host if absent and
@@ -141,6 +144,33 @@ argument_specs:
         required: false
         default: hcw-labs-agent
         description: systemd unit name.
+      labs_agent_docker_proxy_image:
+        type: str
+        required: true
+        description: The proxy's image, haproxy (Docker's official image).
+      labs_agent_docker_proxy_image_tag:
+        type: str
+        required: true
+        description: The release the digest was read from; for people, never pulled.
+      labs_agent_docker_proxy_image_digest:
+        type: str
+        required: true
+        description: The image index digest the proxy runs, sha256:<64 hex>.
+      labs_agent_docker_proxy_container:
+        type: str
+        required: false
+        default: hcw-labs-agent-docker-proxy
+        description: The proxy container's name.
+      labs_agent_docker_proxy_config_dir:
+        type: path
+        required: false
+        default: /etc/hcw/labs-agent-docker-proxy
+        description: Holds the rendered haproxy.cfg the proxy mounts read-only.
+      labs_agent_docker_proxy_memory:
+        type: str
+        required: false
+        default: 64m
+        description: The proxy container's memory limit.
       labs_agent_node_apt_key_url:
         type: str
         required: false

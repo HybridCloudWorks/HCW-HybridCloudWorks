@@ -1,0 +1,99 @@
+---
+# hcw-labs-agent-docker-proxy (LAB-5, 2026-10-07): HAProxy from the official
+# image, pinned by digest, configured from templates/docker-proxy.haproxy.cfg.j2,
+# listening on a Unix socket that root owns and only the agent's group may
+# open. It passes on the calls a job makes and refuses every other call, and
+# every container create that asks for a way out of the sandbox (the
+# template's header says which, and what such rules cannot do).
+- name: Read the agent group's gid
+  ansible.builtin.getent:
+    database: group
+    key: "{{ labs_agent_group }}"
+
+- name: Record the gid the proxy's socket is given to
+  ansible.builtin.set_fact:
+    labs_agent_docker_proxy_gid: "{{ ansible_facts['getent_group'][labs_agent_group][1] }}"
+
+- name: Refuse a job staging directory the proxy's bind rule cannot name
+  ansible.builtin.assert:
+    that:
+      - labs_agent_tmp_dir is match('^/[A-Za-z0-9._/-]+[^/]$')
+    fail_msg: >-
+      labs_agent_tmp_dir is {{ labs_agent_tmp_dir }}. The agent's Docker proxy allows one bind,
+      <labs_agent_tmp_dir>/labjob-XXXXXX, and builds that rule from this path, so it must be an
+      absolute path of letters, digits and . _ - / with no trailing slash.
+    quiet: true
+
+- name: Create the proxy's configuration directory
+  ansible.builtin.file:
+    path: "{{ labs_agent_docker_proxy_config_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Write the proxy's allowlist
+  ansible.builtin.template:
+    src: docker-proxy.haproxy.cfg.j2
+    dest: "{{ labs_agent_docker_proxy_config }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: labs_agent_docker_proxy_cfg
+
+# Created at boot by systemd-tmpfiles, so the proxy finds it whenever Docker
+# starts it, and the agent's unit can test for the socket inside it.
+- name: Have systemd-tmpfiles create the proxy's socket directory at every boot
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/hcw-labs-agent-docker.conf
+    content: |
+      # {{ ansible_managed }}
+      d {{ labs_agent_docker_proxy_socket_dir }} 0750 root {{ labs_agent_group }} -
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Create the proxy's socket directory now
+  ansible.builtin.file:
+    path: "{{ labs_agent_docker_proxy_socket_dir }}"
+    state: directory
+    owner: root
+    group: "{{ labs_agent_group }}"
+    mode: "0750"
+
+# --userns=host because the proxy must open the host's Docker socket, which a
+# remapped root cannot (roles/docker/README.md, "User namespaces"). Root in
+# it, but with every capability dropped, no network at all, a read-only root
+# filesystem and no privilege gain: it opens the socket as its owner and
+# chowns its own socket to a group it was given, which needs neither.
+- name: Run the agent's Docker socket proxy
+  community.docker.docker_container:
+    name: "{{ labs_agent_docker_proxy_container }}"
+    image: "{{ labs_agent_docker_proxy_image_ref }}"
+    pull: missing
+    state: started
+    restart: "{{ labs_agent_docker_proxy_cfg is changed }}"
+    restart_policy: unless-stopped
+    userns_mode: host
+    user: "0:0"
+    groups:
+      - "{{ labs_agent_docker_proxy_gid }}"
+    cap_drop:
+      - ALL
+    security_opts:
+      - no-new-privileges:true
+    read_only: true
+    network_mode: none
+    memory: "{{ labs_agent_docker_proxy_memory }}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - "{{ labs_agent_docker_proxy_config }}:/usr/local/etc/haproxy/haproxy.cfg:ro"
+      - "{{ labs_agent_docker_proxy_socket_dir }}:{{ labs_agent_docker_proxy_socket_dir }}"
+    labels:
+      hcw.role: labs-agent-docker-proxy
+
+- name: Wait for the proxy's socket
+  ansible.builtin.wait_for:
+    path: "{{ labs_agent_docker_proxy_socket }}"
+    timeout: 60
+  when: not ansible_check_mode

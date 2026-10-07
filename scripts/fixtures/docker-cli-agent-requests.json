@@ -1,0 +1,483 @@
+{
+  "$comment": "Written by scripts/lab/capture-docker-cli-requests.mjs; read by scripts/lab-host-docker-proxy.test.mjs. Container ids are <id>.",
+  "dockerCli": "29.8.1",
+  "apiVersion": "1.56",
+  "job": {
+    "jobDir": "/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9",
+    "containerName": "labjob-0123456789ab",
+    "jobId": "7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f"
+  },
+  "limits": {
+    "memory": "512m",
+    "cpus": "0.5",
+    "pidsLimit": 128
+  },
+  "runs": {
+    "shell-echo": {
+      "encoding": "text",
+      "argv": [
+        "run",
+        "--rm",
+        "--name",
+        "labjob-0123456789ab",
+        "--label",
+        "hcw.lab-job=7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f",
+        "--network",
+        "none",
+        "--read-only",
+        "--security-opt",
+        "no-new-privileges",
+        "--cap-drop",
+        "ALL",
+        "--user",
+        "65534:65534",
+        "--memory",
+        "512m",
+        "--cpus",
+        "0.5",
+        "--pids-limit",
+        "128",
+        "-v",
+        "/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro",
+        "alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6",
+        "cat",
+        "/workspace/payload.txt"
+      ],
+      "requests": [
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/create",
+          "query": "name=labjob-0123456789ab",
+          "headers": {
+            "content-length": "1712",
+            "content-type": "application/json"
+          },
+          "body": "{\"Hostname\":\"\",\"Domainname\":\"\",\"User\":\"65534:65534\",\"AttachStdin\":false,\"AttachStdout\":true,\"AttachStderr\":true,\"Tty\":false,\"OpenStdin\":false,\"StdinOnce\":false,\"Env\":null,\"Cmd\":[\"cat\",\"/workspace/payload.txt\"],\"Image\":\"alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6\",\"Volumes\":{},\"WorkingDir\":\"\",\"Entrypoint\":null,\"Labels\":{\"hcw.lab-job\":\"7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f\"},\"HostConfig\":{\"Binds\":[\"/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro\"],\"ContainerIDFile\":\"\",\"LogConfig\":{\"Type\":\"\",\"Config\":{}},\"NetworkMode\":\"none\",\"PortBindings\":{},\"RestartPolicy\":{\"Name\":\"no\",\"MaximumRetryCount\":0},\"AutoRemove\":true,\"VolumeDriver\":\"\",\"VolumesFrom\":null,\"ConsoleSize\":[0,0],\"CapAdd\":null,\"CapDrop\":[\"ALL\"],\"CgroupnsMode\":\"\",\"Dns\":null,\"DnsOptions\":[],\"DnsSearch\":[],\"ExtraHosts\":null,\"GroupAdd\":null,\"IpcMode\":\"\",\"Cgroup\":\"\",\"Links\":null,\"OomScoreAdj\":0,\"PidMode\":\"\",\"Privileged\":false,\"PublishAllPorts\":false,\"ReadonlyRootfs\":true,\"SecurityOpt\":[\"no-new-privileges\"],\"UTSMode\":\"\",\"UsernsMode\":\"\",\"ShmSize\":0,\"Isolation\":\"\",\"CpuShares\":0,\"Memory\":536870912,\"NanoCpus\":500000000,\"CgroupParent\":\"\",\"BlkioWeight\":0,\"BlkioWeightDevice\":[],\"BlkioDeviceReadBps\":[],\"BlkioDeviceWriteBps\":[],\"BlkioDeviceReadIOps\":[],\"BlkioDeviceWriteIOps\":[],\"CpuPeriod\":0,\"CpuQuota\":0,\"CpuRealtimePeriod\":0,\"CpuRealtimeRuntime\":0,\"CpusetCpus\":\"\",\"CpusetMems\":\"\",\"Devices\":[],\"DeviceCgroupRules\":null,\"DeviceRequests\":null,\"MemoryReservation\":0,\"MemorySwap\":0,\"MemorySwappiness\":-1,\"OomKillDisable\":false,\"PidsLimit\":128,\"Ulimits\":null,\"CpuCount\":0,\"CpuPercent\":0,\"IOMaximumIOps\":0,\"IOMaximumBandwidth\":0,\"MaskedPaths\":null,\"ReadonlyPaths\":null},\"NetworkingConfig\":{\"EndpointsConfig\":{}}}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/attach",
+          "query": "stderr=1&stdout=1&stream=1",
+          "headers": {
+            "content-length": "0",
+            "content-type": "text/plain",
+            "upgrade": "tcp",
+            "connection": "Upgrade"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/wait",
+          "query": "condition=removed",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/start",
+          "query": "",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        }
+      ]
+    },
+    "terraform-validate": {
+      "encoding": "text",
+      "argv": [
+        "run",
+        "--rm",
+        "--name",
+        "labjob-0123456789ab",
+        "--label",
+        "hcw.lab-job=7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f",
+        "--network",
+        "none",
+        "--read-only",
+        "--security-opt",
+        "no-new-privileges",
+        "--cap-drop",
+        "ALL",
+        "--user",
+        "65534:65534",
+        "--memory",
+        "512m",
+        "--cpus",
+        "0.5",
+        "--pids-limit",
+        "128",
+        "-v",
+        "/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro",
+        "--tmpfs",
+        "/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700",
+        "ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746",
+        "hcw-terraform-validate"
+      ],
+      "requests": [
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/create",
+          "query": "name=labjob-0123456789ab",
+          "headers": {
+            "content-length": "1838",
+            "content-type": "application/json"
+          },
+          "body": "{\"Hostname\":\"\",\"Domainname\":\"\",\"User\":\"65534:65534\",\"AttachStdin\":false,\"AttachStdout\":true,\"AttachStderr\":true,\"Tty\":false,\"OpenStdin\":false,\"StdinOnce\":false,\"Env\":null,\"Cmd\":[\"hcw-terraform-validate\"],\"Image\":\"ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746\",\"Volumes\":{},\"WorkingDir\":\"\",\"Entrypoint\":null,\"Labels\":{\"hcw.lab-job\":\"7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f\"},\"HostConfig\":{\"Binds\":[\"/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro\"],\"ContainerIDFile\":\"\",\"LogConfig\":{\"Type\":\"\",\"Config\":{}},\"NetworkMode\":\"none\",\"PortBindings\":{},\"RestartPolicy\":{\"Name\":\"no\",\"MaximumRetryCount\":0},\"AutoRemove\":true,\"VolumeDriver\":\"\",\"VolumesFrom\":null,\"ConsoleSize\":[0,0],\"CapAdd\":null,\"CapDrop\":[\"ALL\"],\"CgroupnsMode\":\"\",\"Dns\":null,\"DnsOptions\":[],\"DnsSearch\":[],\"ExtraHosts\":null,\"GroupAdd\":null,\"IpcMode\":\"\",\"Cgroup\":\"\",\"Links\":null,\"OomScoreAdj\":0,\"PidMode\":\"\",\"Privileged\":false,\"PublishAllPorts\":false,\"ReadonlyRootfs\":true,\"SecurityOpt\":[\"no-new-privileges\"],\"Tmpfs\":{\"/tmp/run\":\"rw,size=64m,uid=65534,gid=65534,mode=0700\"},\"UTSMode\":\"\",\"UsernsMode\":\"\",\"ShmSize\":0,\"Isolation\":\"\",\"CpuShares\":0,\"Memory\":536870912,\"NanoCpus\":500000000,\"CgroupParent\":\"\",\"BlkioWeight\":0,\"BlkioWeightDevice\":[],\"BlkioDeviceReadBps\":[],\"BlkioDeviceWriteBps\":[],\"BlkioDeviceReadIOps\":[],\"BlkioDeviceWriteIOps\":[],\"CpuPeriod\":0,\"CpuQuota\":0,\"CpuRealtimePeriod\":0,\"CpuRealtimeRuntime\":0,\"CpusetCpus\":\"\",\"CpusetMems\":\"\",\"Devices\":[],\"DeviceCgroupRules\":null,\"DeviceRequests\":null,\"MemoryReservation\":0,\"MemorySwap\":0,\"MemorySwappiness\":-1,\"OomKillDisable\":false,\"PidsLimit\":128,\"Ulimits\":null,\"CpuCount\":0,\"CpuPercent\":0,\"IOMaximumIOps\":0,\"IOMaximumBandwidth\":0,\"MaskedPaths\":null,\"ReadonlyPaths\":null},\"NetworkingConfig\":{\"EndpointsConfig\":{}}}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/attach",
+          "query": "stderr=1&stdout=1&stream=1",
+          "headers": {
+            "content-length": "0",
+            "content-type": "text/plain",
+            "upgrade": "tcp",
+            "connection": "Upgrade"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/wait",
+          "query": "condition=removed",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/start",
+          "query": "",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        }
+      ]
+    },
+    "ansible-check": {
+      "encoding": "text",
+      "argv": [
+        "run",
+        "--rm",
+        "--name",
+        "labjob-0123456789ab",
+        "--label",
+        "hcw.lab-job=7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f",
+        "--network",
+        "none",
+        "--read-only",
+        "--security-opt",
+        "no-new-privileges",
+        "--cap-drop",
+        "ALL",
+        "--user",
+        "65534:65534",
+        "--memory",
+        "512m",
+        "--cpus",
+        "0.5",
+        "--pids-limit",
+        "128",
+        "-v",
+        "/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro",
+        "--tmpfs",
+        "/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700",
+        "--env",
+        "ANSIBLE_HOME=/tmp/run/ansible-home",
+        "ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746",
+        "ansible-playbook",
+        "--syntax-check",
+        "-i",
+        "localhost,",
+        "/workspace/playbook.yml"
+      ],
+      "requests": [
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/create",
+          "query": "name=labjob-0123456789ab",
+          "headers": {
+            "content-length": "1927",
+            "content-type": "application/json"
+          },
+          "body": "{\"Hostname\":\"\",\"Domainname\":\"\",\"User\":\"65534:65534\",\"AttachStdin\":false,\"AttachStdout\":true,\"AttachStderr\":true,\"Tty\":false,\"OpenStdin\":false,\"StdinOnce\":false,\"Env\":[\"ANSIBLE_HOME=/tmp/run/ansible-home\"],\"Cmd\":[\"ansible-playbook\",\"--syntax-check\",\"-i\",\"localhost,\",\"/workspace/playbook.yml\"],\"Image\":\"ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746\",\"Volumes\":{},\"WorkingDir\":\"\",\"Entrypoint\":null,\"Labels\":{\"hcw.lab-job\":\"7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f\"},\"HostConfig\":{\"Binds\":[\"/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro\"],\"ContainerIDFile\":\"\",\"LogConfig\":{\"Type\":\"\",\"Config\":{}},\"NetworkMode\":\"none\",\"PortBindings\":{},\"RestartPolicy\":{\"Name\":\"no\",\"MaximumRetryCount\":0},\"AutoRemove\":true,\"VolumeDriver\":\"\",\"VolumesFrom\":null,\"ConsoleSize\":[0,0],\"CapAdd\":null,\"CapDrop\":[\"ALL\"],\"CgroupnsMode\":\"\",\"Dns\":null,\"DnsOptions\":[],\"DnsSearch\":[],\"ExtraHosts\":null,\"GroupAdd\":null,\"IpcMode\":\"\",\"Cgroup\":\"\",\"Links\":null,\"OomScoreAdj\":0,\"PidMode\":\"\",\"Privileged\":false,\"PublishAllPorts\":false,\"ReadonlyRootfs\":true,\"SecurityOpt\":[\"no-new-privileges\"],\"Tmpfs\":{\"/tmp/run\":\"rw,size=64m,uid=65534,gid=65534,mode=0700\"},\"UTSMode\":\"\",\"UsernsMode\":\"\",\"ShmSize\":0,\"Isolation\":\"\",\"CpuShares\":0,\"Memory\":536870912,\"NanoCpus\":500000000,\"CgroupParent\":\"\",\"BlkioWeight\":0,\"BlkioWeightDevice\":[],\"BlkioDeviceReadBps\":[],\"BlkioDeviceWriteBps\":[],\"BlkioDeviceReadIOps\":[],\"BlkioDeviceWriteIOps\":[],\"CpuPeriod\":0,\"CpuQuota\":0,\"CpuRealtimePeriod\":0,\"CpuRealtimeRuntime\":0,\"CpusetCpus\":\"\",\"CpusetMems\":\"\",\"Devices\":[],\"DeviceCgroupRules\":null,\"DeviceRequests\":null,\"MemoryReservation\":0,\"MemorySwap\":0,\"MemorySwappiness\":-1,\"OomKillDisable\":false,\"PidsLimit\":128,\"Ulimits\":null,\"CpuCount\":0,\"CpuPercent\":0,\"IOMaximumIOps\":0,\"IOMaximumBandwidth\":0,\"MaskedPaths\":null,\"ReadonlyPaths\":null},\"NetworkingConfig\":{\"EndpointsConfig\":{}}}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/attach",
+          "query": "stderr=1&stdout=1&stream=1",
+          "headers": {
+            "content-length": "0",
+            "content-type": "text/plain",
+            "upgrade": "tcp",
+            "connection": "Upgrade"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/wait",
+          "query": "condition=removed",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/start",
+          "query": "",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        }
+      ]
+    },
+    "helm-template": {
+      "encoding": "tar",
+      "argv": [
+        "run",
+        "--rm",
+        "--name",
+        "labjob-0123456789ab",
+        "--label",
+        "hcw.lab-job=7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f",
+        "--network",
+        "none",
+        "--read-only",
+        "--security-opt",
+        "no-new-privileges",
+        "--cap-drop",
+        "ALL",
+        "--user",
+        "65534:65534",
+        "--memory",
+        "512m",
+        "--cpus",
+        "0.5",
+        "--pids-limit",
+        "128",
+        "-v",
+        "/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro",
+        "--tmpfs",
+        "/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700",
+        "ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746",
+        "hcw-helm-template"
+      ],
+      "requests": [
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/create",
+          "query": "name=labjob-0123456789ab",
+          "headers": {
+            "content-length": "1833",
+            "content-type": "application/json"
+          },
+          "body": "{\"Hostname\":\"\",\"Domainname\":\"\",\"User\":\"65534:65534\",\"AttachStdin\":false,\"AttachStdout\":true,\"AttachStderr\":true,\"Tty\":false,\"OpenStdin\":false,\"StdinOnce\":false,\"Env\":null,\"Cmd\":[\"hcw-helm-template\"],\"Image\":\"ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746\",\"Volumes\":{},\"WorkingDir\":\"\",\"Entrypoint\":null,\"Labels\":{\"hcw.lab-job\":\"7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f\"},\"HostConfig\":{\"Binds\":[\"/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro\"],\"ContainerIDFile\":\"\",\"LogConfig\":{\"Type\":\"\",\"Config\":{}},\"NetworkMode\":\"none\",\"PortBindings\":{},\"RestartPolicy\":{\"Name\":\"no\",\"MaximumRetryCount\":0},\"AutoRemove\":true,\"VolumeDriver\":\"\",\"VolumesFrom\":null,\"ConsoleSize\":[0,0],\"CapAdd\":null,\"CapDrop\":[\"ALL\"],\"CgroupnsMode\":\"\",\"Dns\":null,\"DnsOptions\":[],\"DnsSearch\":[],\"ExtraHosts\":null,\"GroupAdd\":null,\"IpcMode\":\"\",\"Cgroup\":\"\",\"Links\":null,\"OomScoreAdj\":0,\"PidMode\":\"\",\"Privileged\":false,\"PublishAllPorts\":false,\"ReadonlyRootfs\":true,\"SecurityOpt\":[\"no-new-privileges\"],\"Tmpfs\":{\"/tmp/run\":\"rw,size=64m,uid=65534,gid=65534,mode=0700\"},\"UTSMode\":\"\",\"UsernsMode\":\"\",\"ShmSize\":0,\"Isolation\":\"\",\"CpuShares\":0,\"Memory\":536870912,\"NanoCpus\":500000000,\"CgroupParent\":\"\",\"BlkioWeight\":0,\"BlkioWeightDevice\":[],\"BlkioDeviceReadBps\":[],\"BlkioDeviceWriteBps\":[],\"BlkioDeviceReadIOps\":[],\"BlkioDeviceWriteIOps\":[],\"CpuPeriod\":0,\"CpuQuota\":0,\"CpuRealtimePeriod\":0,\"CpuRealtimeRuntime\":0,\"CpusetCpus\":\"\",\"CpusetMems\":\"\",\"Devices\":[],\"DeviceCgroupRules\":null,\"DeviceRequests\":null,\"MemoryReservation\":0,\"MemorySwap\":0,\"MemorySwappiness\":-1,\"OomKillDisable\":false,\"PidsLimit\":128,\"Ulimits\":null,\"CpuCount\":0,\"CpuPercent\":0,\"IOMaximumIOps\":0,\"IOMaximumBandwidth\":0,\"MaskedPaths\":null,\"ReadonlyPaths\":null},\"NetworkingConfig\":{\"EndpointsConfig\":{}}}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/attach",
+          "query": "stderr=1&stdout=1&stream=1",
+          "headers": {
+            "content-length": "0",
+            "content-type": "text/plain",
+            "upgrade": "tcp",
+            "connection": "Upgrade"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/wait",
+          "query": "condition=removed",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/start",
+          "query": "",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        }
+      ]
+    },
+    "kubeconform": {
+      "encoding": "text",
+      "argv": [
+        "run",
+        "--rm",
+        "--name",
+        "labjob-0123456789ab",
+        "--label",
+        "hcw.lab-job=7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f",
+        "--network",
+        "none",
+        "--read-only",
+        "--security-opt",
+        "no-new-privileges",
+        "--cap-drop",
+        "ALL",
+        "--user",
+        "65534:65534",
+        "--memory",
+        "512m",
+        "--cpus",
+        "0.5",
+        "--pids-limit",
+        "128",
+        "-v",
+        "/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro",
+        "ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746",
+        "hcw-kubeconform"
+      ],
+      "requests": [
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "HEAD",
+          "path": "/_ping",
+          "query": "",
+          "headers": {},
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/create",
+          "query": "name=labjob-0123456789ab",
+          "headers": {
+            "content-length": "1766",
+            "content-type": "application/json"
+          },
+          "body": "{\"Hostname\":\"\",\"Domainname\":\"\",\"User\":\"65534:65534\",\"AttachStdin\":false,\"AttachStdout\":true,\"AttachStderr\":true,\"Tty\":false,\"OpenStdin\":false,\"StdinOnce\":false,\"Env\":null,\"Cmd\":[\"hcw-kubeconform\"],\"Image\":\"ghcr.io/hybridcloudworks/hcw-lab-runner:7c0a95b2ac8d48f77d8c01f71a187b02e2cd284b@sha256:8cc6935466abc0958d7d3f6f85f14931e23604e401097eb2cab0eb431af1c746\",\"Volumes\":{},\"WorkingDir\":\"\",\"Entrypoint\":null,\"Labels\":{\"hcw.lab-job\":\"7f9c2b1e-3d4a-4c5b-8e6f-0a1b2c3d4e5f\"},\"HostConfig\":{\"Binds\":[\"/var/lib/hcw-labs-agent/tmp/labjob-Ab3xZ9:/workspace:ro\"],\"ContainerIDFile\":\"\",\"LogConfig\":{\"Type\":\"\",\"Config\":{}},\"NetworkMode\":\"none\",\"PortBindings\":{},\"RestartPolicy\":{\"Name\":\"no\",\"MaximumRetryCount\":0},\"AutoRemove\":true,\"VolumeDriver\":\"\",\"VolumesFrom\":null,\"ConsoleSize\":[0,0],\"CapAdd\":null,\"CapDrop\":[\"ALL\"],\"CgroupnsMode\":\"\",\"Dns\":null,\"DnsOptions\":[],\"DnsSearch\":[],\"ExtraHosts\":null,\"GroupAdd\":null,\"IpcMode\":\"\",\"Cgroup\":\"\",\"Links\":null,\"OomScoreAdj\":0,\"PidMode\":\"\",\"Privileged\":false,\"PublishAllPorts\":false,\"ReadonlyRootfs\":true,\"SecurityOpt\":[\"no-new-privileges\"],\"UTSMode\":\"\",\"UsernsMode\":\"\",\"ShmSize\":0,\"Isolation\":\"\",\"CpuShares\":0,\"Memory\":536870912,\"NanoCpus\":500000000,\"CgroupParent\":\"\",\"BlkioWeight\":0,\"BlkioWeightDevice\":[],\"BlkioDeviceReadBps\":[],\"BlkioDeviceWriteBps\":[],\"BlkioDeviceReadIOps\":[],\"BlkioDeviceWriteIOps\":[],\"CpuPeriod\":0,\"CpuQuota\":0,\"CpuRealtimePeriod\":0,\"CpuRealtimeRuntime\":0,\"CpusetCpus\":\"\",\"CpusetMems\":\"\",\"Devices\":[],\"DeviceCgroupRules\":null,\"DeviceRequests\":null,\"MemoryReservation\":0,\"MemorySwap\":0,\"MemorySwappiness\":-1,\"OomKillDisable\":false,\"PidsLimit\":128,\"Ulimits\":null,\"CpuCount\":0,\"CpuPercent\":0,\"IOMaximumIOps\":0,\"IOMaximumBandwidth\":0,\"MaskedPaths\":null,\"ReadonlyPaths\":null},\"NetworkingConfig\":{\"EndpointsConfig\":{}}}"
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/attach",
+          "query": "stderr=1&stdout=1&stream=1",
+          "headers": {
+            "content-length": "0",
+            "content-type": "text/plain",
+            "upgrade": "tcp",
+            "connection": "Upgrade"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/wait",
+          "query": "condition=removed",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        },
+        {
+          "method": "POST",
+          "path": "/v1.56/containers/<id>/start",
+          "query": "",
+          "headers": {
+            "content-length": "0"
+          },
+          "body": ""
+        }
+      ]
+    }
+  },
+  "remove": {
+    "argv": [
+      "rm",
+      "-f",
+      "labjob-0123456789ab"
+    ],
+    "requests": [
+      {
+        "method": "HEAD",
+        "path": "/_ping",
+        "query": "",
+        "headers": {},
+        "body": ""
+      },
+      {
+        "method": "DELETE",
+        "path": "/v1.56/containers/labjob-0123456789ab",
+        "query": "force=1",
+        "headers": {},
+        "body": ""
+      }
+    ]
+  }
+}

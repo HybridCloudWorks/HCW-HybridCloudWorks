@@ -1,0 +1,130 @@
+# {{ ansible_managed }}
+#
+# hcw-labs-agent-docker-proxy (LAB-5, 2026-10-07): the only way vps-agent
+# reaches Docker. The agent user is in no docker group; it reaches this
+# proxy on a Unix socket only its group may open, and the proxy passes on
+# exactly the calls `docker run --rm` and `docker rm -f` make for a job, and
+# nothing else. The sequence was read from Docker CLI 29.8.1, the host's
+# pin, against a recording daemon (scripts/lab/capture-docker-cli-requests.mjs,
+# fixture scripts/fixtures/docker-cli-agent-requests.json):
+#
+#   HEAD /_ping
+#   POST /v1.NN/containers/create?name=labjob-<12 hex>   (JSON body)
+#   POST /v1.NN/containers/<64 hex>/attach               (upgraded stream)
+#   POST /v1.NN/containers/<64 hex>/wait
+#   POST /v1.NN/containers/<64 hex>/start
+#   DELETE /v1.NN/containers/labjob-<12 hex>?force=1      (a timed-out job)
+#
+# No pull (lab_images pulls every pinned image as root beforehand), no exec,
+# no inspect, no list, no volume, network, image or system call.
+#
+# A path allowlist does not read bodies, and the create body is where a
+# privileged container would be asked for. So the create body is read too,
+# and refused when it carries any of the settings that turn a container
+# into a way out: privileged mode, a host namespace or the opt-out of the
+# daemon's user-namespace remapping, added capabilities, devices, mounts, a
+# bind other than the one job directory, unmasked kernel paths, a security
+# option other than no-new-privileges, a network other than none. These are
+# deny-anywhere rules, which is what makes regular expressions sound here:
+# the agent's bodies are ASCII JSON with no backslash in them (the CLI
+# escapes nothing in them), so with any other byte and every backslash
+# refused, every key is a plain string followed by a colon, and a rule that
+# matches such a key anywhere matches it wherever Docker would read it,
+# duplicates and odd capitalisation included (Go's JSON decoder matches
+# keys case-insensitively; so do these rules). What these rules cannot do
+# is require a setting to be present, because a regular expression cannot
+# tell HostConfig from an unknown key Docker ignores: the sandbox flags the
+# agent sets (network none, read-only root, cap-drop ALL, uid 65534) remain
+# the runner's own contract, asserted by vps-agent/lib/docker-runner.test.js.
+# With the daemon remapping user namespaces, the rules here are what keep a
+# compromised agent inside that remapping.
+#
+# scripts/lab-host-docker-proxy.test.mjs evaluates this file's rules against
+# the recorded requests and against the escapes; CI parses it with
+# `haproxy -c` at the pinned image.
+
+global
+    log stdout format raw local0 info
+    maxconn 64
+    # No stats socket, pidfile or state file: the root filesystem is
+    # read-only and nothing here needs one.
+
+defaults
+    mode http
+    log global
+    option httplog
+    option dontlognull
+    # The rules below read the whole create body, so wait for it.
+    option http-buffer-request
+    timeout http-request 10s
+    timeout connect 5s
+    # `docker run` holds /wait and the attached stream open while the job
+    # runs: at most 195 s (capabilities.js plus the runner's 15 s grace).
+    timeout client 10m
+    timeout server 10m
+    timeout tunnel 10m
+
+frontend agent
+    bind unix@{{ labs_agent_docker_proxy_socket }} mode 660 gid {{ labs_agent_docker_proxy_gid }}
+
+    # The calls, by method, path and query. Paths are matched as sent, not
+    # URL-decoded, so an encoded character matches nothing and is refused.
+    acl m_ping      method GET HEAD
+    acl m_post      method POST
+    acl m_delete    method DELETE
+    acl ping        path -m reg '^(/v1\.[0-9]+)?/_ping$'
+    acl create      path -m reg '^/v1\.[0-9]+/containers/create$'
+    acl job_name    query -m reg '^name=labjob-[0-9a-f]{12}$'
+    acl by_id       path -m reg '^/v1\.[0-9]+/containers/[0-9a-f]{64}/(attach|wait|start)$'
+    acl own_job     path -m reg '^/v1\.[0-9]+/containers/labjob-[0-9a-f]{12}$'
+    acl force_rm    query -m str force=1
+
+    # The shape of a body.
+    acl one_length  req.hdr_cnt(content-length) eq 1
+    acl chunked     req.hdr(transfer-encoding) -m found
+    acl json        req.hdr(content-type) -m str application/json
+    acl too_big     req.body_size gt 8192
+    acl no_body     req.body_size eq 0
+
+    # Bytes the agent never sends: anything outside printable ASCII, tab and
+    # line breaks, and any backslash, so no JSON escape can spell a key.
+    acl body_bytes  req.body -m reg '[^\t\n\r -~]'
+    acl body_bytes  req.body -m reg '\x5c'
+
+    # Settings the agent never sends, wherever they appear in the body.
+    acl body_forbidden req.body -m reg -i '"privileged"[ \t\r\n]*:[ \t\r\n]*true'
+    acl body_forbidden req.body -m reg -i '"(usernsmode|pidmode|ipcmode|utsmode|cgroupnsmode|cgroup|cgroupparent|volumedriver|runtime|type)"[ \t\r\n]*:[ \t\r\n]*"[^"]'
+    acl body_forbidden req.body -m reg -i '"networkmode"[ \t\r\n]*:[ \t\r\n]*(?!"none")'
+    acl body_forbidden req.body -m reg -i '"(capadd|devices|devicerequests|devicecgrouprules|mounts|volumesfrom|links|groupadd)"[ \t\r\n]*:[ \t\r\n]*\[[ \t\r\n]*[^ \t\r\n\]]'
+    acl body_forbidden req.body -m reg -i '"(maskedpaths|readonlypaths)"[ \t\r\n]*:[ \t\r\n]*\['
+    acl body_forbidden req.body -m reg -i '"securityopt"[ \t\r\n]*:[ \t\r\n]*(?!\[[ \t\r\n]*"no-new-privileges"[ \t\r\n]*\])'
+    acl body_forbidden req.body -m reg -i '"(sysctls|annotations|portbindings|endpointsconfig)"[ \t\r\n]*:[ \t\r\n]*\{[ \t\r\n]*"'
+    acl body_forbidden req.body -m reg -i '"(publishallports|oomkilldisable)"[ \t\r\n]*:[ \t\r\n]*true'
+    acl body_forbidden req.body -m reg -i '"image"[ \t\r\n]*:[ \t\r\n]*(?!"[a-z0-9._/:-]+@sha256:[0-9a-f]{64}")'
+    # The one bind: this job's own staging directory, read-only. Not -i, so
+    # the path is matched exactly; the key is matched in any case.
+    acl body_forbidden req.body -m reg '(?i:"binds")[ \t\r\n]*:[ \t\r\n]*(?!\[[ \t\r\n]*"{{ labs_agent_tmp_dir | regex_escape }}/labjob-[A-Za-z0-9]{6}:/workspace:ro"[ \t\r\n]*\])'
+
+    # 1. A container create: its body's shape, then its contents.
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this container: it carries a setting the lab agent never sends (LAB-5)"}' if create !one_length
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this container: it carries a setting the lab agent never sends (LAB-5)"}' if create chunked
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this container: it carries a setting the lab agent never sends (LAB-5)"}' if create !json
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this container: it carries a setting the lab agent never sends (LAB-5)"}' if create too_big
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this container: it carries a setting the lab agent never sends (LAB-5)"}' if create body_bytes
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this container: it carries a setting the lab agent never sends (LAB-5)"}' if create body_forbidden
+
+    # 2. No other call carries a body.
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this call: it is not one the lab agent makes (LAB-5)"}' if !create !no_body
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this call: it is not one the lab agent makes (LAB-5)"}' if chunked
+
+    # 3. Exactly the calls, and nothing else.
+    http-request allow if ping m_ping
+    http-request allow if create m_post job_name
+    http-request allow if by_id m_post
+    http-request allow if own_job m_delete force_rm
+    http-request deny status 403 content-type application/json string '{"message":"hcw-labs-agent-docker-proxy refused this call: it is not one the lab agent makes (LAB-5)"}'
+
+    default_backend daemon
+
+backend daemon
+    server docker unix@/var/run/docker.sock

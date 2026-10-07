@@ -41,11 +41,18 @@
     signed_by: "{{ docker_apt_key_path }}"
     state: present
 
-- name: Install Docker Engine, buildx and compose at the pinned versions
+# docker-ce-rootless-extras is the same build as docker-ce, so it takes the
+# same version string. It carries rootlesskit and dockerd-rootless.sh, which
+# the coder_sandbox role runs Coder's workspaces under (LAB-5). Its AppArmor
+# profile for /usr/bin/rootlesskit comes from Ubuntu's apparmor package, not
+# from this one (the deb ships three binaries and no profile, read
+# 2026-10-07); coder_sandbox refuses to start without it.
+- name: Install Docker Engine, buildx, compose and the rootless extras at the pinned versions
   ansible.builtin.apt:
     name:
       - "docker-ce={{ docker_version }}"
       - "docker-ce-cli={{ docker_version }}"
+      - "docker-ce-rootless-extras={{ docker_version }}"
       - "containerd.io={{ docker_containerd_version }}"
       - "docker-buildx-plugin={{ docker_buildx_version }}"
       - "docker-compose-plugin={{ docker_compose_version }}"
@@ -70,6 +77,7 @@
   loop:
     - docker-ce
     - docker-ce-cli
+    - docker-ce-rootless-extras
     - containerd.io
     - docker-buildx-plugin
     - docker-compose-plugin
@@ -82,6 +90,46 @@
     group: root
     mode: "0755"
 
+# User namespaces (LAB-5, 2026-10-07). Turning userns-remap on or off moves
+# the daemon to another data root (/var/lib/docker/<uid>.<gid> while it is
+# on), and with live-restore the old root's containers would keep running
+# with no daemon that knows them. So on the run that switches, and only
+# then, every running container is stopped first. The roles after this one
+# create the host's own containers again in the new root, and
+# userns_carry.yml below brings the named volumes that hold state across.
+- name: Read the daemon configuration this run replaces
+  ansible.builtin.slurp:
+    src: /etc/docker/daemon.json
+  register: docker_daemon_json_current
+  failed_when: false
+
+- name: Work out whether this run switches user-namespace remapping on or off
+  ansible.builtin.set_fact:
+    docker_userns_switching: >-
+      {{ (docker_daemon_json_current.content | default('e30=') | b64decode | from_json).get('userns-remap', '')
+         != docker_daemon_config.get('userns-remap', '') }}
+
+- name: List the running containers the switch would leave behind
+  ansible.builtin.command:
+    argv:
+      - docker
+      - ps
+      - --quiet
+  register: docker_running_before_switch
+  changed_when: false
+  # A first run has no daemon yet, and so nothing to stop.
+  failed_when: false
+  when: docker_userns_switching | bool
+
+- name: Stop them before the daemon changes data root
+  ansible.builtin.command:
+    argv: "{{ ['docker', 'stop', '--time', '30'] + docker_running_before_switch.stdout_lines }}"
+  changed_when: true
+  when:
+    - docker_userns_switching | bool
+    - docker_running_before_switch.rc | default(1) == 0
+    - docker_running_before_switch.stdout_lines | default([]) | length > 0
+
 - name: Write the daemon configuration
   ansible.builtin.copy:
     dest: /etc/docker/daemon.json
@@ -91,8 +139,21 @@
     mode: "0644"
   notify: Restart docker
 
+# Now rather than at the end of the play: left to the end, the restart would
+# run after the coder, labs_agent and portainer roles had created their
+# containers in the old data root, and would then hide every one of them.
+# This flushes every handler notified so far, the hardening role's included,
+# which would otherwise run at the end; force_handlers in site.yml already
+# runs them whatever fails later.
+- name: Restart Docker now if its configuration changed, so the roles after this one meet the new daemon
+  ansible.builtin.meta: flush_handlers
+
 - name: Enable and start Docker
   ansible.builtin.systemd_service:
     name: docker
     enabled: true
     state: started
+
+- name: Check user-namespace remapping and carry the host's named volumes into the remapped root
+  ansible.builtin.include_tasks: userns_carry.yml
+  when: docker_daemon_config.get('userns-remap', '') | length > 0

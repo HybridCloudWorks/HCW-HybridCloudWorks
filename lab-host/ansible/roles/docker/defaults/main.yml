@@ -5,9 +5,58 @@ docker_apt_key_url: https://download.docker.com/linux/ubuntu/gpg
 docker_apt_key_path: /etc/apt/keyrings/docker.asc
 docker_apt_repository_url: https://download.docker.com/linux/ubuntu
 
-docker_daemon_config:
+# userns-remap "default" (LAB-5, 2026-10-07): every container's root is a
+# subordinate uid of the dockremap user Docker creates, so a container escape
+# lands as an unprivileged uid rather than root on the host. A container that
+# must reach the host's own Docker socket opts out with --userns=host, and
+# only this host's own containers do (the two socket proxies and Portainer;
+# README.md beside this file lists them).
+#
+# containerd-snapshotter false is not optional with it: the containerd image
+# store, Docker 29's default on a fresh install, "is not available when using
+# user namespace remapping"
+# (https://docs.docker.com/engine/storage/containerd/, read 2026-10-07), so
+# the daemon goes back to the overlay2 graph driver. Switching either setting
+# gives the daemon a fresh store: images are pulled again (lab_images and
+# the roles that run containers do that), and tasks/userns_carry.yml brings
+# the named volumes that hold state across.
+#
+# docker_userns_remap is the switch. group_vars/all.yml sets it true; false
+# is the way back (docs/runbooks/labs-host.md, "Taking it back"), which puts
+# the daemon on its original data root with the containerd image store it
+# was installed with, through the same stop-and-restart as the way on.
+docker_userns_remap: true
+
+docker_daemon_config: >-
+  {{ docker_daemon_base_config
+     | combine(docker_daemon_userns_config if docker_userns_remap | bool else docker_daemon_no_userns_config) }}
+
+docker_daemon_base_config:
   log-driver: json-file
   log-opts:
     max-size: "10m"
     max-file: "3"
   live-restore: true
+
+docker_daemon_userns_config:
+  userns-remap: default
+  features:
+    containerd-snapshotter: false
+
+docker_daemon_no_userns_config:
+  features:
+    containerd-snapshotter: true
+
+# The data root before the remap, where the named volumes to carry are read
+# from. Docker's default, which this host has never changed.
+docker_legacy_root: /var/lib/docker
+
+# Named volumes whose data must survive the move into the remapped root, as
+# {name, remapped}: remapped true for a volume a remapped container owns
+# (its files are shifted into the remapped range), false for one a
+# --userns=host container owns (copied as is). group_vars/all.yml lists this
+# host's.
+docker_userns_carry_volumes: []
+
+# Where the carry records which volumes it finished, one file per volume.
+docker_userns_carry_state_dir: /var/lib/hcw-docker/userns-carry

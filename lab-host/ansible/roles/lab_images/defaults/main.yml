@@ -10,10 +10,15 @@ lab_images_checkouts:
   - "{{ lab_images_playbook_checkout }}"
   - "{{ labs_agent_home }}"
 
-# Pull the Coder workspace image as well. Coder pulls it itself on the first
-# workspace start; pulled here, that start does not wait for it. It is kept
-# once present whatever this says, because it is still a pin.
+# Plan the Coder workspace image on the sandbox daemon the workspaces run on
+# (the coder_sandbox role; LAB-5): pull it there, and remove the ones no pin
+# names. Coder pulls it itself on the first workspace start; pulled here, that
+# start does not wait for it. Off while Coder is, because that daemon is then
+# stopped.
 lab_images_pull_workspace: "{{ coder_enabled }}"
+
+# The sandbox daemon's socket, the coder_sandbox role's fixed path.
+lab_images_sandbox_docker_host: unix:///run/hcw-coder-docker/docker.sock
 
 # NodeSource's node, which the labs_agent role installs, runs the plan.
 lab_images_node: /usr/bin/node

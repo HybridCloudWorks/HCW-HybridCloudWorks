@@ -3,7 +3,9 @@
 How to reach the Hostinger lab host from a desktop over SSH and VS Code (the
 first section); how to reinstall it, and what the first `bootstrap.sh` run
 checks before it changes anything; how the lab agent goes live, which is one
-PowerShell line; how the owner reaches Portainer and
+PowerShell line; how to check, after the run that turns it on, that the
+container runtime is privilege-separated and how to take that back (LAB-5);
+how the owner reaches Portainer and
 initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26),
 and moves that Vault to auto-unseal through the Arc identity (#726);
 how fast a runc, containerd or Docker Engine advisory is fixed on the host,
@@ -665,6 +667,194 @@ Every public lab route then answers `PUBLIC_SUBMISSION_CLOSED` before reading
 anything, and the line beside the button reads *Validation on the lab isn't
 available right now. You can still download the files and validate
 locally.*
+
+## Container-runtime privilege separation (LAB-5)
+
+Estate review 2026-10-06, finding LAB-5; ADR 0032, amendment of 2026-10-07.
+Since that change the lab host runs two Docker daemons and nobody but root
+reaches either directly:
+
+- the **host daemon** remaps user namespaces (`userns-remap: default`), so a
+  job container's root, and Coder's server's and PostgreSQL's, is an
+  unprivileged uid on the host;
+- **`hcw-labs-agent` is in no docker group**: the agent reaches the host
+  daemon through `hcw-labs-agent-docker-proxy`, which passes the calls a job
+  makes and refuses any container that asks for privilege, a host
+  namespace, a device, a mount, or a bind beyond the job's own directory;
+- **Coder's workspaces run on a rootless daemon** owned by the unprivileged
+  user `hcw-coder-docker`, and Coder's proxy reaches that daemon and never
+  the host's.
+
+The run of `lab-host/bootstrap.sh` that first applies this checks all of it
+at its end (the `privilege_checks` role) and fails with what to do. The
+commands below are the owner's own look afterwards, and what the estate
+review's next pass will check.
+
+### What the first run changes, and costs
+
+The run that turns user-namespace remapping on:
+
+1. **Stops every running container**, then restarts Docker. A lab job in
+   flight fails and is reported failed; a workspace in use stops.
+2. **Copies two volumes** into the daemon's new data root: Coder's
+   PostgreSQL cluster (sign-ins, the template, workspace records) and
+   Portainer's database (its administrator and licence). The originals are
+   only read and stay in `/var/lib/docker/volumes/`.
+3. **Pulls every image again**: the host daemon's store starts empty, and
+   the workspace image (about 484 MB) goes into the sandbox daemon's. The
+   run takes several minutes longer than usual, once.
+4. **Starts workspaces on the sandbox daemon.** A learner's workspace
+   starts again from an empty home volume, because its old volume belongs to
+   the host daemon's old data root, where it stays on disk
+   (`/var/lib/docker/volumes/coder-<workspace id>-home`) but no daemon
+   serves it. Coder Community has members of one GitHub organisation only,
+   so this is expected to be the owner's own workspaces.
+
+`lab-host/coder/templates/hcw-lab/main.tf` changed in comments only, so
+publishing the template again is not needed for this change.
+
+### Before the run
+
+An extra PostgreSQL dump of Coder, beside the nightly one, costs nothing.
+Bash, on the host (PowerShell `ssh hcw-lab` from the workstation gets there):
+
+```bash
+sudo /usr/local/sbin/coder-postgres-backup
+```
+
+Good is exit status 0 and a new file under `/var/backups/coder/`.
+
+### The run
+
+Bash, on the host, after the pull request is merged:
+
+```bash
+sudo /opt/hcw-src/lab-host/bootstrap.sh
+```
+
+Good is a `PLAY RECAP` line for `localhost` with `failed=0`, and before it
+the task **Show what the agent proxy check saw** printing `job`, `listing`
+and `privileged`, each with `ok: true`. Two lines that look like trouble and
+are not: Compose warning that `volume "coder-postgres-data" already exists
+but was not created by Docker Compose` (the carried volume, created by the
+docker role on purpose), and the docker role reporting `changed` on the stop
+and the carry tasks (they run once).
+
+### Checking it afterwards
+
+Each command is bash, on the host, one line.
+
+The agent user's groups:
+
+```bash
+id hcw-labs-agent
+```
+
+Good is `groups=` naming `hcw-labs-agent` alone. `docker` anywhere in the
+line is the finding.
+
+The host daemon's security options:
+
+```bash
+sudo docker info --format '{{json .SecurityOptions}} {{.DockerRootDir}} {{.Driver}}'
+```
+
+Good is a list containing `"name=userns"`, then a data root of the form
+`/var/lib/docker/231072.231072` (two equal numbers, the remapped range's
+first id) and `overlay2`.
+
+A job, as the agent user, through its proxy, and the two things the proxy
+must refuse:
+
+```bash
+sudo runuser -u hcw-labs-agent -- env DOCKER_HOST=unix:///run/hcw-labs-agent-docker/docker.sock TMPDIR=/var/lib/hcw-labs-agent/tmp /usr/bin/node /usr/local/libexec/hcw-labs-agent-proxy-check.mjs /opt/hcw-labs-agent/vps-agent 64m 0.5 32
+```
+
+Good is one line of JSON in which `job`, `listing` and `privileged` each
+carry `"ok":true`: the job printed `hcw-labs-agent proxy check` and exited 0,
+and the other two were answered `hcw-labs-agent-docker-proxy refused this
+call` and `refused this container`.
+
+The agent user cannot use the daemon's own socket:
+
+```bash
+sudo runuser -u hcw-labs-agent -- docker -H unix:///var/run/docker.sock ps
+```
+
+Good is `permission denied while trying to connect to the docker API`.
+
+Coder's proxy and the allowlist it runs with:
+
+```bash
+sudo docker inspect coder-docker-proxy --format '{{range .Config.Env}}{{println .}}{{end}}{{range .Mounts}}mount {{.Source}}{{println}}{{end}}'
+```
+
+Good is every `KEY="0"` or `KEY="1"` line of the `coder-docker-proxy`
+service in `lab-host/coder/docker-compose.yml` (on `main`) appearing as
+`KEY=0` or `KEY=1`, `SOCKET_PATH=/run/hcw-coder-docker/docker.sock`, and
+one mount line, `mount /run/hcw-coder-docker`. A `mount
+/var/run/docker.sock` line is the finding.
+
+The daemon Coder's workspaces run on:
+
+```bash
+sudo docker -H unix:///run/hcw-coder-docker/docker.sock info --format '{{json .SecurityOptions}} cgroup v{{.CgroupVersion}} {{.CgroupDriver}}'
+```
+
+Good is a list containing `"name=rootless"`, then `cgroup v2 systemd`.
+
+Then open a lab from https://hybridcloudworks.com/education/labs and, once
+the editor shows, look for its container on each daemon:
+
+```bash
+sudo docker -H unix:///run/hcw-coder-docker/docker.sock ps --format '{{.Names}} {{.Labels}}'
+```
+
+Good is one `coder-...` line per running workspace with
+`com.coder.resource=true` in its labels, and
+
+```bash
+sudo docker ps --format '{{.Names}}'
+```
+
+listing `coder`, `coder-postgres`, `coder-docker-proxy`,
+`hcw-labs-agent-docker-proxy`, `portainer`, and no `coder-...` workspace.
+
+### If a check fails
+
+The run's own message names what to do. Its log is the first place to read:
+for the host daemon, `sudo journalctl -u docker -n 50 --no-pager`; for the
+agent's proxy, `sudo docker logs --tail 50 hcw-labs-agent-docker-proxy`
+(each refused request is a line with `403`); for the sandbox daemon,
+`sudo journalctl _UID=$(id -u hcw-coder-docker) -n 80 --no-pager`.
+
+### Taking it back
+
+Nothing on the host was deleted to make this change, so the remap is
+undone with a flag rather than a repair. Bash, on the host:
+
+```bash
+sudo /opt/hcw-src/lab-host/bootstrap.sh -e docker_userns_remap=false
+```
+
+The docker role stops the running containers, puts the daemon back on its
+original data root with the containerd image store it was installed with,
+and the Coder database and Portainer come back as they were at the moment
+of the switch. Good is `failed=0` in the `PLAY RECAP` and, near the end, the
+message `This run was given docker_userns_remap=false` from the checks,
+which warn rather than fail on it. The agent stays out of the docker group
+and the workspaces stay on the sandbox daemon: the flag undoes the remap
+only. Do not take it back by reverting the pull request: the older docker
+role neither stops the containers before switching nor restarts the daemon
+before the roles after it, and leaves the remapped containers running
+beside the original ones.
+
+Anything Coder recorded after the switch (a new sign-in, a template
+version) is in the remapped root's copy only, so take a dump with
+`sudo /usr/local/sbin/coder-postgres-backup` first if it matters. The next
+plain run turns the remap on again and stops at the carry: it finds the
+pre-remap data newer than the copy it made the first time, refuses to use
+that older copy, and prints the three steps that carry the data again.
 
 ## Portainer through an SSH tunnel
 

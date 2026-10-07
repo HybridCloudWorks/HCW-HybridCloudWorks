@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  role_name: privilege_checks
+  namespace: hcw
+  author: HybridCloudWorks
+  description: End-of-run checks that the lab host's container runtime is privilege-separated (LAB-5)
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - resolute
+        - noble
+  galaxy_tags:
+    - docker
+    - security
+
+dependencies: []
