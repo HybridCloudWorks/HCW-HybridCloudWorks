@@ -117,9 +117,13 @@
       - --quiet
   register: docker_running_before_switch
   changed_when: false
-  # A first run has no daemon yet, and so nothing to stop.
-  failed_when: false
-  when: docker_userns_switching | bool
+  # Fails closed (#987 review): a daemon that cannot list its containers here
+  # could leave them running on the old root after the restart. Only a host
+  # with no daemon.json yet is skipped: that is a first run, on a daemon the
+  # install above has just started, with nothing on it to stop.
+  when:
+    - docker_userns_switching | bool
+    - docker_daemon_json_current.content is defined
 
 - name: Stop them before the daemon changes data root
   ansible.builtin.command:
@@ -127,7 +131,6 @@
   changed_when: true
   when:
     - docker_userns_switching | bool
-    - docker_running_before_switch.rc | default(1) == 0
     - docker_running_before_switch.stdout_lines | default([]) | length > 0
 
 - name: Write the daemon configuration

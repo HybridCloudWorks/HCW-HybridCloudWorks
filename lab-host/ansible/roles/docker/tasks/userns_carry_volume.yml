@@ -16,6 +16,46 @@
     path: "{{ docker_userns_carry_state_dir }}/{{ docker_carry.name }}.done"
   register: docker_carry_marker
 
+# A marker with no copy behind it (#987 review): the remapped volume was
+# removed, or a recovery stopped half-way. Left alone, Compose would create an
+# empty volume of the same name and Coder would start on a fresh database, so
+# the run stops while the pre-remap data is still there to carry.
+- name: Read the carried volume in the remapped root, {{ docker_carry.name }}
+  community.docker.docker_volume_info:
+    name: "{{ docker_carry.name }}"
+  register: docker_carry_current
+  when:
+    - docker_carry_legacy.stat.isdir | default(false)
+    - docker_carry_marker.stat.exists
+
+- name: Look inside the carried volume, {{ docker_carry.name }}
+  ansible.builtin.find:
+    paths: "{{ docker_carry_current.volume.Mountpoint }}"
+    file_type: any
+    hidden: true
+  register: docker_carry_contents
+  when:
+    - docker_carry_legacy.stat.isdir | default(false)
+    - docker_carry_marker.stat.exists
+    - docker_carry_current.exists
+
+- name: Refuse a carry marker whose volume is missing or empty, {{ docker_carry.name }}
+  ansible.builtin.assert:
+    that:
+      - docker_carry_current.exists
+      - docker_carry_contents.matched > 0
+    fail_msg: >-
+      {{ docker_carry_marker.stat.path }} says {{ docker_carry.name }} was carried into the remapped
+      data root, but that volume is {{ 'missing' if not docker_carry_current.exists else 'empty' }}, so
+      a container started now would begin with no data. The pre-remap data is untouched at
+      {{ docker_carry_legacy.stat.path }}. To carry it again: stop the container that uses
+      {{ docker_carry.name }}, run sudo docker volume rm {{ docker_carry.name }} if it exists, run
+      sudo rm {{ docker_carry_marker.stat.path }}, and re-run bootstrap.sh.
+    quiet: true
+  when:
+    - docker_carry_legacy.stat.isdir | default(false)
+    - docker_carry_marker.stat.exists
+
 # A copy carried earlier, with the pre-remap data written since: the remap
 # was turned off (a revert) and the stack ran on the old root, then turned
 # on again. The remapped copy is then older than the data, and using it
