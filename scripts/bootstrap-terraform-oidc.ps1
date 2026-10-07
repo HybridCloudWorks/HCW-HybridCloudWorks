@@ -65,9 +65,21 @@
   HCP Terraform organization name, case-sensitive. Default: HybridCloudWorks.
 
 .PARAMETER TfcProject
-  HCP Terraform project name, case-sensitive. Defaults to Site, which is where
-  the hcw-azure workspace lives. A workspace created without choosing a project
-  lands in "Default Project" instead — including the space.
+  HCP Terraform project name, case-sensitive. Defaults to Site, the project
+  the hcw-azure workspace was created in and the one the live credentials
+  name. A workspace created without choosing a project lands in "Default
+  Project" instead, with the space, and a workspace can be moved between
+  projects from its Settings page; the subject HCP Terraform presents follows
+  the move at once and the credentials do not. Read the project off
+  https://app.terraform.io/app/hcw/workspaces/hcw-azure/settings/general and
+  pass it when it differs from this default.
+
+.PARAMETER ReplaceFederatedCredentials
+  Allow section 4 to delete a federated credential whose subject differs from
+  the one computed here and recreate it. Without this switch a mismatch stops
+  the script with both subjects printed, because the other way to agree, moving
+  the workspace back into the project the credential names, changes nothing in
+  Azure and is usually what happened.
 
 .PARAMETER TfcWorkspace
   HCP Terraform workspace name, case-sensitive.
@@ -122,11 +134,15 @@ param(
   [string] $IdentitySubscriptionId,
   [string[]] $TargetSubscriptionIds = @(),
   # These three compose the federated credential subject, which Entra matches
-  # as an exact, case-sensitive string. They are the live values, verified
-  # against the HCP Terraform API on 2026-08-19 — every one of them was wrong
-  # before that (org HybridCloudWorks, workspace hybridcloudworks-azure and
-  # project "Default Project" were assumptions, and the first two named things
-  # that do not exist).
+  # as an exact, case-sensitive string. The workspace was created in the
+  # `Site` project on 2026-08-19 and the credentials were written for it.
+  # On 2026-10-07 the HCP Terraform API showed hcw-azure in "Default
+  # Project" (with the space) and `Site` empty, and every run failed at
+  # sign-in with AADSTS700213 naming the presented subject. Whichever side
+  # moved, the two must agree: read the project off the workspace's
+  # Settings page and pass it, and note that section 4 refuses to replace a
+  # credential whose subject differs unless -ReplaceFederatedCredentials is
+  # given, because a silent replacement is how a working trust gets lost.
   [string] $TfcOrganization = 'hcw',
   [string] $TfcProject = 'Site',
   [string] $TfcWorkspace = 'hcw-azure',
@@ -145,6 +161,7 @@ param(
   # Location matters more than it looks: leaving this at southcentralus meant
   # the next bootstrap run would recreate the region drift that the centralus
   # consolidation removed.
+  [switch] $ReplaceFederatedCredentials,
   [string] $ResourceGroupName = 'rg-mgmt-boot-prod-cus',
   [string] $IdentityName = 'id-plat-terraform-prod-cus-01',
   [string] $Location = 'centralus',
@@ -576,8 +593,25 @@ foreach ($credentialName in ($subjects.Keys | Sort-Object)) {
   }
 
   if ($existing) {
-    # Subject is immutable in practice; the org, project or workspace name
-    # changed, so replace rather than leave a credential that matches nothing.
+    # The org, project or workspace in the subject differs from what is on
+    # the identity. One of two things is true: the workspace moved projects
+    # (2026-10-07: hcw-azure was found in "Default Project" with the
+    # credentials still naming Site, and every run failed with AADSTS700213),
+    # or this script was given the wrong name. Replacing silently turns the
+    # second case into a lockout, so a mismatch stops here unless the caller
+    # has read both subjects and asked for the replacement.
+    if (-not $ReplaceFederatedCredentials) {
+      Stop-WithGuidance "$credentialName exists with a different subject." @(
+        "On the identity: $($existing.subject)",
+        "Computed now:    $subject",
+        'Runs present the subject of the project the workspace is IN today. Read it at',
+        "https://app.terraform.io/app/$TfcOrganization/workspaces/$TfcWorkspace/settings/general",
+        'and then do ONE of these:',
+        '  - move the workspace back into the project the identity names (no Azure change), or',
+        "  - re-run with -TfcProject '<the project shown there>' -ReplaceFederatedCredentials",
+        '    to recreate both credentials for it.'
+      )
+    }
     Write-Info "$credentialName exists with subject '$($existing.subject)' — replacing"
     if ($PSCmdlet.ShouldProcess($credentialName, 'delete stale federated credential')) {
       Invoke-Az @(
