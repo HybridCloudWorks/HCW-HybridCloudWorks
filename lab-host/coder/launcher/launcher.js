@@ -15,12 +15,23 @@
  * from Coder's API.
  *
  * WHAT IT MAY DO, and nothing more:
- *   - GET only, same origin, with the learner's session cookie, to three
- *     paths: who is signed in, their workspace for this lab, and, before
- *     Coder's create page is ever framed, the template. No request here
- *     changes anything in Coder, so it needs no CSRF token. Creating or
- *     starting a workspace is Coder's own UI in a frame of the same origin,
- *     with Coder's own consent dialog and buttons.
+ *   - GET, same origin, with the learner's session cookie, to four paths:
+ *     who is signed in, their workspace for this lab, before Coder's create
+ *     page is ever framed the template, and Coder's own index page for the
+ *     CSRF token. None of these changes anything in Coder.
+ *   - ONE write, and only this one: `POST /api/v2/workspaces/{id}/builds`
+ *     with `{ transition: "start" }` (and the template's active version id
+ *     when the workspace is outdated), for the learner's own workspace for
+ *     this lab, only when its last build stopped or was cancelled, once per
+ *     visit, carrying the CSRF token Coder embeds in its own page as
+ *     `X-CSRF-TOKEN` — the same call, and the same token, Coder's Start
+ *     button sends (#911, owner 2026-10-07). Never a create, never a delete,
+ *     never another learner's workspace: the id comes from the workspace
+ *     read above, which Coder scopes to the signed-in learner. When Coder
+ *     refuses, or its page carries no token, the launcher frames Coder's
+ *     workspace page with Start, as it always did. Creating a workspace is
+ *     still Coder's own UI in a frame of the same origin, with Coder's own
+ *     consent dialog.
  *   - Everything it builds comes from constants below: the lab id and the
  *     workspace name from LAB_WORKSPACES, the template name, and the host
  *     suffix it navigates to. The query string only selects a key of
@@ -164,6 +175,89 @@ export function workspacePagePath(workspace) {
   return `/@me/${encodeURIComponent(workspace)}`;
 }
 
+/**
+ * Starting a stopped workspace without a click (owner, 2026-10-07, #911:
+ * "the lab was enabled but I still needed to start it").
+ *
+ * Coder starts a workspace with `POST /api/v2/workspaces/{id}/builds
+ * { transition: "start" }`, the call its own Start button makes. The
+ * launcher is signed in the way Coder's pages are, by the session cookie,
+ * and Coder guards every cookie-authenticated write with a CSRF token
+ * (coderd/httpmw/csrf.go): the cookie is HttpOnly, so a page cannot read
+ * it, and the token is instead embedded in every page Coder serves as
+ * `<meta property="csrf-token">`, which Coder's own front end reads and
+ * sends as `X-CSRF-TOKEN` (site/src/api/api.ts). The launcher does the
+ * same: it reads one of Coder's pages and sends the token it finds. When
+ * the page carries none, or Coder refuses the start, the launcher does
+ * what it did before — frames Coder's workspace page, where Start is — so
+ * a Coder change here costs a click, never the lab.
+ *
+ * Only a build that stopped or was cancelled is started this way. A failed
+ * build is not: its page carries the reason and Retry, and starting it
+ * blind would hide the reason. An outdated workspace is started on its
+ * template's active version, so a template change (a new editor pin, say)
+ * reaches every lab on its next open rather than waiting for each learner
+ * to press "Update and start". One attempt per visit; the poll then waits
+ * for the build like any other start.
+ */
+export const CSRF_PAGE_PATH = '/';
+export const CSRF_HEADER = 'X-CSRF-TOKEN';
+const CSRF_META = /<meta\s+property="csrf-token"\s+content="([^"]+)"/i;
+const STARTABLE = new Set(['stopped', 'canceled']);
+
+/** Coder's builds API for one workspace, by id. */
+export function buildsApiPath(workspaceId) {
+  return `/api/v2/workspaces/${encodeURIComponent(workspaceId)}/builds`;
+}
+
+/** The CSRF token a Coder page carries, or null. */
+export function csrfTokenFrom(html) {
+  const match = typeof html === 'string' ? html.match(CSRF_META) : null;
+  return match ? match[1] : null;
+}
+
+/**
+ * How to start this workspace, or null when it should not be started
+ * without a click: `{ path, body }` for a stopped or cancelled build of a
+ * workspace with an id, on the active template version when outdated.
+ */
+export function startPlan(workspace) {
+  const status = workspace?.latest_build?.status;
+  if (!STARTABLE.has(status) || typeof workspace?.id !== 'string' || workspace.id === '') return null;
+  const body = { transition: 'start' };
+  if (workspace.outdated === true && typeof workspace.template_active_version_id === 'string') {
+    body.template_version_id = workspace.template_active_version_id;
+  }
+  return { path: buildsApiPath(workspace.id), body };
+}
+
+/** One attempt to start: true when Coder accepted the build, false for anything else. */
+async function startWorkspace(fetchImpl, plan) {
+  try {
+    const page = await fetchImpl(CSRF_PAGE_PATH, {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      headers: { Accept: 'text/html' },
+    });
+    if (!page.ok) return false;
+    const token = csrfTokenFrom(await page.text());
+    if (!token) return false;
+    const response = await fetchImpl(plan.path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      redirect: 'error',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', [CSRF_HEADER]: token },
+      body: JSON.stringify(plan.body),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 /** The lab and workspace a query string names, or null for anything but exactly one known `lab`. */
 export function resolveLab(search) {
   let params;
@@ -240,7 +334,11 @@ const isReady = ({ agent, app }) =>
  */
 export function assess(workspace, workspaceName, owner) {
   const status = workspace?.latest_build?.status;
-  if (status !== 'running') return { state: NOT_RUNNING.get(status) ?? 'starting' };
+  if (status !== 'running') {
+    const state = NOT_RUNNING.get(status) ?? 'starting';
+    const start = state === 'stopped' ? startPlan(workspace) : null;
+    return start ? { state, start } : { state };
+  }
   const found = findCodeServer(workspace);
   // A startup script that failed never becomes ready; the workspace page
   // shows why and has Restart.
@@ -365,13 +463,24 @@ async function templateGate(verdict, session, fetchImpl) {
 /**
  * One step of the wait: who is signed in, then their workspace for this lab,
  * with the template read before a create. `session` carries what the steps
- * learn: `{ owner, templateFound }`.
+ * learn: `{ owner, templateFound, startTried }`.
  */
 async function launcherStep(session, { fetchImpl, target, view, navigate }) {
   if (!session.owner) return readOwner(session, fetchImpl);
   const verdict = workspaceVerdict(await read(fetchImpl, workspaceApiPath(target.workspace)), target, session.owner);
   if (verdict.end) return verdict.end;
-  return (await templateGate(verdict, session, fetchImpl)) ?? show(verdict, { target, view, navigate });
+  const gate = await templateGate(verdict, session, fetchImpl);
+  if (gate) return gate;
+  // A stopped workspace is started once, without a click; if Coder takes
+  // the build the visit waits for it, otherwise Coder's page with Start.
+  if (verdict.start && !session.startTried) {
+    session.startTried = true;
+    if (await startWorkspace(fetchImpl, verdict.start)) {
+      view.report('starting');
+      return 'wait';
+    }
+  }
+  return show(verdict, { target, view, navigate });
 }
 
 /** What goes on after a step: `'wait'` sleeps and backs off, `'again'` goes straight on, `'error'` counts toward giving up. */
@@ -418,7 +527,7 @@ export async function runLauncher({ search, fetch: fetchImpl, ui, post, navigate
   if (!target) return view.end('unavailable', MESSAGES['unknown-lab']);
   view.report('checking');
 
-  const session = { owner: null, templateFound: false };
+  const session = { owner: null, templateFound: false, startTried: false };
   const step = () => launcherStep(session, { fetchImpl, target, view, navigate });
   const ending = await pollUntilDone(step, { sleep, now, poll });
   return ending === 'ready' ? ending : view.end(ending);

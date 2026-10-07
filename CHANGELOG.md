@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **The lab launcher starts a stopped workspace itself (owner, 2026-10-07;
+  #911).** "The lab was enabled but I still needed to start it." A workspace
+  whose last build stopped or was cancelled is now started with the call
+  Coder's own Start button makes, with the CSRF token read from Coder's own
+  page the way Coder's front end does, and the visit waits for the build as
+  for any other start; an outdated workspace is started on its template's
+  active version, so a template change reaches every lab on its next open.
+  A failed build is not started blind, since its page carries the reason
+  and Retry. When Coder refuses, or its page carries no token, the launcher
+  frames the workspace page where Start is, as before: a Coder change here
+  costs a click, never the lab. One attempt per visit.
+
 - **Integrations directory: a configuration-driven tab on the admin
   Integrations page (owner brief 2026-10-06, slice 3; #919).** One card per
   external service — its Powered-by badge, category, a one-line summary,

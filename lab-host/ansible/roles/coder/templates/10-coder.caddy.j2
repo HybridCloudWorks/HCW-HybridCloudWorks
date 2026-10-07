@@ -33,8 +33,10 @@ vars @coder_github_sign_in lab_top_level_allowed true
 # opens code-server in a new window or tab, a top-level visit that
 # lab_panes_only sends away, so the editor could never open in a pane from
 # there. The launcher reads the learner's workspace with their own session
-# (GET only, same origin), and replaces itself with code-server's own name
-# once it is healthy. It is on the dashboard name because that is where the
+# (same origin; GET, plus one write: the start of the learner's own stopped
+# workspace, with Coder's CSRF token, as Coder's Start button does —
+# lab-host/coder/launcher/launcher.js, "WHAT IT MAY DO"), and replaces
+# itself with code-server's own name once it is healthy. It is on the dashboard name because that is where the
 # session cookie and the API are. It gets no top-level exemption: opened in
 # a tab, it is redirected like any other Coder page.
 # Its policy is added beside lab_panes_only's frame-ancestors, not in place
