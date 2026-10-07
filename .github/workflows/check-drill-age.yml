@@ -1,0 +1,109 @@
+# Check drill age — has the Cosmos restore drill been run in the last 100
+# days? (estate review 2026-10-06, PLAT-1)
+#
+# The recovery objectives (RTO 8 hours, RPO 24 hours; ADR 0011, amendment of
+# 2026-10-06) are only as true as the last timed restore, and the runbook
+# says to run the drill once a quarter. Nothing noticed when a quarter
+# passed: the Drills table at the end of docs/runbooks/cosmos-restore.md
+# does not complain. This job does.
+#
+# Every Monday it runs scripts/check-drill-age.mjs over that table, which
+# exits 0 when the newest dated row is at most 100 days old (a quarter plus
+# ten days' grace), 1 when it is older or there is no dated row, and 2 when
+# the table cannot be read. On a non-zero exit it opens one issue, or
+# comments on the open one, telling the owner to run the drill, and the run
+# fails. A current drill is a green run and nothing else.
+#
+# THE FIRST RUN FAILS, ON PURPOSE. The table was empty when this landed
+# (2026-10-07): the drill was approved on 2026-10-06 and has not been run.
+# The fix is the drill and its row, not this workflow. Until then the run
+# stays red every Monday, and scripts/check-workflow-health.mjs will in time
+# list it as never succeeding; both are the same signal, the overdue drill.
+name: Check drill age
+
+on:
+  schedule:
+    # Mondays 07:20 UTC, off the hour and after warn-catalogue-due (07:00).
+    - cron: '20 7 * * 1'
+  workflow_dispatch:
+
+# No workflow-level permissions: the one job declares its own.
+permissions: {}
+
+concurrency:
+  group: check-drill-age
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Last Cosmos restore drill within 100 days
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read # checkout only
+      issues: write # open or comment on the one drill-overdue issue
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # No npm ci: the checker imports node: built-ins only.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
+      - name: Read the Drills table
+        id: drill
+        run: |
+          set -uo pipefail
+          node scripts/check-drill-age.mjs --summary "${RUNNER_TEMP}/drill.md"
+          code=$?
+          echo "exit=${code}" >> "$GITHUB_OUTPUT"
+          cat "${RUNNER_TEMP}/drill.md" >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      # One issue, kept current: created when none is open, commented on when
+      # one is. The title is the search key, so it does not change.
+      - name: Open or update the issue when the drill is due
+        if: steps.drill.outputs.exit != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          DRILL_EXIT: ${{ steps.drill.outputs.exit }}
+        run: |
+          set -euo pipefail
+          title="Cosmos restore drill overdue: no drill recorded in the last 100 days"
+          {
+            echo "Weekly check, run ${RUN_URL}, $(date -u +%Y-%m-%d)."
+            echo
+            cat "${RUNNER_TEMP}/drill.md"
+            echo
+            if [ "${DRILL_EXIT}" = "2" ]; then
+              echo "**The table could not be read**, so the age was not evaluated. Fix the Drills table in docs/runbooks/cosmos-restore.md to the row format defined above it; the message above quotes the line."
+            else
+              echo "**Owner step:** run the drill in docs/runbooks/cosmos-restore.md, section \"The drill\", from a desktop signed in to Azure as the owner. Before step 6 tears the target down, add one row to the Drills table at the end of that page, in the format defined there: the date, RTO measured (the elapsed time from step 5), RPO measured (hours from the newest applied run to the drill start), who, the applied runs, the document count, and notes. Merge that row; the next Monday run is then green and this issue can be closed."
+            fi
+          } > "${RUNNER_TEMP}/issue.md"
+          existing=$(gh issue list --repo "$REPO" --state open --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body-file "${RUNNER_TEMP}/issue.md"
+            echo "Commented on #${existing}."
+          else
+            gh issue create --repo "$REPO" --title "$title" --body-file "${RUNNER_TEMP}/issue.md"
+          fi
+
+      - name: Fail the run while the drill is overdue or unreadable
+        if: steps.drill.outputs.exit != '0'
+        env:
+          DRILL_EXIT: ${{ steps.drill.outputs.exit }}
+        run: |
+          if [ "${DRILL_EXIT}" = "2" ]; then
+            echo "::error::The Drills table in docs/runbooks/cosmos-restore.md could not be read; see the summary."
+          else
+            echo "::error::No Cosmos restore drill in the last 100 days; see the summary and the issue."
+          fi
+          exit 1

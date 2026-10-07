@@ -48,10 +48,15 @@
 
 .PARAMETER TargetSubscriptionIds
   Every subscription Terraform must be able to deploy into. The identity is
-  granted Contributor + Role Based Access Control Administrator on each one,
-  separately — there is no management group in this tenant to inherit from, so
-  a subscription absent from this list is a subscription Terraform cannot
-  touch. Defaults to IdentitySubscriptionId alone.
+  granted, on each one separately: Role Based Access Control Administrator
+  (conditioned, Set-TerraformRbacCondition.ps1), the custom role
+  "HCW Terraform Subscription Scope" (scripts/terraform-identity-grants.json:
+  create resource groups, budgets, provider registration), Contributor on
+  each resource group infra/ declares in that subscription, and, until the
+  second step of SEC-1 lands, Contributor on the subscription itself (section
+  5 says why it is two steps). There is no management group in this tenant to
+  inherit from, so a subscription absent from this list is a subscription
+  Terraform cannot touch. Defaults to IdentitySubscriptionId alone.
 
   Pass all four platform/application subscriptions in the normal case. Order
   does not matter and duplicates are ignored.
@@ -295,7 +300,8 @@ if (-not $IdentitySubscriptionId) {
 
 if ($TargetSubscriptionIds.Count -eq 0) {
   Write-Step 'Which subscriptions Terraform must deploy into'
-  Write-Info 'The identity is granted Contributor + RBAC Administrator on each.'
+  Write-Info 'The identity is granted RBAC Administrator, the subscription-scope role,'
+  Write-Info 'and Contributor on the resource groups infra/ declares, on each.'
   Write-Info 'A subscription missing here is one Terraform cannot touch, and the'
   Write-Info 'failure arrives partway through an apply rather than at plan.'
   # Preselect exactly what the configuration targets: the three subscriptions
@@ -596,65 +602,251 @@ foreach ($credentialName in ($subjects.Keys | Sort-Object)) {
 }
 
 # ===========================================================================
-# 5. Subscription roles for the Terraform identity
+# 5. Role assignments for the Terraform identity
 # ===========================================================================
-# Contributor creates the resources. It cannot create role assignments, and
-# infra/ creates several (Function App -> Key Vault, -> Cosmos, -> OpenAI, and
-# the GitHub deploy identity's own roles), so a role-assignment writer is
-# required too. Role Based Access Control Administrator is the narrower one:
-# it holds roleAssignments/write and nothing else of Microsoft.Authorization.
+# Three grants, each as narrow as what infra/ actually does with it:
 #
-# It is NOT narrow on its own. This comment used to say it "cannot grant
-# Owner or User Access Administrator"; it can — an unconditioned RBAC
-# Administrator writes any role assignment, Owner included. What stops the
-# Terraform identity escalating itself is the ABAC condition
-# scripts/Set-TerraformRbacCondition.ps1 puts on the assignment (estate
-# review 2026-10-06, SEC-1), which this step calls once the roles exist.
-Write-Step 'Subscription role assignments'
+#   - Role Based Access Control Administrator, per subscription. infra/
+#     creates role assignments (Function App -> Key Vault, -> Cosmos, ->
+#     Foundry, the GitHub identities' roles), and Contributor cannot. It is
+#     NOT narrow on its own: an unconditioned RBAC Administrator writes any
+#     role assignment, Owner included. The ABAC condition
+#     scripts/Set-TerraformRbacCondition.ps1 puts on it (estate review
+#     2026-10-06, SEC-1) is what stops the identity escalating itself, and
+#     since 2026-10-07 it also refuses Contributor, so a run cannot hand the
+#     subscription-wide grant below back to itself once it is gone.
+#   - "HCW Terraform Subscription Scope", per subscription: the only things
+#     infra/ does at subscription scope. Create and update its resource
+#     groups (main.tf, hub.tf, lab-hybrid.tf), keep the two subscription
+#     budgets (budget.tf), and register var.azure_resource_providers
+#     (providers.tf). Defined in scripts/terraform-identity-grants.json and
+#     created here, because its assignable scopes are subscription ids and
+#     those are not published in the repository. No resourceGroups/delete:
+#     at subscription scope that verb deletes ANY group and everything in
+#     it, which is the blast radius this step exists to remove. Removing a
+#     group from infra/ is therefore an owner step: the apply destroys its
+#     contents and fails on the group itself, the owner deletes the empty
+#     group, and the next plan drops it from state.
+#   - Contributor on each resource group infra/ declares, listed per
+#     subscription in the same JSON (terraform-identity-grants.test.mjs
+#     keeps the list equal to the groups infra/ declares). Everything inside
+#     a group comes from here.
+#
+# Plus, for now, Contributor on the subscription. SEC-1 lands in TWO steps
+# on purpose, and this is step one. The grants above are additive; a run
+# after this script proves nothing broke but cannot prove the narrow grants
+# are SUFFICIENT while the wide one is still there. Step two, a separate and
+# later change, removes 'Contributor' from $subscriptionRoles below and
+# deletes the live assignment, and is confirmed by the next plan and apply.
+# Doing both at once would mean the first run to find a missing action is
+# the run that has already lost the subscription-wide grant. None of this
+# can lock a run out mid-apply: these assignments are not in Terraform
+# state, and only this script, run by the owner, changes them.
+#
+# A NEW resource group in infra/ costs one extra pass once step two lands:
+# the apply that creates it cannot create anything inside it, because
+# Contributor on a group can only be granted once the group exists. Add the
+# name to terraform-identity-grants.json in the same pull request, apply
+# (the group is created, its contents fail with AuthorizationFailed), re-run
+# this script, and run the apply again. Or land the group alone first.
+Write-Step 'Role assignments'
 
-$requiredRoles = @('Contributor', 'Role Based Access Control Administrator')
+$grantsPath = Join-Path $PSScriptRoot 'terraform-identity-grants.json'
+$grants = Get-Content -LiteralPath $grantsPath -Raw | ConvertFrom-Json
+$scopeRoleName = $grants.subscriptionRole.Name
 
-# Assigned per subscription rather than once at a management group: this tenant
-# has no management group hierarchy yet. When the ALZ exists, these collapse
-# into a single assignment at the intermediate root and this loop goes away.
+# Step one of two (see above): 'Contributor' leaves this list in step two.
+$subscriptionRoles = @('Contributor', 'Role Based Access Control Administrator', $scopeRoleName)
+
+# Which slot of terraform-identity-grants.json a subscription fills, from its
+# name, the same convention the target picker above preselects by.
+function Get-SubscriptionSlot {
+  param([string] $Name)
+  switch -Wildcard ($Name) {
+    'sub-app-*' { return 'app' }
+    'sub-plat-mgmt-*' { return 'mgmt' }
+    'sub-plat-conn-*' { return 'conn' }
+    default { return $null }
+  }
+}
+
+# 5a. The subscription-scope custom role, assignable at every target. Written
+# with a PUT on the definition's own id, which creates and updates alike and
+# so needs no create-or-update branch; a definition that already matches is
+# left alone.
+$assignableScopes = @($TargetSubscriptionIds | ForEach-Object { "/subscriptions/$_" } | Sort-Object)
+$wantedActions = @($grants.subscriptionRole.Actions | Sort-Object)
+# Every read in this step fails closed. Invoke-Az -AllowFailure returns $null
+# both for "nothing there" and for a call that failed (throttled, denied,
+# timed out), and reading the second as the first would create a duplicate
+# definition or a duplicate assignment (review of #984; T-703 is the same
+# trap in the elevation read-back above).
+function Stop-OnUnreadable {
+  param([string] $What)
+  if (Test-LastAzFailed) {
+    Stop-WithGuidance "Could not read $What, so this step stops rather than guess." @(
+      'Nothing after this point was changed. Check the sign-in and your rights',
+      '(az account show), then re-run; the script skips what already exists.'
+    )
+  }
+}
+
+$roleList = Invoke-Az @(
+  'role', 'definition', 'list', '--name', $scopeRoleName, '--custom-role-only', 'true', '-o', 'json'
+) -AllowFailure
+Stop-OnUnreadable -What "the custom role definitions named '$scopeRoleName'"
+$existingRole = @(@($roleList) | Where-Object { $_ })
+if ($existingRole.Count -gt 1) {
+  Stop-WithGuidance "More than one custom role is named '$scopeRoleName'." @(
+    'Delete the extra definition, then re-run. List them with:',
+    "az role definition list --name `"$scopeRoleName`" --custom-role-only true -o table"
+  )
+}
+# The whole permission shape, not only actions and scopes: one permission
+# block, no notActions, no data actions. A definition that drifted by hand
+# (an extra block, a data action) is rewritten, never reported as matching
+# (review of #984).
+$roleMatches = $false
+if ($existingRole.Count -eq 1) {
+  $permissions = @($existingRole[0].permissions)
+  $heldActions = @($permissions | ForEach-Object { $_.actions } | Where-Object { $_ } | Sort-Object)
+  $heldOther = @($permissions | ForEach-Object { @($_.notActions) + @($_.dataActions) + @($_.notDataActions) } | Where-Object { $_ })
+  $heldScopes = @($existingRole[0].assignableScopes | Sort-Object)
+  $roleMatches = ($permissions.Count -eq 1) -and ($heldOther.Count -eq 0) -and
+                 (($heldActions -join ',') -eq ($wantedActions -join ',')) -and
+                 (($heldScopes -join ',').ToLowerInvariant() -eq ($assignableScopes -join ',').ToLowerInvariant())
+}
+if ($roleMatches) {
+  Write-Ok "$scopeRoleName — defined, assignable on $($assignableScopes.Count) subscription(s)"
+} elseif ($PSCmdlet.ShouldProcess($scopeRoleName, 'create or update the custom role definition')) {
+  $roleGuid = if ($existingRole.Count -eq 1) { $existingRole[0].name } else { [guid]::NewGuid().ToString() }
+  $body = @{
+    properties = @{
+      roleName         = $scopeRoleName
+      description      = $grants.subscriptionRole.Description
+      type             = 'CustomRole'
+      permissions      = @(@{
+          actions        = $wantedActions
+          notActions     = @()
+          dataActions    = @()
+          notDataActions = @()
+        })
+      assignableScopes = $assignableScopes
+    }
+  }
+  # A file, not an inline --body: a JSON string on a Windows command line
+  # loses its quotes on the way to az.
+  $bodyPath = Join-Path ([System.IO.Path]::GetTempPath()) "hcw-terraform-scope-role-$roleGuid.json"
+  try {
+    Set-Content -LiteralPath $bodyPath -Value ($body | ConvertTo-Json -Depth 6) -Encoding utf8NoBOM
+    Invoke-Az @(
+      'rest', '--method', 'put',
+      '--url', "https://management.azure.com$($assignableScopes[0])/providers/Microsoft.Authorization/roleDefinitions/$($roleGuid)?api-version=2022-04-01",
+      '--body', "@$bodyPath"
+    ) | Out-Null
+  } finally {
+    Remove-Item -LiteralPath $bodyPath -ErrorAction SilentlyContinue
+  }
+  Write-Act "$scopeRoleName — $(if ($existingRole.Count -eq 1) { 'updated' } else { 'created' })"
+} else {
+  Write-Act "Would create or update $scopeRoleName"
+}
+
+# A custom role written seconds ago can take a short while to resolve by
+# name at a scope, and the failure ("Role ... doesn't exist") reads like a
+# typo. Retried for that case only; any other role is assigned once.
+function New-IdentityRoleAssignment {
+  param([string] $Role, [string] $Scope, [string] $Subscription)
+  $tries = if ($Role -eq $scopeRoleName) { 6 } else { 1 }
+  for ($i = 1; $i -le $tries; $i++) {
+    $result = Invoke-Az @(
+      'role', 'assignment', 'create',
+      '--assignee-object-id', $identity.principalId,
+      '--assignee-principal-type', 'ServicePrincipal',
+      '--role', $Role,
+      '--scope', $Scope,
+      '--subscription', $Subscription,
+      '-o', 'json'
+    ) -AllowFailure
+    if (-not (Test-LastAzFailed)) { return $result }
+    if ($i -lt $tries) { Start-Sleep -Seconds 10 }
+  }
+  throw "Could not assign '$Role' at $Scope after $tries attempt(s). Re-run the script; it skips what already exists."
+}
+
+# 5b. Assignments. Per subscription rather than once at a management group:
+# this tenant has no management group hierarchy yet. When the ALZ exists, the
+# subscription-scope ones collapse into a single assignment at the
+# intermediate root.
 foreach ($id in $TargetSubscriptionIds) {
   $scope = "/subscriptions/$id"
   $label = $subscriptionNames[$id]
+  $slot = Get-SubscriptionSlot -Name $label
+  $groups = if ($slot) { @($grants.resourceGroups.$slot) } else { @() }
 
   if (-not ($identity -and $identity.principalId)) {
-    foreach ($role in $requiredRoles) { Write-Act "Would assign $role on $label" }
+    foreach ($role in $subscriptionRoles) { Write-Act "Would assign $role on $label" }
+    foreach ($group in $groups) { Write-Act "Would assign Contributor on $label/$group" }
     continue
   }
 
   $held = Invoke-Az @(
-    'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $scope, '-o', 'json'
+    'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $scope,
+    '--subscription', $id, '-o', 'json'
   ) -AllowFailure
-  $heldNames = @($held | ForEach-Object { $_.roleDefinitionName })
+  Stop-OnUnreadable -What "the identity's role assignments on $label"
+  $heldNames = @($held | Where-Object { $_.scope -eq $scope } | ForEach-Object { $_.roleDefinitionName })
 
-  foreach ($role in $requiredRoles) {
+  foreach ($role in $subscriptionRoles) {
     if ($heldNames -contains $role) {
       Write-Ok "$label — $role"
     } elseif ($PSCmdlet.ShouldProcess("$IdentityName on $label", "assign $role at subscription scope")) {
-      Invoke-Az @(
-        'role', 'assignment', 'create',
-        '--assignee-object-id', $identity.principalId,
-        '--assignee-principal-type', 'ServicePrincipal',
-        '--role', $role,
-        '--scope', $scope
-      ) | Out-Null
+      New-IdentityRoleAssignment -Role $role -Scope $scope -Subscription $id | Out-Null
       Write-Act "$label — $role assigned"
     } else {
       Write-Act "Would assign $role on $label"
+    }
+  }
+
+  if (-not $slot) {
+    Write-Warn "$label matches none of sub-app-*, sub-plat-mgmt-*, sub-plat-conn-*, so no resource-group grants are made there."
+    continue
+  }
+
+  foreach ($group in $groups) {
+    $groupScope = "$scope/resourceGroups/$group"
+    $exists = Invoke-Az @('group', 'exists', '-n', $group, '--subscription', $id) -AllowFailure
+    Stop-OnUnreadable -What "whether $label/$group exists"
+    if ($exists -ne $true) {
+      # Expected on a fresh estate before the first apply, and for a group
+      # added to infra/ but not yet applied. Not an error: re-run after the
+      # apply that creates it.
+      Write-Info "$label/$group — does not exist yet; Contributor is granted on a re-run after the apply that creates it"
+      continue
+    }
+    $groupHeld = Invoke-Az @(
+      'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $groupScope,
+      '--subscription', $id, '-o', 'json'
+    ) -AllowFailure
+    Stop-OnUnreadable -What "the identity's role assignments on $label/$group"
+    $groupHeldNames =@($groupHeld | Where-Object { $_.scope -eq $groupScope } | ForEach-Object { $_.roleDefinitionName })
+    if ($groupHeldNames -contains 'Contributor') {
+      Write-Ok "$label/$group — Contributor"
+    } elseif ($PSCmdlet.ShouldProcess("$IdentityName on $label/$group", 'assign Contributor at resource-group scope')) {
+      New-IdentityRoleAssignment -Role 'Contributor' -Scope $groupScope -Subscription $id | Out-Null
+      Write-Act "$label/$group — Contributor assigned"
+    } else {
+      Write-Act "Would assign Contributor on $label/$group"
     }
   }
 }
 
 # The condition on the RBAC Administrator assignments: constrained delegation,
 # so the identity can assign what infra/ needs and never Owner, User Access
-# Administrator, RBAC Administrator, or a Key Vault officer role to anything
-# but a named human (the seeding window). The script is idempotent and
-# honours -WhatIf. Without an identity (a -WhatIf discovery run before the
-# identity exists) there is nothing to condition yet.
+# Administrator, RBAC Administrator or Contributor, nor a Key Vault officer
+# role to anything but a named human (the seeding window). The script is
+# idempotent and honours -WhatIf. Without an identity (a -WhatIf discovery
+# run before the identity exists) there is nothing to condition yet.
 if ($identity -and $identity.principalId) {
   & (Join-Path $PSScriptRoot 'Set-TerraformRbacCondition.ps1') -PrincipalId $identity.principalId -WhatIf:$WhatIfPreference
 } else {
@@ -793,6 +985,30 @@ if (-not $WhatIfPreference) {
     }
     $flag = if ($observed -eq 'none') { ' **← Terraform cannot deploy here**' } else { '' }
     & $add "| $($subscriptionNames[$id]) | $observed$flag |"
+  }
+  & $add ''
+  & $add 'Contributor on the resource groups `infra/` declares, read back the same way:'
+  & $add ''
+  & $add '| Subscription | Resource group | Contributor |'
+  & $add '| --- | --- | --- |'
+  foreach ($id in $TargetSubscriptionIds) {
+    $slot = Get-SubscriptionSlot -Name $subscriptionNames[$id]
+    if (-not $slot) { continue }
+    foreach ($group in @($grants.resourceGroups.$slot)) {
+      $state = 'no'
+      if ($identity -and $identity.principalId) {
+        $groupScope = "/subscriptions/$id/resourceGroups/$group"
+        $found = Invoke-Az @(
+          'role', 'assignment', 'list',
+          '--assignee', $identity.principalId,
+          '--scope', $groupScope,
+          '--subscription', $id, '-o', 'json'
+        ) -AllowFailure
+        if (Test-LastAzFailed) { $state = 'unreadable (the group may not exist yet)' }
+        elseif (@($found | Where-Object { $_.scope -eq $groupScope -and $_.roleDefinitionName -eq 'Contributor' }).Count -gt 0) { $state = 'yes' }
+      }
+      & $add "| $($subscriptionNames[$id]) | ``$group`` | $state |"
+    }
   }
   & $add ''
   & $add '## Still to do by hand'

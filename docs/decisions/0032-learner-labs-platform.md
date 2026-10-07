@@ -84,7 +84,9 @@ are recorded once, here, before any of them is implemented.
    repository or on the host after onboarding. An Azure Monitor Agent data
    collection rule sends **heartbeat and `auth`/`authpriv` syslog only** into
    the existing Log Analytics workspace in `rg-mgmt-plat-prod-cus` (Management
-   subscription). Machine configuration policy is **audit only**. Defender for
+   subscription). Machine configuration policy is **audit only** (and, since
+   the amendment of 2026-10-07 under Consequences, has no agent to run it:
+   guest configuration is off on the host). Defender for
    Servers stays **off** for cost. Arc itself is free. The public lab page
    reads the host's Arc state through the Function App, never from the
    browser: the Function App's existing managed identity is granted
@@ -625,6 +627,39 @@ deleted key would lose the Vault for good.
   own review. (The amendment of 2026-09-29 made the first, in
   `infra/lab-hybrid.tf`: read, wrap and unwrap on one key in a lab-only Key
   Vault, never `kv-site-prod-cus-01`.)
+
+  *Amendment 2026-10-07 (estate review, LAB-6; owner decision that day):*
+  the Connected Machine agent is locked down on the host, by the `arc`
+  role (`lab-host/ansible/roles/arc/tasks/onboard.yml`). Since #900 and
+  #909, applied by `bootstrap.sh` on 2026-10-07 (`failed=0`), its extension
+  allowlist admits the Azure Monitor Linux agent alone
+  (`extensions.allowlist`) and incoming connections, SSH over Arc and
+  Windows Admin Center, are off (`incomingconnections.enabled false`). A
+  Contributor on `rg-lab-hybrid-prod-cus` can therefore no longer push an
+  extension or a Run Command, which ran as root. These settings live on the
+  host and cannot be changed from Azure. **Guest configuration is off as
+  well** (`guestconfiguration.enabled false`, set by the same role the same
+  way). The review recommended enabling it; the owner chose off. Locking the
+  agent down was the point of #900, and Microsoft's guidance for a
+  locked-down machine disables guest configuration so that a custom machine
+  configuration policy, which runs privileged on the host, cannot change
+  the agent's configuration
+  ([Extensions security for Azure Arc-enabled servers](https://learn.microsoft.com/azure/azure-arc/servers/security-extensions),
+  "Locked down machine best practices", read 2026-10-07). It also avoids
+  the machine-configuration charge for an Arc server: the Azure Arc pricing
+  page, read 2026-10-07, lists Azure Policy guest configuration at USD 6 per
+  server per month (USD 0.009 per server-hour), included only with
+  Defender for Servers Plan 2, which stays off. **What it costs:** the
+  audit-only machine configuration in decision 3 has no agent on the host
+  to run it. The `audit-linux-baseline-lab-hybrid` assignment
+  (`infra/lab-hybrid.tf`, behind `lab_hybrid_policy_enabled`) cannot produce
+  a compliance result for this machine while the setting is off, so the
+  labs page's compliance reading would have nothing current to show.
+  Whether to keep that switch, remove the assignment and the
+  `Microsoft.GuestConfiguration` provider registration, or revisit this
+  choice is an open owner question on #952. The evidence for all three
+  settings is `sudo /opt/azcmagent/bin/azcmagent config list` on the host,
+  which stays with the owner.
 - **Ingestion is bounded but not zero.** Heartbeat and auth syslog on one host
   are kilobytes a day against the workspace's 0.25 GB/day cap
   ([ADR 0031](0031-security-scanner-owner-decisions.md) records the headroom).

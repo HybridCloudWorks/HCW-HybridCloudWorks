@@ -348,6 +348,42 @@ was real rather than rehearsed.
 
 ## Drills
 
-| Date | Applied runs | Documents | Elapsed | RPO met | RTO met | Notes |
+One row per drill, real restores and regional ones included. Add the row
+before tearing down (step 5 says when), in this shape:
+
+```text
+| 2026-10-20 | 03:12:45 | 21 h | saulpatinojr | full/2026-10-19 + 1 delta | 70112 | first drill |
+```
+
+| Column | What goes in it |
+| --- | --- |
+| Date | The day the drill ran, UTC, as `YYYY-MM-DD`. Nothing else in this cell: the check below reads it |
+| RTO measured | `$elapsed` from step 5, `hh:mm:ss`. The objective is under `08:00:00` |
+| RPO measured | Hours between the newest applied run in step 2 and `$drillStart`. The objective is under 24 h |
+| Who | Who ran it |
+| Applied runs | The full and the deltas step 4 applied, as step 2 names them |
+| Documents | The count step 4 reports |
+| Notes | `regional` for a regional restore; anything that went wrong |
+
+A row whose Date is `—` is a placeholder, not a drill. Every Monday,
+[`check-drill-age.yml`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/check-drill-age.yml)
+runs `scripts/check-drill-age.mjs` over this table and fails, opening an
+issue or commenting on the open one, when the newest dated row is more than
+100 days old or there is none: a quarter plus ten days' grace. A Date cell it
+cannot read as a real, past calendar date fails the check too, so a typo
+cannot pass as a drill, and so does a dated row with any cell but Notes left
+empty or `—`: a date alone is not evidence of a drill. Keep the columns
+exactly as headed below; the check reads them by name. Run it locally the
+same way:
+
+```powershell
+node scripts/check-drill-age.mjs
+```
+
+Exit 0 and `Last drill: <date>, <n> day(s) ago` is a current drill; exit 1
+names how old the last one is, or says there is none; exit 2 means the table
+could not be read and quotes the line.
+
+| Date | RTO measured | RPO measured | Who | Applied runs | Documents | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
 | — | — | — | — | — | — | No drill yet. Approved 2026-10-06 (estate review, PLAT-1); the exporter has been armed since 2026-09-09, so the first one is due now |

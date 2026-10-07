@@ -19,6 +19,58 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Governance remainders of the 2026-10-06 estate review: the Terraform
+  run identity's Contributor scoped to its resource groups, code owners on
+  the auth and lab paths, a 100-day restore-drill check, and Arc guest
+  configuration off (findings SEC-1, SEC-3, PLAT-1, LAB-6; #971, #972,
+  #961, #952).** *SEC-1:* `scripts/bootstrap-terraform-oidc.ps1` now grants
+  `id-plat-terraform-prod-cus-01` Contributor on each of the nine resource
+  groups `infra/` declares and a custom role, `HCW Terraform Subscription
+  Scope`, for the only things `infra/` does at subscription scope (create
+  and update those groups, the two subscription budgets, provider
+  registration), with no resource-group delete, since at subscription scope
+  that verb deletes any group and its contents. Both lists live in the new
+  `scripts/terraform-identity-grants.json`; the custom role is written
+  there with its assignable scopes filled at run time, because the
+  Management and Connectivity subscription ids are not published. Step one
+  of two: subscription Contributor stays until a separate later change
+  removes it, after a plan and apply have run on the narrow grants, and the
+  file comments say why the two are apart. The RBAC Administrator condition
+  (`Set-TerraformRbacCondition.ps1`) now also refuses Contributor, so the
+  scoping cannot be undone by one role assignment, and its recovery path
+  keys on the custom role as well as subscription Contributor. New
+  `scripts/terraform-identity-grants.test.mjs` keeps the JSON's groups equal
+  to the `azurerm_resource_group` blocks, its register actions equal to
+  `var.azure_resource_providers`, and fails if `infra/` ever assigns a role
+  the condition refuses. ADR 0005 gains a dated amendment: the condition
+  stays an operator script (held in Terraform it would be maintained by the
+  identity it constrains), the two-step scoping, and the read-scoped team
+  token recorded as an owner decision (HCP Terraform Teams is not
+  entitled); `TFC_AZURE_PLAN_CLIENT_ID` is noted as the separate,
+  Teams-free route to plan-only Azure credentials, not built. *SEC-3:*
+  `.github/CODEOWNERS` adds `/infra-lab/`, the identity scripts,
+  `functions/src/lib/auth/`, `admin-identity.js` and its HTTP route,
+  `useAdminAuth.js`, `msalConfig.js`, `/lab-host/` and `/vps-agent/`; the
+  ruleset rule and 2FA stay the owner's, and the file says that requiring
+  code-owner review blocks every pull request until a second reviewer
+  exists. *PLAT-1:* new `scripts/check-drill-age.mjs` reads the Drills
+  table in `docs/runbooks/cosmos-restore.md` (row format now defined there:
+  date, RTO measured, RPO measured, who, applied runs, documents, notes),
+  exits 1 when the newest dated row is more than 100 days old or there is
+  none and 2 when a Date cell is not a real past date or a dated row
+  leaves any cell but Notes empty (a date alone is not a drill), and new
+  `.github/workflows/check-drill-age.yml` runs it every Monday and opens or
+  comments on one issue. The table is empty, so its first run fails on
+  purpose. *LAB-6:* the `arc` role sets `guestconfiguration.enabled false`
+  with the same read-compare-set as the allowlist and incoming connections
+  (owner decision 2026-10-07: Microsoft's locked-down-machine guidance, and
+  no machine-configuration charge); ADR 0032 records it, and that the
+  audit-only Linux baseline assignment then has no agent to evaluate it,
+  which is left to the owner on #952. **Owner steps:** re-run the bootstrap
+  script, then a plan-and-apply in `hcw-azure` showing only the permanent
+  diff; the three GitHub settings pages; `bootstrap.sh` on the lab host and
+  `azcmagent config list`; the drill.
+
 - **Admin Labs → Coder tab: Coder's own dashboard, framed (owner,
   2026-10-07).** Coder's pages open only inside the site (the lab host's
   panes-only rule), and since #925 the lab panes never show one, so the

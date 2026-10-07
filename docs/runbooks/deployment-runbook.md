@@ -163,10 +163,33 @@ the documented one-time root-scope elevation, grants you Owner on the target
 subscription, and removes the root-scope grant again.
 
 It creates: `rg-mgmt-boot-prod-cus`, the `id-plat-terraform-prod-cus-01` managed identity, two
-federated credentials, and two subscription role assignments (Contributor to
-create resources, Role Based Access Control Administrator to create the role
-assignments `infra/` declares — Contributor alone cannot, and RBAC
-Administrator cannot grant Owner, so the identity cannot escalate itself).
+federated credentials, and the identity's role assignments, each as narrow as
+what `infra/` does with it (estate review 2026-10-06, SEC-1; ADR 0005,
+amendment of 2026-10-07):
+
+| Grant | Scope | Why |
+| --- | --- | --- |
+| Role Based Access Control Administrator, with the ABAC condition below | each target subscription | `infra/` creates role assignments and Contributor cannot. The condition is what stops it granting Owner, Contributor or a Key Vault officer role |
+| `HCW Terraform Subscription Scope` (custom, `scripts/terraform-identity-grants.json`) | each target subscription | The only things `infra/` does above a resource group: create and update its groups, keep the two subscription budgets, register its resource providers. No resource-group delete |
+| Contributor | each resource group `infra/` declares, listed in the same JSON | Everything inside a group |
+| Contributor | each target subscription | **Step one of two.** Kept until a later change removes it; see below |
+
+The subscription-wide Contributor goes in a second, separate change, after a
+plan and an apply have run on the narrow grants above. The two steps are
+apart on purpose: while both exist a run proves nothing broke but cannot
+prove the narrow grants are enough, and removing the wide one in the same
+change would make the first run to find a missing action the run that has
+already lost it. None of it can lock a run out mid-apply, because these
+assignments are not in Terraform state; only the script changes them.
+
+Once the second step lands, a **new resource group** in `infra/` takes one
+extra pass: the apply that creates it cannot create anything inside it.
+Add the group to `scripts/terraform-identity-grants.json` in the same pull
+request (`terraform-identity-grants.test.mjs` fails until you do), apply,
+re-run this script, and apply again; or land the empty group first.
+**Removing** a group is an owner step for the same reason the custom role
+has no delete: the apply destroys its contents and stops at the group,
+which the owner deletes by hand before the next plan.
 
 **Two federated credentials, not one.** HCP Terraform stamps the run phase
 into the token subject, and Entra matches subjects as exact case-sensitive
@@ -241,9 +264,12 @@ Access Control Administrator assignments carry an ABAC condition: it can
 assign the roles `infra/` needs and cannot assign Owner, User Access
 Administrator, RBAC Administrator or a Key Vault officer role to anything
 but a named human (the `admin_object_ids` seeding window), and cannot remove
-an Owner or User Access Administrator assignment. The bootstrap script
-applies it at the end of its role step; on an estate bootstrapped before
-that date, apply it once from a desktop signed in as the owner:
+an Owner or User Access Administrator assignment. Since 2026-10-07 it also
+refuses Contributor, so the resource-group scoping above cannot be undone by
+one role assignment. The bootstrap script applies it at the end of its role
+step, and re-running the bootstrap is how an existing estate picks up both
+the new grants and the changed condition. The condition script alone, from a
+desktop signed in as the owner:
 
 ```powershell
 pwsh -NoProfile -File scripts/Set-TerraformRbacCondition.ps1 -WhatIf
