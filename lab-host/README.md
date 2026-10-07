@@ -1249,7 +1249,10 @@ Most of this is automated (#949). Every Tuesday
 that is behind its publisher (Docker Engine, containerd, buildx, compose,
 Caddy and its Cloudflare module, Coder, PostgreSQL, Portainer, Vault,
 node_exporter, Node.js) together with the checksum or digest it read from
-that publisher, and opens or updates one pull request on the branch
+that publisher. It also re-reads the pins that are current but can be
+rebuilt under the same name, an image tag re-pushed on a patched base or a
+package given a new Debian revision, and moves the digest or revision when
+it changed. It opens or updates one pull request on the branch
 `chore/lab-pins-host` whose body says where each value was read. A pin whose
 checksum it could not verify is not moved; it is listed in the weekly issue,
 and this section is how a person moves it. The same run proposes the lab

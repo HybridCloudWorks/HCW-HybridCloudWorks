@@ -194,13 +194,32 @@ export function aptStanzas(packagesText, name) {
     }));
 }
 
-/** The one stanza whose upstream version is `core`; throws on none, on two, or on one without a SHA256. */
+/**
+ * Order two Debian version strings of one package in one suite by their
+ * numeric runs (epoch, upstream, revision): `0.37.1-2~ubuntu…` is newer than
+ * `0.37.1-1~ubuntu…`. Not dpkg's full algorithm, which these indexes never
+ * need: within one suite of one publisher the strings differ only in numbers.
+ */
+export function compareDebian(a, b) {
+  const pa = String(a).match(/\d+/g)?.map(Number) ?? [];
+  const pb = String(b).match(/\d+/g)?.map(Number) ?? [];
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    if ((pa[i] ?? -1) !== (pb[i] ?? -1)) return (pa[i] ?? -1) < (pb[i] ?? -1) ? -1 : 1;
+  }
+  return 0;
+}
+
+/**
+ * The newest build of upstream version `core`: a publisher can rebuild a
+ * release under a new Debian revision (0.37.1-1 → 0.37.1-2), and that is a
+ * pin to move too. Throws on none, or on a pick without a SHA256.
+ */
 export function aptPick(packagesText, name, core) {
   const hits = aptStanzas(packagesText, name).filter((s) => coreVersion(s.version) === core);
   if (hits.length === 0) throw new Error(`${name} ${core} is not in the index`);
-  if (hits.length > 1) throw new Error(`${name} ${core} appears ${hits.length} times in the index (${hits.map((h) => h.version).join(', ')})`);
-  if (!hits[0].sha256) throw new Error(`${name} ${hits[0].version} carries no SHA256 in the index`);
-  return hits[0];
+  const pick = hits.reduce((best, s) => (compareDebian(s.version, best.version) > 0 ? s : best));
+  if (!pick.sha256) throw new Error(`${name} ${pick.version} carries no SHA256 in the index`);
+  return pick;
 }
 
 /** The SHA256 an InRelease file lists for one index path (`stable/binary-amd64/Packages`). */
@@ -253,27 +272,38 @@ const indentOf = (line) => line.match(/^ */)[0].length;
  * comments and layout around it survive. Each key must occur exactly once at
  * its level; the value keeps the quoting it had.
  */
+/** The one line in [start, end) that holds `key:` at the shallowest indentation there. */
+function findKey(lines, [start, end], key, where) {
+  const levels = lines.slice(start, end).filter((l) => !blank(l)).map(indentOf);
+  if (levels.length === 0) throw new Error(`${where}: nothing under the parent of \`${key}\``);
+  const level = Math.min(...levels);
+  const re = new RegExp(`^ {${level}}${escapeRe(key)}:(\\s|$)`);
+  const hits = [];
+  for (let i = start; i < end; i += 1) if (re.test(lines[i])) hits.push(i);
+  if (hits.length !== 1) throw new Error(`${where}: expected one \`${key}:\` at its level, found ${hits.length}`);
+  return { at: hits[0], level };
+}
+
+/** The lines nested under the key on line `at`, as a [start, end) range. */
+function childrenOf(lines, at, level) {
+  let end = at + 1;
+  for (let i = at + 1; i < lines.length; i += 1) {
+    if (blank(lines[i])) continue;
+    if (indentOf(lines[i]) <= level) break;
+    end = i + 1;
+  }
+  return [at + 1, end];
+}
+
 export function setYamlScalar(text, path, value) {
   const lines = String(text).split('\n');
+  const where = path.join('.');
   let range = [0, lines.length];
   let at = -1;
   for (const key of path) {
-    const [start, end] = range;
-    const levels = lines.slice(start, end).filter((l) => !blank(l)).map(indentOf);
-    if (levels.length === 0) throw new Error(`${path.join('.')}: nothing under the parent of \`${key}\``);
-    const level = Math.min(...levels);
-    const re = new RegExp(`^ {${level}}${escapeRe(key)}:(\\s|$)`);
-    const hits = [];
-    for (let i = start; i < end; i += 1) if (re.test(lines[i])) hits.push(i);
-    if (hits.length !== 1) throw new Error(`${path.join('.')}: expected one \`${key}:\` at its level, found ${hits.length}`);
-    at = hits[0];
-    let childEnd = at + 1;
-    for (let i = at + 1; i < lines.length; i += 1) {
-      if (blank(lines[i])) continue;
-      if (indentOf(lines[i]) <= level) break;
-      childEnd = i + 1;
-    }
-    range = [at + 1, childEnd];
+    const found = findKey(lines, range, key, where);
+    at = found.at;
+    range = childrenOf(lines, at, found.level);
   }
   const m = lines[at].match(/^( *[^:#]+:[ \t]*)("?)([^"#\n]*?)("?)([ \t]+#.*)?$/);
   if (!m || !m[3]) throw new Error(`${path.join('.')}: line ${at + 1} is not a scalar on one line`);
@@ -361,13 +391,23 @@ const DOCKER_CODENAMES = ['resolute', 'noble'];
 const NODESOURCE = 'https://deb.nodesource.com/node_26.x';
 
 /**
+ * Marks a bumper that is also run for a row the check calls current, with the
+ * pinned release: a publisher can rebuild a release without renaming it (a
+ * re-pushed image tag on a patched base, a new Debian revision), and the
+ * semantic version alone cannot see that. A checksum file for a released
+ * version (Vault, node_exporter, the Go module) must never change, so those
+ * are not refreshed.
+ */
+const refreshable = (bumper) => Object.assign(bumper, { refresh: true });
+
+/**
  * A Docker apt pin, moved in every codename's entry together: the comment in
  * group_vars says the upstream versions are the same for both releases, and a
  * bump that could not keep that is a note. `alsoAt` names packages pinned to
  * the same version string (docker-ce-cli rides docker_version).
  */
 function dockerAptBumper(field, packageName, alsoAt = []) {
-  return async ({ http, latest }) => {
+  return refreshable(async ({ http, latest }) => {
     const edits = [];
     const evidence = [];
     for (const codename of DOCKER_CODENAMES) {
@@ -386,19 +426,19 @@ function dockerAptBumper(field, packageName, alsoAt = []) {
       edits.push(yamlEdit(['docker_release_pins', codename, field], stanza.version));
     }
     return { edits, evidence };
-  };
+  });
 }
 
 /** A Docker Hub or GHCR image pin: the tag and its index digest, together. */
 function imageBumper({ image, tagKey, digestKey, tagFor, extra = () => [] }) {
-  return async ({ http, latest }) => {
+  return refreshable(async ({ http, latest }) => {
     const tag = tagFor(latest);
     const resolved = await resolveTag(http, image, tag);
     return {
       edits: [yamlEdit([tagKey], tag), yamlEdit([digestKey], resolved.digest), ...extra(latest)],
       evidence: [{ item: `${image}:${tag} (index digest)`, value: resolved.digest, source: resolved.reads.join('; ') }],
     };
-  };
+  });
 }
 
 /** How each BEHIND row of the check becomes edits and evidence. Keys match LABELS in lab-pins-upstream.mjs. */
@@ -453,7 +493,7 @@ export const HOST_BUMPERS = {
       evidence: [{ item: `${file} (SHA256)`, value: hex, source: url }],
     };
   },
-  node: async ({ http, latest }) => {
+  node: refreshable(async ({ http, latest }) => {
     const index = await aptIndex(http, NODESOURCE, 'dists/nodistro', 'main');
     const stanza = aptPick(index.text, 'nodejs', latest);
     return {
@@ -466,32 +506,44 @@ export const HOST_BUMPERS = {
         },
       ],
     };
-  },
+  }),
 };
+
+/** What a check row asks of its bumper: a new release, the same release rebuilt, or nothing. */
+function hostTarget(row, bumper) {
+  if (row.status === 'BEHIND') return { release: row.latest, to: row.latest };
+  if (row.status === 'current' && bumper?.refresh) return { release: row.pinned, to: `${row.pinned} (same release, newer build)` };
+  return null;
+}
 
 /**
  * Plan the host bumps for the rows lab-pins-upstream.mjs's check marked
- * BEHIND. Rows that are current or unreadable are not touched here: the check
- * already reports an unreadable source, and the weekly issue carries it.
+ * BEHIND, and re-read the rows it marked current whose publisher can rebuild
+ * a release under the same name (see `refreshable`); a re-read that matches
+ * the pin is no bump. Unreadable rows are not touched here: the check already
+ * reports them, and the weekly issue carries it.
  */
 export async function planHost({ text, rows, http, bumpers = HOST_BUMPERS }) {
   const bumps = [];
   const notes = [];
-  for (const row of rows.filter((r) => r.status === 'BEHIND')) {
+  for (const row of rows) {
     const bumper = bumpers[row.key];
-    if (!bumper) {
+    if (row.status === 'BEHIND' && !bumper) {
       notes.push({ label: row.label, from: row.pinned, to: row.latest, reason: 'no bump procedure is automated for this pin' });
       continue;
     }
+    const target = hostTarget(row, bumper);
+    if (!target) continue;
     try {
-      const { edits, evidence } = await bumper({ http, latest: row.latest, pinned: row.pinned });
-      bumps.push({ key: row.key, label: row.label, from: row.pinned, to: row.latest, edits, evidence });
+      const { edits, evidence } = await bumper({ http, latest: target.release, pinned: row.pinned });
+      bumps.push({ key: row.key, label: row.label, from: row.pinned, to: target.to, edits, evidence });
     } catch (error) {
-      notes.push({ label: row.label, from: row.pinned, to: row.latest, reason: error?.message || String(error) });
+      notes.push({ label: row.label, from: row.pinned, to: target.to, reason: error?.message || String(error) });
     }
   }
   const result = applyBumps({ [GROUP_VARS_PATH]: text }, bumps);
-  return { files: result.files, applied: result.applied, notes: [...notes, ...result.notes] };
+  const moved = result.applied.filter((bump) => bump.changes.some((c) => c.from !== c.to));
+  return { files: result.files, applied: moved, notes: [...notes, ...result.notes] };
 }
 
 // ── Lab image base (versions.env and its FROM lines) ───────────────────────
@@ -506,100 +558,96 @@ export async function planHost({ text, rows, http, bumpers = HOST_BUMPERS }) {
  * rebuild, so the line stays put. lab-image/README.md, "Updating a version",
  * is this procedure by hand.
  */
+/** The python base: the line tag's newest digest, its CPython, and the patch tag that must agree. */
+async function planPythonBase(env, http) {
+  const base = parseImageRef(env.BASE_IMAGE);
+  const tagParts = base?.tag?.match(/^(\d+)\.(\d+)\.(\d+)(-[a-z0-9.-]+)$/);
+  if (!base || !tagParts) throw new Error('BASE_IMAGE is not a python:<x.y.z>-<variant> tag');
+  const [, major, minor, , variant] = tagParts;
+  const lineTag = `${major}.${minor}${variant}`;
+  const line = await resolveTag(http, base.name, lineTag);
+  if (line.digest === env.BASE_DIGEST) return null;
+  const pythonVersion = (await imageEnv(http, base.name, line.manifest))
+    .find((e) => e.startsWith('PYTHON_VERSION='))
+    ?.slice('PYTHON_VERSION='.length);
+  if (!pythonVersion || !/^\d+\.\d+\.\d+$/.test(pythonVersion)) throw new Error(`${base.name}:${lineTag} sets no PYTHON_VERSION`);
+  if (compareVersions(pythonVersion, env.BASE_PYTHON_VERSION) < 0) {
+    throw new Error(`${base.name}:${lineTag} carries CPython ${pythonVersion}, older than the pinned ${env.BASE_PYTHON_VERSION}`);
+  }
+  const patchTag = `${pythonVersion}${variant}`;
+  const patch = await resolveTag(http, base.name, patchTag);
+  if (patch.digest !== line.digest) {
+    throw new Error(`${base.name}:${patchTag} is ${patch.digest} but ${base.name}:${lineTag} is ${line.digest}; the two have not settled`);
+  }
+  const oldRef = `${env.BASE_IMAGE}@${env.BASE_DIGEST}`;
+  const newImage = `${base.name}:${patchTag}`;
+  const newRef = `${newImage}@${line.digest}`;
+  const envEdit = (key, to) => ({ file: VERSIONS_ENV_PATH, where: key, to, apply: (t) => setEnvValue(t, key, to) });
+  return {
+    key: 'base',
+    label: `Lab image base (${base.name}:${lineTag})`,
+    from: `${env.BASE_IMAGE}@${env.BASE_DIGEST.slice(0, 19)}`,
+    to: `${newImage}@${line.digest.slice(0, 19)}`,
+    edits: [
+      envEdit('BASE_IMAGE', newImage),
+      envEdit('BASE_DIGEST', line.digest),
+      envEdit('BASE_PYTHON_VERSION', pythonVersion),
+      { file: DOCKERFILE_PATH, where: 'every external FROM', to: newRef, apply: (t) => replaceFrom(t, oldRef, newRef) },
+    ],
+    evidence: [
+      { item: `${base.name}:${lineTag} (index digest)`, value: line.digest, source: line.reads.join('; ') },
+      { item: `${newImage} (index digest, the same)`, value: patch.digest, source: patch.reads.join('; ') },
+      {
+        item: 'CPython in that image',
+        value: pythonVersion,
+        source:
+          'PYTHON_VERSION in the linux/amd64 image config, each manifest and the config blob hashed against the digest that named it; smoke.sh checks it against BASE_PYTHON_VERSION',
+      },
+    ],
+  };
+}
+
+/** The sandbox template's base: its tag's newest digest. */
+async function planSandboxBase(env, http) {
+  const sandbox = parseImageRef(env.SANDBOX_BASE_IMAGE);
+  if (!sandbox?.tag) throw new Error('SANDBOX_BASE_IMAGE names no tag');
+  const resolved = await resolveTag(http, sandbox.name, sandbox.tag);
+  if (resolved.digest === env.SANDBOX_BASE_DIGEST) return null;
+  const oldRef = `${env.SANDBOX_BASE_IMAGE}@${env.SANDBOX_BASE_DIGEST}`;
+  const newRef = `${env.SANDBOX_BASE_IMAGE}@${resolved.digest}`;
+  return {
+    key: 'sandbox',
+    label: `Sandbox template base (${env.SANDBOX_BASE_IMAGE})`,
+    from: env.SANDBOX_BASE_DIGEST.slice(0, 19),
+    to: resolved.digest.slice(0, 19),
+    edits: [
+      {
+        file: VERSIONS_ENV_PATH,
+        where: 'SANDBOX_BASE_DIGEST',
+        to: resolved.digest,
+        apply: (t) => setEnvValue(t, 'SANDBOX_BASE_DIGEST', resolved.digest),
+      },
+      { file: SANDBOX_DOCKERFILE_PATH, where: 'FROM', to: newRef, apply: (t) => replaceFrom(t, oldRef, newRef) },
+    ],
+    evidence: [{ item: `${env.SANDBOX_BASE_IMAGE} (index digest)`, value: resolved.digest, source: resolved.reads.join('; ') }],
+  };
+}
+
 export async function planImageBase({ files, http }) {
   const env = readEnv(files[VERSIONS_ENV_PATH]);
   const bumps = [];
   const notes = [];
-
-  const base = parseImageRef(env.BASE_IMAGE);
-  const tagParts = base?.tag?.match(/^(\d+)\.(\d+)\.(\d+)(-[a-z0-9.-]+)$/);
-  if (!base || !tagParts) {
-    notes.push({ label: 'Lab image base', from: env.BASE_IMAGE, to: '—', reason: 'BASE_IMAGE is not a python:<x.y.z>-<variant> tag' });
-  } else {
-    const [, major, minor, , variant] = tagParts;
-    const lineTag = `${major}.${minor}${variant}`;
+  for (const [label, from, plan] of [
+    [`Lab image base (${env.BASE_IMAGE})`, env.BASE_IMAGE, planPythonBase],
+    [`Sandbox template base (${env.SANDBOX_BASE_IMAGE})`, env.SANDBOX_BASE_DIGEST, planSandboxBase],
+  ]) {
     try {
-      const line = await resolveTag(http, base.name, lineTag);
-      if (line.digest !== env.BASE_DIGEST) {
-        const pythonVersion = (await imageEnv(http, base.name, line.manifest))
-          .find((e) => e.startsWith('PYTHON_VERSION='))
-          ?.slice('PYTHON_VERSION='.length);
-        if (!pythonVersion || !/^\d+\.\d+\.\d+$/.test(pythonVersion)) throw new Error(`${base.name}:${lineTag} sets no PYTHON_VERSION`);
-        if (compareVersions(pythonVersion, env.BASE_PYTHON_VERSION) < 0) {
-          throw new Error(`${base.name}:${lineTag} carries CPython ${pythonVersion}, older than the pinned ${env.BASE_PYTHON_VERSION}`);
-        }
-        const patchTag = `${pythonVersion}${variant}`;
-        const patch = await resolveTag(http, base.name, patchTag);
-        if (patch.digest !== line.digest) {
-          throw new Error(`${base.name}:${patchTag} is ${patch.digest} but ${base.name}:${lineTag} is ${line.digest}; the two have not settled`);
-        }
-        const oldRef = `${env.BASE_IMAGE}@${env.BASE_DIGEST}`;
-        const newImage = `${base.name}:${patchTag}`;
-        const newRef = `${newImage}@${line.digest}`;
-        const edits = [
-          { file: VERSIONS_ENV_PATH, where: 'BASE_IMAGE', to: newImage, apply: (t) => setEnvValue(t, 'BASE_IMAGE', newImage) },
-          { file: VERSIONS_ENV_PATH, where: 'BASE_DIGEST', to: line.digest, apply: (t) => setEnvValue(t, 'BASE_DIGEST', line.digest) },
-          {
-            file: VERSIONS_ENV_PATH,
-            where: 'BASE_PYTHON_VERSION',
-            to: pythonVersion,
-            apply: (t) => setEnvValue(t, 'BASE_PYTHON_VERSION', pythonVersion),
-          },
-          { file: DOCKERFILE_PATH, where: 'every external FROM', to: newRef, apply: (t) => replaceFrom(t, oldRef, newRef) },
-        ];
-        bumps.push({
-          key: 'base',
-          label: `Lab image base (${base.name}:${lineTag})`,
-          from: `${env.BASE_IMAGE}@${env.BASE_DIGEST.slice(0, 19)}`,
-          to: `${newImage}@${line.digest.slice(0, 19)}`,
-          edits,
-          evidence: [
-            { item: `${base.name}:${lineTag} (index digest)`, value: line.digest, source: line.reads.join('; ') },
-            { item: `${newImage} (index digest, the same)`, value: patch.digest, source: patch.reads.join('; ') },
-            {
-              item: 'CPython in that image',
-              value: pythonVersion,
-              source: `PYTHON_VERSION in the linux/amd64 image config, each manifest and the config blob hashed against the digest that named it; smoke.sh checks it against BASE_PYTHON_VERSION`,
-            },
-          ],
-        });
-      }
+      const bump = await plan(env, http);
+      if (bump) bumps.push(bump);
     } catch (error) {
-      notes.push({ label: `Lab image base (${base.name}:${lineTag})`, from: env.BASE_IMAGE, to: '—', reason: error?.message || String(error) });
+      notes.push({ label, from, to: '—', reason: error?.message || String(error) });
     }
   }
-
-  const sandbox = parseImageRef(env.SANDBOX_BASE_IMAGE);
-  if (!sandbox?.tag) {
-    notes.push({ label: 'Sandbox template base', from: env.SANDBOX_BASE_IMAGE, to: '—', reason: 'SANDBOX_BASE_IMAGE names no tag' });
-  } else {
-    try {
-      const resolved = await resolveTag(http, sandbox.name, sandbox.tag);
-      if (resolved.digest !== env.SANDBOX_BASE_DIGEST) {
-        const oldRef = `${env.SANDBOX_BASE_IMAGE}@${env.SANDBOX_BASE_DIGEST}`;
-        const newRef = `${env.SANDBOX_BASE_IMAGE}@${resolved.digest}`;
-        bumps.push({
-          key: 'sandbox',
-          label: `Sandbox template base (${env.SANDBOX_BASE_IMAGE})`,
-          from: env.SANDBOX_BASE_DIGEST.slice(0, 19),
-          to: resolved.digest.slice(0, 19),
-          edits: [
-            {
-              file: VERSIONS_ENV_PATH,
-              where: 'SANDBOX_BASE_DIGEST',
-              to: resolved.digest,
-              apply: (t) => setEnvValue(t, 'SANDBOX_BASE_DIGEST', resolved.digest),
-            },
-            { file: SANDBOX_DOCKERFILE_PATH, where: 'FROM', to: newRef, apply: (t) => replaceFrom(t, oldRef, newRef) },
-          ],
-          evidence: [{ item: `${env.SANDBOX_BASE_IMAGE} (index digest)`, value: resolved.digest, source: resolved.reads.join('; ') }],
-        });
-      }
-    } catch (error) {
-      notes.push({ label: `Sandbox template base (${env.SANDBOX_BASE_IMAGE})`, from: env.SANDBOX_BASE_DIGEST, to: '—', reason: error?.message || String(error) });
-    }
-  }
-
   const result = applyBumps(files, bumps);
   return { files: result.files, applied: result.applied, notes: [...notes, ...result.notes] };
 }

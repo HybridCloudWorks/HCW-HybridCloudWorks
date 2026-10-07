@@ -12,6 +12,7 @@ import {
   SANDBOX_DOCKERFILE_PATH,
   VERSIONS_ENV_PATH,
   aptPick,
+  compareDebian,
   goSumHash,
   inReleaseSha256,
   makeHttp,
@@ -104,6 +105,16 @@ describe('reading publisher indexes', () => {
     'Package: docker-ce\nVersion: 5:29.8.1-1~ubuntu.26.04~resolute\nSHA256: ' + hex('3'),
     'Package: containerd.io\nVersion: 2.3.7-1~ubuntu.26.04~resolute',
   ].join('\n\n');
+
+  it('picks the newest Debian revision of one upstream version', () => {
+    const rebuilt = [
+      `Package: docker-buildx-plugin\nVersion: 0.37.1-1~ubuntu.26.04~resolute\nSHA256: ${hex('1')}`,
+      `Package: docker-buildx-plugin\nVersion: 0.37.1-2~ubuntu.26.04~resolute\nSHA256: ${hex('2')}`,
+    ].join('\n\n');
+    expect(aptPick(rebuilt, 'docker-buildx-plugin', '0.37.1').version).toBe('0.37.1-2~ubuntu.26.04~resolute');
+    expect(compareDebian('5:29.8.2-1~ubuntu.26.04~resolute', '5:29.8.10-1~ubuntu.26.04~resolute')).toBe(-1);
+    expect(compareDebian('26.10.0-1nodesource1', '26.10.0-1nodesource1')).toBe(0);
+  });
 
   it('picks the one stanza for an upstream version, with its SHA256', () => {
     expect(aptPick(packages, 'docker-ce', '29.8.2')).toEqual({
@@ -215,6 +226,49 @@ describe('the host plan', () => {
     expect(evidence).toContain(hex('e'));
     expect(evidence).toContain('https://releases.hashicorp.com/vault/2.1.2/vault_2.1.2_SHA256SUMS');
     expect(renderNotes(plan.notes)).toContain('**Coder** 2.38.0 → 2.39.0: ghcr.io/coder/coder:v2.39.0: HTTP 404');
+  });
+
+  it('re-reads a current image pin and moves its digest when the publisher re-pushed the same tag', async () => {
+    const pinned = setYamlScalar(text, ['coder_postgres_image_digest'], 'x').from;
+    const rebuilt = JSON.stringify({ rebuilt: true });
+    const routes = (manifest) => ({
+      'https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/postgres:pull': { token: 't' },
+      'https://registry-1.docker.io/v2/library/postgres/manifests/18.6': manifest,
+      'https://hub.docker.com/v2/repositories/library/postgres/tags/18.6': { digest: sha(manifest) },
+    });
+    const plan = await planHost({ text, rows: [row('postgres', '18.6', '18.6', 'current')], http: makeHttp(fakeFetch(routes(rebuilt))) });
+    expect(plan.applied).toHaveLength(1);
+    expect(plan.applied[0].to).toBe('18.6 (same release, newer build)');
+    expect(plan.files[GROUP_VARS_PATH]).toContain(`coder_postgres_image_digest: ${sha(rebuilt)}\n`);
+    expect(plan.files[GROUP_VARS_PATH]).not.toContain(pinned);
+    expect(plan.files[GROUP_VARS_PATH]).toContain('coder_postgres_image_tag: "18.6"\n');
+  });
+
+  it('proposes nothing for a current pin whose re-read matches, and never re-reads a released checksum file', async () => {
+    let vaultCalls = 0;
+    const same = async () => ({
+      edits: [{ file: GROUP_VARS_PATH, where: 'coder_image_tag', to: 'v2.38.0', apply: (t) => setYamlScalar(t, ['coder_image_tag'], 'v2.38.0') }],
+      evidence: [],
+    });
+    const plan = await planHost({
+      text,
+      rows: [row('coder', '2.38.0', '2.38.0', 'current'), row('vault', '2.1.1', '2.1.1', 'current')],
+      http: null,
+      bumpers: {
+        coder: Object.assign(same, { refresh: true }),
+        vault: async () => {
+          vaultCalls += 1;
+          return { edits: [], evidence: [] };
+        },
+      },
+    });
+    expect(plan.applied).toEqual([]);
+    expect(plan.notes).toEqual([]);
+    expect(plan.files[GROUP_VARS_PATH]).toBe(text);
+    expect(vaultCalls).toBe(0);
+    expect(HOST_BUMPERS.vault.refresh).toBeUndefined();
+    expect(HOST_BUMPERS.postgres.refresh).toBe(true);
+    expect(HOST_BUMPERS.containerd.refresh).toBe(true);
   });
 
   it('moves both codenames of a Docker pin from the signed index chain, with the CLI riding the engine', async () => {

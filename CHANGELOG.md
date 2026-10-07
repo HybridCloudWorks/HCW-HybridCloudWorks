@@ -128,8 +128,11 @@ This project has not cut a tagged release; entries are grouped under
   index digest from the registry (bytes hashed, Docker-Content-Digest
   agreed) and the Docker Hub API, HashiCorp's SHA256SUMS, node_exporter's
   sha256sums.txt, and the Go checksum database for the Caddy module. A pin
-  with no verifiable checksum is not edited; it is listed in the weekly
-  issue. `--dry-run` prints the planned edits. `lab-supply-chain.yml` gains
+  the check calls current is re-read too when its publisher can rebuild a
+  release under the same name (an image tag re-pushed on a patched base,
+  such as `postgres:18.6` that day, or a new Debian revision), and its digest
+  or revision moves. A pin with no verifiable checksum is not edited; it is
+  listed in the weekly issue. `--dry-run` prints the planned edits. `lab-supply-chain.yml` gains
   a `propose` job (read-only) and a `pull-request` job that keeps one pull
   request per pin set open on a fixed branch (`chore/lab-pins-host`,
   `chore/lab-pins-image-base`), replacing its commit and body while it is

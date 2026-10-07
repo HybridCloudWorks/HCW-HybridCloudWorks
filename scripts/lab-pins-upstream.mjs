@@ -24,7 +24,9 @@
  *
  * With --bump it also makes the edits, for one pin set at a time (#949):
  *
- *   --bump host           group_vars/all.yml, for every row reported BEHIND
+ *   --bump host           group_vars/all.yml, for every row reported BEHIND,
+ *                         and for a current image tag or apt package the
+ *                         publisher rebuilt under the same name
  *   --bump image-base     lab-image/versions.env and its FROM lines, to the
  *                         newest digest of the base image's release line
  *   --bump image-digests  vps-agent/lib/capabilities.js and the Coder

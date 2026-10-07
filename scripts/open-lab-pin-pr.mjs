@@ -11,7 +11,7 @@
  *                                        lease on the sha read a moment ago) and
  *                                        rewrite the body, unless the tree is
  *                                        already the same, when only the body moves
- *   open, someone else committed to it   push nothing; comment the new reading
+ *   open, someone else wrote or amended  push nothing; comment the new reading
  *                                        instead, so a person's fix is never lost
  *
  * It stages the set's paths by name and refuses to run when anything outside
@@ -29,7 +29,7 @@
  *   env: GH_TOKEN (the App token), GITHUB_REPOSITORY, GITHUB_SERVER_URL, GITHUB_RUN_ID
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, appendFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export const BOT = { name: 'hcw-manifest[bot]', email: 'hcw-manifest[bot]@users.noreply.github.com' };
@@ -152,100 +152,97 @@ export function changedPaths(porcelain) {
     .map((line) => line.slice(3).replace(/^"|"$/g, ''));
 }
 
-async function main(argv) {
-  const flag = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : null);
-  const listSet = flag('--paths');
-  if (listSet) {
-    if (!SETS[listSet]) return 2;
-    process.stdout.write(`${SETS[listSet].paths.join('\n')}\n`);
-    return 0;
-  }
+/**
+ * Everyone other than the bot who wrote OR committed a commit on the branch.
+ * The committer counts as well as the author: `git commit --amend` of the
+ * bot's commit keeps the bot as author and records the person as committer,
+ * and that amendment is a person's work this job must not overwrite.
+ */
+export function foreignIdentities(commits) {
+  const emails = (commits ?? []).flatMap((c) => [c.commit?.author?.email, c.commit?.committer?.email]);
+  return [...new Set(emails.filter((email) => email && email !== BOT.email))];
+}
 
-  const set = flag('--set');
-  const s = SETS[set];
-  if (!s) {
-    console.error(`--set takes one of ${Object.keys(SETS).join(', ')}`);
-    return 2;
-  }
-  const token = process.env.GH_TOKEN;
-  const repo = process.env.GITHUB_REPOSITORY;
-  const runUrl = `${process.env.GITHUB_SERVER_URL}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
-  if (!token || !repo) {
-    console.error('GH_TOKEN (the App installation token) and GITHUB_REPOSITORY must be set.');
-    return 2;
-  }
-  const read = (path) => (path && existsSync(path) ? readFileSync(path, 'utf8') : '');
-  const evidence = read(flag('--evidence'));
-  const notes = read(flag('--notes'));
+/** The remote branch, if it exists: its head, its tree, and anyone else's hand in it. */
+async function readRemote(call, branchName) {
+  const branch = await call('GET', `/branches/${encodeURIComponent(branchName)}`);
+  if (!branch) return null;
+  const compare = await call('GET', `/compare/main...${encodeURIComponent(branchName)}`);
+  return { sha: branch.commit.sha, tree: branch.commit.commit.tree.sha, foreignAuthors: foreignIdentities(compare?.commits) };
+}
 
+/** The set's edits, staged by name and committed on its branch; refuses anything else in the checkout. */
+function commitSet(set, s, runUrl) {
   const changed = changedPaths(git('status', '--porcelain', '--untracked-files=all'));
   const outside = changed.filter((p) => !s.paths.includes(p));
-  if (outside.length) {
-    console.error(`Refusing: paths outside the ${set} set changed: ${outside.join(', ')}`);
-    return 2;
-  }
-  if (changed.length === 0) {
-    console.log(`No ${set} pin moved; nothing to propose.`);
-    return 0;
-  }
-
+  if (outside.length) throw new Error(`Refusing: paths outside the ${set} set changed: ${outside.join(', ')}`);
+  if (changed.length === 0) return null;
   git('config', 'user.name', BOT.name);
   git('config', 'user.email', BOT.email);
   git('checkout', '-B', s.branch);
   git('add', '--', ...s.paths);
   git('commit', '-m', s.title, '-m', `Read from each publisher by node scripts/lab-pins-upstream.mjs --bump ${set} (${runUrl}). Refs #949.`);
-  const localTree = git('rev-parse', 'HEAD^{tree}');
+  return git('rev-parse', 'HEAD^{tree}');
+}
 
-  const call = api(token, repo);
-  const owner = repo.split('/')[0];
-  const pulls = await call('GET', `/pulls?state=open&head=${encodeURIComponent(`${owner}:${s.branch}`)}`);
-  const pull = pulls?.[0] ?? null;
-  const branch = await call('GET', `/branches/${encodeURIComponent(s.branch)}`);
-  let remote = null;
-  if (branch) {
-    const compare = await call('GET', `/compare/main...${encodeURIComponent(s.branch)}`);
-    const foreignAuthors = (compare?.commits ?? [])
-      .map((c) => c.commit?.author?.email)
-      .filter((email) => email && email !== BOT.email);
-    remote = { sha: branch.commit.sha, tree: branch.commit.commit.tree.sha, foreignAuthors };
-  }
-
-  const action = decide({ pull, remote, localTree });
-  const body = prBody({ set, evidence, notes, runUrl });
-  let url = pull?.html_url ?? null;
-
+/** Carry out decide()'s answer: comment, or push (with a lease) and open or refresh the pull request. */
+async function act({ action, call, s, pull, remote, body, token, repo }) {
   if (action === 'comment') {
     await call('POST', `/issues/${pull.number}/comments`, {
-      body: `A newer reading, not pushed: \`${s.branch}\` holds commits from ${[...new Set(remote.foreignAuthors)].join(', ')}, and this job never overwrites them. Apply it by hand, or close this pull request so next week's run opens a fresh one.\n\n${body}`,
+      body: `A newer reading, not pushed: \`${s.branch}\` holds commits from ${remote.foreignAuthors.join(', ')}, and this job never overwrites them. Apply it by hand, or close this pull request so next week's run opens a fresh one.\n\n${body}`,
     });
-    console.log(`Commented the new reading on ${url}; the branch has someone else's commits.`);
-  } else {
-    if (action.startsWith('push')) {
-      git('remote', 'set-url', 'origin', `https://x-access-token:${token}@github.com/${repo}.git`);
-      git('push', `--force-with-lease=refs/heads/${s.branch}:${remote?.sha ?? ''}`, 'origin', `HEAD:refs/heads/${s.branch}`);
-    }
-    if (action.endsWith('refresh')) {
-      await call('PATCH', `/pulls/${pull.number}`, { title: s.title, body });
-      console.log(`Updated ${url} (${action}).`);
-    } else {
-      const created = await call('POST', '/pulls', { title: s.title, head: s.branch, base: 'main', body, draft: false });
-      url = created.html_url;
-      console.log(`Opened ${url}.`);
-    }
+    return `commented the new reading on #${pull.number}; the branch has someone else's commits`;
   }
-  if (process.env.GITHUB_STEP_SUMMARY && url) {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n**${set}:** ${action} — ${url}\n`);
+  if (action.startsWith('push')) {
+    git('remote', 'set-url', 'origin', `https://x-access-token:${token}@github.com/${repo}.git`);
+    git('push', `--force-with-lease=refs/heads/${s.branch}:${remote?.sha ?? ''}`, 'origin', `HEAD:refs/heads/${s.branch}`);
   }
-  return 0;
+  if (action.endsWith('refresh')) {
+    await call('PATCH', `/pulls/${pull.number}`, { title: s.title, body });
+    return `updated #${pull.number} (${action})`;
+  }
+  const created = await call('POST', '/pulls', { title: s.title, head: s.branch, base: 'main', body, draft: false });
+  return `opened #${created.number}`;
+}
+
+async function propose(flag) {
+  const set = flag('--set');
+  const s = SETS[set];
+  if (!s) throw new Error(`--set takes one of ${Object.keys(SETS).join(', ')}`);
+  const token = process.env.GH_TOKEN;
+  const repo = process.env.GITHUB_REPOSITORY;
+  if (!token || !repo) throw new Error('GH_TOKEN (the App installation token) and GITHUB_REPOSITORY must be set.');
+  const runUrl = `${process.env.GITHUB_SERVER_URL}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+  const read = (path) => (path && existsSync(path) ? readFileSync(path, 'utf8') : '');
+
+  const localTree = commitSet(set, s, runUrl);
+  if (!localTree) {
+    console.log(`No ${set} pin moved; nothing to propose.`);
+    return;
+  }
+  const call = api(token, repo);
+  const pulls = await call('GET', `/pulls?state=open&head=${encodeURIComponent(`${repo.split('/')[0]}:${s.branch}`)}`);
+  const pull = pulls?.[0] ?? null;
+  const remote = await readRemote(call, s.branch);
+  const action = decide({ pull, remote, localTree });
+  const body = prBody({ set, evidence: read(flag('--evidence')), notes: read(flag('--notes')), runUrl });
+  console.log(`${set}: ${await act({ action, call, s, pull, remote, body, token, repo })}.`);
+}
+
+async function main(argv) {
+  const flag = (name) => (argv.includes(name) ? argv[argv.indexOf(name) + 1] : null);
+  const listSet = flag('--paths');
+  if (listSet) {
+    if (!SETS[listSet]) throw new Error(`--paths takes one of ${Object.keys(SETS).join(', ')}`);
+    process.stdout.write(`${SETS[listSet].paths.join('\n')}\n`);
+    return;
+  }
+  await propose(flag);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main(process.argv.slice(2))
-    .then((code) => {
-      process.exitCode = code;
-    })
-    .catch((error) => {
-      console.error(error?.message || error);
-      process.exitCode = 2;
-    });
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(error?.message || error);
+    process.exitCode = 2;
+  });
 }

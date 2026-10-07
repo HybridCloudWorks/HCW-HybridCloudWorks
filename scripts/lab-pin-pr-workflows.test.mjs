@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BOT, SETS, changedPaths, decide, prBody } from './open-lab-pin-pr.mjs';
+import { BOT, SETS, changedPaths, decide, foreignIdentities, prBody } from './open-lab-pin-pr.mjs';
 import {
   CAPABILITIES_PATH,
   CODER_TEMPLATE_PATH,
@@ -49,6 +49,19 @@ describe('the pin sets', () => {
     expect(decide({ pull, remote: { tree: 'b', foreignAuthors: ['owner@example.com'] }, localTree: 'a' })).toBe('comment');
     // An abandoned branch with no open pull request is the bot's to reuse.
     expect(decide({ pull: null, remote: { tree: 'b', foreignAuthors: ['owner@example.com'] }, localTree: 'a' })).toBe('push-and-open');
+  });
+
+  it('counts a person as the committer of an amended bot commit, not only as an author', () => {
+    const bot = { email: BOT.email };
+    expect(foreignIdentities([{ commit: { author: bot, committer: bot } }])).toEqual([]);
+    expect(foreignIdentities([{ commit: { author: bot, committer: { email: 'owner@example.com' } } }])).toEqual(['owner@example.com']);
+    expect(
+      foreignIdentities([
+        { commit: { author: { email: 'owner@example.com' }, committer: { email: 'owner@example.com' } } },
+        { commit: { author: bot, committer: { email: 'owner@example.com' } } },
+      ])
+    ).toEqual(['owner@example.com']);
+    expect(foreignIdentities(undefined)).toEqual([]);
   });
 
   it('reads changed paths from git status --porcelain', () => {
