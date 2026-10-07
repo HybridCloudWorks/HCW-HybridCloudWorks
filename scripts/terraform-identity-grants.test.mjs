@@ -360,6 +360,29 @@ const IN_A_DECLARED_GROUP = new Set([
   'azurerm_virtual_network_peering',
 ]);
 
+/**
+ * The attributes that decide where an Azure call lands: the group a resource
+ * is created in, the scope a role assignment or alert targets, the parent or
+ * target of an azapi or diagnostic resource. Every one of them must resolve
+ * to a declared group or something inside one.
+ */
+const SCOPE_ATTRIBUTES = [
+  'scope',
+  'scopes',
+  'parent_id',
+  'resource_id',
+  'target_resource_id',
+  'resource_group_name',
+  'resource_group_id',
+];
+
+/**
+ * Locals and variables a scope-bearing attribute may name, each with the
+ * reason it resolves below a declared group. Empty on purpose: none is used
+ * on 2026-10-07, and an entry here is a reviewed decision, not a default.
+ */
+const SCOPE_EXPRESSION_ALLOWLIST = {};
+
 describe('what infra/ does once subscription Contributor is gone (SEC-1 step two)', () => {
   const blocks = allBlocks(source).filter((b) => /^(data\.)?(azurerm|azapi)_/.test(b.key));
   const declared = Object.values(declaredResourceGroups()).flat();
@@ -404,19 +427,66 @@ describe('what infra/ does once subscription Contributor is gone (SEC-1 step two
     expect(deletes).toEqual(['Microsoft.Consumption/budgets/delete']);
   });
 
-  it('places every group-scoped block in a group infra/ declares', () => {
-    const outside = blocks
+  /** Why one expression does not resolve below a declared group, or null. */
+  function expressionProblem(expr) {
+    if (expr in SCOPE_EXPRESSION_ALLOWLIST) return null;
+    if (/^data\.azurerm_subscriptions?\b/.test(expr)) return `${expr} is the subscription itself`;
+    const ref = expr.match(/^(azurerm_\w+|azapi_\w+)\.\w+(?:\[[^\]]+\])?\.(id|name)$/);
+    if (!ref) return `${expr} is not a declared resource's id (resolve it, or allowlist it with a reason)`;
+    const [, type, attribute] = ref;
+    if (type === 'azurerm_resource_group') return null;
+    if (attribute !== 'id') return `${expr} names a ${type}'s ${attribute}, not an id`;
+    if (!IN_A_DECLARED_GROUP.has(type)) return `${type} is not classified as living in a declared group`;
+    return null;
+  }
+
+  /** Why one attribute value does not resolve below a declared group, or []. */
+  function scopeProblems(value) {
+    if (/data\.azurerm_subscriptions?\b/.test(value)) return [`${value} names data.azurerm_subscription`];
+    const literal = value.match(/^"(.*)"$/);
+    if (!literal) {
+      // A bare reference, or a list of them (`scopes`).
+      return value
+        .replace(/^\[|\]$/g, '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map(expressionProblem)
+        .filter(Boolean);
+    }
+    const text = literal[1];
+    if (text.startsWith('/')) {
+      const group = text.match(/^\/subscriptions\/[^/]+\/resourceGroups\/([^/]+)/i)?.[1];
+      const name = group?.replace(/\$\{([^}]+)\}/g, (whole, expr) => values[expr] ?? whole);
+      return name && declared.includes(name) ? [] : [`literal ${text} is not inside a declared resource group`];
+    }
+    // "${azurerm_x.y.id}/child": the leading reference decides where it lands.
+    const lead = text.match(/^\$\{([^}]+)\}/)?.[1];
+    if (!lead) return [`literal "${text}" names no declared resource`];
+    const problem = expressionProblem(lead.trim());
+    return problem ? [problem] : [];
+  }
+
+  it('resolves every scope-bearing attribute below a declared group', () => {
+    const attribute = new RegExp(`^\\s*(${SCOPE_ATTRIBUTES.join('|')})\\s*=\\s*(.+)$`, 'gm');
+    const found = blocks
       .filter((b) => !(b.key in SUBSCRIPTION_SCOPE))
       .flatMap(({ key, label, body }) =>
-        [...withoutComments(body).matchAll(/^\s*resource_group_(?:name|id)\s*=\s*(.+)$/gm)]
-          .map((m) => m[1].trim())
-          .filter((value) => !/^azurerm_resource_group\.\w+(\[[^\]]+\])?\.(name|id)$/.test(value))
-          .map((value) => `${key}.${label}: resource group ${value}`)
+        [...withoutComments(body).matchAll(attribute)].map((m) => ({
+          where: `${key}.${label}.${m[1]}`,
+          value: m[2].trim(),
+        }))
       );
+    // Guards the guard: about 115 such attributes on 2026-10-07, 25 of them
+    // role-assignment scopes.
+    expect(found.length).toBeGreaterThan(100);
+    expect(found.filter((f) => /^azurerm_role_assignment\.\w+\.scope$/.test(f.where)).length).toBeGreaterThanOrEqual(25);
+    const problems = found.flatMap(({ where, value }) => scopeProblems(value).map((p) => `${where}: ${p}`));
     expect(
-      outside,
-      'A block names its resource group by something other than an azurerm_resource_group in infra/. ' +
-        'The run identity holds Contributor only on the declared groups.'
+      problems,
+      'A block is scoped to something that is not a declared resource group or a resource inside one. ' +
+        'With subscription Contributor gone the run identity holds Contributor only on the declared groups, ' +
+        'and a role assignment at subscription scope would be a widening the condition does not refuse.'
     ).toEqual([]);
   });
 
@@ -459,6 +529,15 @@ describe('what infra/ does once subscription Contributor is gone (SEC-1 step two
     expect(bootstrapScript).toMatch(
       /ShouldProcess\([^\n]*'remove Contributor at subscription scope'\)\) \{\s*Invoke-Az @\('role', 'assignment', 'delete'/
     );
+    // The read-back after the deletes looks for Contributor AT SUBSCRIPTION
+    // SCOPE on every target, not for the deleted ids: a Contributor granted
+    // again under a new id (a concurrent plain run) must still stop it
+    // (review of #996).
+    const readBack = bootstrapScript.indexOf(
+      "$rows = @(@($after) | Where-Object { $_ -and $_.scope -eq $scope -and $_.roleDefinitionName -eq 'Contributor' })"
+    );
+    expect(readBack).toBeGreaterThan(remove);
+    expect(bootstrapScript).not.toContain('$_.id -eq $item.Id');
     expect(bootstrapScript).toContain('Contributor at subscription scope removed');
     expect(bootstrapScript).toContain('Would remove Contributor at subscription scope on');
   });

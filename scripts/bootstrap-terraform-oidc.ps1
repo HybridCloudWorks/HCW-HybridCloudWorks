@@ -1152,44 +1152,56 @@ if ($RemoveSubscriptionContributor) {
     Write-Ok 'No target holds Contributor at subscription scope; step two is already done'
   }
 
-  $removed = [System.Collections.Generic.List[object]]::new()
   foreach ($item in $toRemove) {
     if ($PSCmdlet.ShouldProcess("$IdentityName on $($item.Label)", 'remove Contributor at subscription scope')) {
       Invoke-Az @('role', 'assignment', 'delete', '--ids', $item.Id) | Out-Null
       Write-Act "$($item.Label) — Contributor at subscription scope removed"
-      $removed.Add($item)
     } else {
       Write-Act "Would remove Contributor at subscription scope on $($item.Label)"
     }
   }
 
-  # Read back, for the same reason the elevation above is read back: a
-  # delete that "succeeded" over an assignment still listed is the false
-  # green this step cannot afford, and an unreadable list is not a clean one.
-  $stillHeld = @()
-  foreach ($item in $removed) {
-    $after = Invoke-Az @(
-      'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', "/subscriptions/$($item.Subscription)",
-      '--subscription', $item.Subscription, '-o', 'json'
-    ) -AllowFailure
-    if (Test-LastAzFailed) {
-      $stillHeld += "$($item.Label) — could not read the assignments back"
-    } elseif (@(@($after) | Where-Object { $_ -and $_.id -eq $item.Id }).Count -gt 0) {
-      $stillHeld += "$($item.Label) — the Contributor assignment is still listed"
-    } else {
-      Write-Ok "$($item.Label) — no Contributor at subscription scope (read back)"
+  # Read back, for the same reason the elevation above is read back, and by
+  # ROLE AT SCOPE rather than by the ids just deleted: a Contributor
+  # recreated under a new id between the listing and this read (a concurrent
+  # plain run, which is the rollback) would pass an id check while the wide
+  # grant is live (review of #996). Every target is re-read with
+  # --subscription stated (#992), and an unreadable list is not a clean one.
+  # Skipped under -WhatIf, where nothing was removed.
+  if (-not $WhatIfPreference) {
+    $stillHeld = [System.Collections.Generic.List[string]]::new()
+    foreach ($id in $TargetSubscriptionIds) {
+      $scope = "/subscriptions/$id"
+      $label = $subscriptionNames[$id]
+      $after = Invoke-Az @(
+        'role', 'assignment', 'list', '--assignee', $identity.principalId, '--scope', $scope,
+        '--subscription', $id, '-o', 'json'
+      ) -AllowFailure
+      if (Test-LastAzFailed) {
+        $stillHeld.Add("$label — could not read the identity's assignments back")
+        continue
+      }
+      $rows = @(@($after) | Where-Object { $_ -and $_.scope -eq $scope -and $_.roleDefinitionName -eq 'Contributor' })
+      if ($rows.Count -eq 0) {
+        Write-Ok "$label — no Contributor at subscription scope (read back)"
+      } else {
+        foreach ($row in $rows) {
+          $stillHeld.Add("$label — Contributor at $($row.scope) (assignment $($row.id))")
+        }
+      }
     }
-  }
-  if ($stillHeld.Count -gt 0) {
-    Stop-WithGuidance 'Not every removal could be confirmed.' (
-      @($stillHeld | ForEach-Object { "  $_" }) +
-      @(
-        '',
-        'Re-run with -RemoveSubscriptionContributor; it removes only what is still there.',
-        'The read-back one-liner in docs/runbooks/deployment-runbook.md, section 0,',
-        'shows the current state of all three subscriptions.'
+    if ($stillHeld.Count -gt 0) {
+      Stop-WithGuidance 'Contributor at subscription scope is still held after the removal.' (
+        @($stillHeld | ForEach-Object { "  $_" }) +
+        @(
+          '',
+          'A row with a new assignment id means something granted it again while this ran',
+          '(a plain run of this script is the rollback and does exactly that). Re-run with',
+          '-RemoveSubscriptionContributor; it removes only what is still there. The read-back',
+          'one-liner in docs/runbooks/deployment-runbook.md, section 0, shows all three.'
+        )
       )
-    )
+    }
   }
 }
 
