@@ -13,7 +13,7 @@
  * tests live.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,10 +26,8 @@ import {
   connectionOf,
   directoryEntries,
 } from '@/config/integrationsDirectory';
-import { buildIntegrationView, SERVICE_STATUS, serviceStatus } from './integrationView';
-import { SERVICES } from './serviceRegistry';
-import { effectiveResult } from './IntegrationsOverview';
-import useSecretStatus from './useSecretStatus';
+import { SERVICE_STATUS, serviceStatus } from './integrationView';
+import useServiceCards from './useServiceCards';
 import { TabError, TabLoading } from './TabNotice';
 
 export const CONNECTION_FILTERS = Object.freeze([
@@ -135,28 +133,17 @@ function Chips({ label, options, value, onChange }) {
 }
 
 export default function IntegrationsDirectory({ tests }) {
-  const { data, loading, error, reload } = useSecretStatus();
-  const { ensurePersisted } = tests;
-  useEffect(() => {
-    ensurePersisted?.();
-  }, [ensurePersisted]);
-
+  const { serviceCards, results, data, loading, error, reload } = useServiceCards(tests);
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('all');
   const [connection, setConnection] = useState('all');
 
   const entries = useMemo(() => {
-    const { serviceCards } = buildIntegrationView({
-      services: SERVICES,
-      sections: data?.sections ?? [],
-      secrets: data?.secrets ?? [],
-    });
     const cardById = new Map(serviceCards.map((card) => [card.id, card]));
     const labels = new Map(DIRECTORY_CATEGORIES.map((c) => [c.id, c.label]));
     return directoryEntries().map((entry) => {
       const card = cardById.get(entry.id);
-      const result = effectiveResult(tests.results?.[entry.id], tests.persisted?.[entry.id]);
-      const statusKey = card ? serviceStatus(card, result) : 'untested';
+      const statusKey = card ? serviceStatus(card, results[entry.id]) : 'untested';
       return {
         ...entry,
         statusKey,
@@ -164,7 +151,7 @@ export default function IntegrationsDirectory({ tests }) {
         categoryLabel: labels.get(entry.category) ?? entry.category,
       };
     });
-  }, [data, tests.results, tests.persisted]);
+  }, [serviceCards, results]);
 
   const used = new Set(entries.map((entry) => entry.category));
   const categories = [
