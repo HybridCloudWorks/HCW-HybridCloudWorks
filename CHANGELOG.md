@@ -2952,6 +2952,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Lab host: Coder v2.38.0 and code-server 4.140.0, with code-server's
+  release notice off (owner, 2026-10-07; #911).** The Coder pin moves from
+  v2.37.3 to v2.38.0 (released 2026-10-06; index digest read from
+  `imagetools` and the registry's `Docker-Content-Digest`, which agreed;
+  its breaking changes, Tasks removal, MCP private-network CIDRs and HA
+  pubsub, touch nothing this host uses). The workspace template pins
+  code-server 4.140.0 (Code 1.140.0) and passes `--disable-update-check`:
+  the "a new release is out" notice's link opened a window the site's
+  sandboxed pane could not navigate, which is the blank window of #911, and
+  the release is the pin anyway. **Owner steps:** re-run `bootstrap.sh`
+  (pulls the new Coder image and recreates the server), then
+  `hcw-coder-template-push` so the template version carries the new
+  code-server; existing workspaces take it on their next start.
+
 - **Plan-check declarations trimmed to the one still pending (2026-10-06).**
   The `hcw-azure` runs after the stale #908 plan was discarded applied the
   three lab rule predicates, the `SEND_REMINDERS` flag (`false`, then `true`

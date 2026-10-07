@@ -204,7 +204,7 @@ Both digests are image **indexes**, read with `docker buildx imagetools
 inspect`; the tag beside each is for humans. Bash, anywhere with Docker:
 
 ```bash
-docker buildx imagetools inspect ghcr.io/coder/coder:v2.37.3 | head -3
+docker buildx imagetools inspect ghcr.io/coder/coder:v2.38.0 | head -3
 ```
 
 ```bash
@@ -220,7 +220,9 @@ curl -fsSI -H "Authorization: Bearer $(curl -fsS 'https://auth.docker.io/token?s
 ```
 
 Coder's releases are at <https://github.com/coder/coder/releases>;
-`ghcr.io/coder/coder:latest` resolved to the same digest as `v2.37.3` on
+`ghcr.io/coder/coder:latest` resolved to the same digest as `v2.38.0` on
+2026-10-07, the day it was pinned (the release is dated 2026-10-06); before
+that, as `v2.37.3` on
 2026-09-25. Coder supports PostgreSQL 13 and later (its upstream
 `compose.yaml` runs 17).
 
