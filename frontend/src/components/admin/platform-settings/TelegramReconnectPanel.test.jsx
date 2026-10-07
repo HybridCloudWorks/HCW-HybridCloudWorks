@@ -10,6 +10,8 @@ import { render, screen, within } from '@testing-library/react';
 
 import TelegramReconnectPanel, {
   BOT_HANDLE,
+  BOT_LINK_QR_ALT,
+  BOT_LINK_QR_SRC,
   BOT_QR_ALT,
   BOT_QR_SRC,
   BOT_URL,
@@ -17,6 +19,7 @@ import TelegramReconnectPanel, {
 } from './TelegramReconnectPanel';
 import { RemindersCard } from './RemindersTab';
 import telegramBotQr from '@/assets/admin/telegram-bot-qr.png';
+import telegramBotLinkQr from '@/assets/admin/telegram-bot-link-qr.png';
 
 vi.mock('@/lib/api', () => ({
   getJSON: vi.fn(),
@@ -40,6 +43,25 @@ describe('TelegramReconnectPanel', () => {
     const figure = img.closest('figure');
     expect(figure.className).toContain('sm:w-[220px]');
     expect(figure.className).toContain('w-[60vw]');
+  });
+
+  it('shows the verified code beneath the artwork, smaller, with its own alt text and caption', () => {
+    render(<TelegramReconnectPanel />);
+    const img = screen.getByRole('img', { name: 'Scannable code for @agenticarchitectbot' });
+    expect(BOT_LINK_QR_ALT).toBe('Scannable code for @agenticarchitectbot');
+    expect(BOT_LINK_QR_SRC).toBe(telegramBotLinkQr);
+    expect(img.getAttribute('src')).toBe(telegramBotLinkQr);
+    expect(img.getAttribute('src')).toMatch(/telegram-bot-link-qr.*\.png/);
+    const figure = img.closest('figure');
+    expect(figure.className).toContain('sm:w-[160px]');
+    expect(figure.className).toContain('w-[45vw]');
+    expect(
+      within(figure).getByText('If the artwork above does not scan, this code opens the same bot.')
+    ).toBeTruthy();
+    // The artwork comes first; the full-size link stays on the artwork alone.
+    const images = screen.getAllByRole('img');
+    expect(images.map((node) => node.getAttribute('alt'))).toEqual([BOT_QR_ALT, BOT_LINK_QR_ALT]);
+    expect(screen.getAllByRole('link', { name: 'Open full size' })).toHaveLength(1);
   });
 
   it('links the handle to the bot in a new tab', () => {
@@ -66,15 +88,27 @@ describe('TelegramReconnectPanel', () => {
       'listitem'
     );
     expect(steps).toHaveLength(3);
-    expect(steps[0].textContent).toMatch(/Scan the code/);
+    expect(steps[0].textContent).toMatch(/Scan a code/);
+    expect(steps[0].textContent).toMatch(/the small one if the artwork does not scan/);
     expect(steps[1].textContent).toMatch(/press Start/);
     expect(steps[1].textContent).toMatch(/Unblock or Restart/);
     expect(steps[2].textContent).toMatch(/Press Test Telegram/);
+    expect(steps[2].textContent).toMatch(/the message arriving there is the proof/);
+    expect(steps[2].textContent).not.toMatch(/Sent means/);
   });
 
-  it('names the chat id rule and links to where the id is changed', () => {
+  it('says what Sent proves, account first, and links to where the id is changed', () => {
     render(<TelegramReconnectPanel />);
-    expect(screen.getByText(/TELEGRAM_CHAT_ID/)).toBeTruthy();
+    const note = screen.getByText(/TELEGRAM_CHAT_ID/);
+    expect(note.textContent).toMatch(
+      /Test Telegram proves the bot can reach the chat id stored as TELEGRAM_CHAT_ID/
+    );
+    expect(note.textContent).toMatch(/does not check which phone that chat is on/);
+    expect(note.textContent).toMatch(
+      /first check which Telegram account the phone is signed in to/
+    );
+    expect(note.textContent).toMatch(/same account keeps the same chat id on any phone/);
+    expect(note.textContent).toMatch(/Only if the account itself has changed/);
     const keys = screen.getByRole('link', { name: 'Integrations, Keys' });
     expect(KEYS_HREF).toBe('/admin/integrations?tab=keys');
     expect(keys.getAttribute('href')).toBe(KEYS_HREF);
