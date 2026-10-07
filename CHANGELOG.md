@@ -59,15 +59,15 @@ This project has not cut a tagged release; entries are grouped under
   artwork for `@agenticarchitectbot` now sits at the top of the Reminders
   card, at a fixed 220 px wide on a laptop and 60 % of the screen width on
   a phone, on a white panel so the dark artwork reads in both themes, with
-  the handle linked to `https://t.me/agenticarchitectbot` and an **Open
-  full size** link. The artwork is AI-generated (its C2PA manifest names
-  the image generator) and no decoder read its embossed modules, so it is
-  not verified to scan. Beneath it, at 160 px on a laptop and 45 % of the
-  screen on a phone, is the verified path: a plain black-on-white code
-  generated from the t.me link (version 3, error correction Q, eight
-  modules of quiet zone) that jsQR decodes back to exactly
-  `https://t.me/agenticarchitectbot` at 495, 247, 165 and 123 px. Three
-  steps cover a phone that loses the bot (scan a code or search the handle,
+  the handle linked to `https://t.me/agenticarchitectbot` beneath it and an
+  **Open full size** icon on its top-right corner. The artwork is
+  AI-generated (its C2PA manifest names the image generator) and no decoder
+  read its embossed modules, so it is not verified to scan; the handle link
+  is the fallback. A second, plain black-on-white code that #994 placed
+  beneath it was removed the same day at the owner's request, and on a
+  laptop the steps beside the artwork now start level with its top and end,
+  with the Test Telegram frame, on the handle's line. Three
+  steps cover a phone that loses the bot (scan the code or search the handle,
   press Start or Unblock, press **Test Telegram** and watch for the message
   on that phone), with the existing Test Telegram button inside the same
   panel. The note under them says what Sent proves: Telegram accepted a
@@ -75,11 +75,9 @@ This project has not cut a tagged release; entries are grouped under
   that chat. When Sent shows and nothing arrives, check which account the
   phone is signed in to first (the same account keeps the same chat id on
   any phone), and change the stored id on Integrations → Keys only if the
-  account itself changed. Both images are imported from
-  `frontend/src/assets/admin/`: the artwork as delivered (1,907,187
-  bytes) is fingerprinted into `/assets`, and the code (3,119 bytes) is
-  under Vite's 4 KiB inline limit, so it ships as a data URI inside the
-  lazy Platform Settings chunk. Both load only when that page is open.
+  account itself changed. The artwork is imported from
+  `frontend/src/assets/admin/` as delivered (1,907,187 bytes) and
+  fingerprinted into `/assets`; it loads only when that page is open.
   `TelegramReconnectPanel.jsx`, with tests beside it.
 
 - **Governance remainders of the 2026-10-06 estate review: the Terraform

@@ -1,8 +1,9 @@
 /**
  * The Telegram reconnect panel: the bot's QR at a fixed size with alt text
- * naming the handle, the handle as a link to the bot, a full-size link to the
- * same imported asset, the three re-pairing steps, and the Test Telegram
- * button beside them inside the Reminders card (owner, 2026-10-07).
+ * naming the handle, the handle as a link to the bot, a full-size icon on the
+ * code's corner linking the same imported asset, the three re-pairing steps,
+ * and the Test Telegram button beside them inside the Reminders card (owner,
+ * 2026-10-07; the second, plain code removed the same day).
  */
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
@@ -10,8 +11,6 @@ import { render, screen, within } from '@testing-library/react';
 
 import TelegramReconnectPanel, {
   BOT_HANDLE,
-  BOT_LINK_QR_ALT,
-  BOT_LINK_QR_SRC,
   BOT_QR_ALT,
   BOT_QR_SRC,
   BOT_URL,
@@ -19,7 +18,6 @@ import TelegramReconnectPanel, {
 } from './TelegramReconnectPanel';
 import { RemindersCard } from './RemindersTab';
 import telegramBotQr from '@/assets/admin/telegram-bot-qr.png';
-import telegramBotLinkQr from '@/assets/admin/telegram-bot-link-qr.png';
 
 vi.mock('@/lib/api', () => ({
   getJSON: vi.fn(),
@@ -45,23 +43,37 @@ describe('TelegramReconnectPanel', () => {
     expect(figure.className).toContain('w-[60vw]');
   });
 
-  it('shows the verified code beneath the artwork, smaller, with its own alt text and caption', () => {
+  it('shows one code only, with the handle as the one line beneath it', () => {
     render(<TelegramReconnectPanel />);
-    const img = screen.getByRole('img', { name: 'Scannable code for @agenticarchitectbot' });
-    expect(BOT_LINK_QR_ALT).toBe('Scannable code for @agenticarchitectbot');
-    expect(BOT_LINK_QR_SRC).toBe(telegramBotLinkQr);
-    expect(img.getAttribute('src')).toBe(telegramBotLinkQr);
-    expect(img.getAttribute('src')).toMatch(/telegram-bot-link-qr.*\.png/);
-    const figure = img.closest('figure');
-    expect(figure.className).toContain('sm:w-[160px]');
-    expect(figure.className).toContain('w-[45vw]');
-    expect(
-      within(figure).getByText('If the artwork above does not scan, this code opens the same bot.')
-    ).toBeTruthy();
-    // The artwork comes first; the full-size link stays on the artwork alone.
     const images = screen.getAllByRole('img');
-    expect(images.map((node) => node.getAttribute('alt'))).toEqual([BOT_QR_ALT, BOT_LINK_QR_ALT]);
-    expect(screen.getAllByRole('link', { name: 'Open full size' })).toHaveLength(1);
+    expect(images.map((node) => node.getAttribute('alt'))).toEqual([BOT_QR_ALT]);
+    const caption = images[0].closest('figure').querySelector('figcaption');
+    expect(caption.textContent.trim()).toBe(BOT_HANDLE);
+    expect(screen.queryByText(/does not scan, this code/)).toBeNull();
+  });
+
+  it('puts Open full size as an icon on the artwork corner, not a text line', () => {
+    render(<TelegramReconnectPanel />);
+    const link = screen.getByRole('link', { name: 'Open full size' });
+    expect(link.textContent).toBe('');
+    expect(link.getAttribute('title')).toBe('Open full size');
+    expect(link.className).toMatch(/\babsolute\b/);
+    expect(link.className).toMatch(/\bright-3\b/);
+    expect(link.className).toMatch(/\btop-3\b/);
+    const frame = screen.getByRole('img', { name: BOT_QR_ALT }).parentElement;
+    expect(frame.className).toMatch(/\brelative\b/);
+    expect(link.parentElement).toBe(frame);
+  });
+
+  it('pushes the passed-in children to the bottom of the column beside the artwork', () => {
+    render(
+      <TelegramReconnectPanel>
+        <button type="button">child</button>
+      </TelegramReconnectPanel>
+    );
+    const wrapper = screen.getByRole('button', { name: 'child' }).parentElement;
+    expect(wrapper.className).toContain('sm:mt-auto');
+    expect(wrapper.parentElement.className).toMatch(/\bflex-col\b/);
   });
 
   it('links the handle to the bot in a new tab', () => {
@@ -88,8 +100,9 @@ describe('TelegramReconnectPanel', () => {
       'listitem'
     );
     expect(steps).toHaveLength(3);
-    expect(steps[0].textContent).toMatch(/Scan a code/);
-    expect(steps[0].textContent).toMatch(/the small one if the artwork does not scan/);
+    expect(steps[0].textContent).toMatch(/Scan the code/);
+    expect(steps[0].textContent).toMatch(/full-size button on the code's corner/);
+    expect(steps[0].textContent).not.toMatch(/small one/);
     expect(steps[1].textContent).toMatch(/press Start/);
     expect(steps[1].textContent).toMatch(/Unblock or Restart/);
     expect(steps[2].textContent).toMatch(/Press Test Telegram/);
