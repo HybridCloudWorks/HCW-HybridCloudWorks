@@ -35,6 +35,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/components/ui/use-toast';
@@ -460,7 +461,7 @@ export default function ElevenLabsCard({ authReady }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-lg">
-          <Mic className="h-5 w-5" /> Podcast voice (ElevenLabs)
+          <Mic className="h-5 w-5" /> Podcast voice <IntegrationBadge id="elevenlabs" />
         </CardTitle>
         <CardDescription>
           ElevenLabs reads podcast episodes and never Listen &amp; Learn. Before a render sends

@@ -22,6 +22,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState, lazy, Suspense } from 'react';
+import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
 import { useNavigate, useSearchParams } from 'react-router';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -267,6 +268,7 @@ export function ProviderCard({ provider, catalogEntry = null, onToggle, onTest, 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-sm">{provider.name}</span>
+              <IntegrationBadge id={provider.id} size="xs" />
               <StatusBadge status={provider.status} />
               {provider.latencyMs && provider.status === 'connected' && (
                 <span className="text-xs text-slate-400">{provider.latencyMs}ms</span>

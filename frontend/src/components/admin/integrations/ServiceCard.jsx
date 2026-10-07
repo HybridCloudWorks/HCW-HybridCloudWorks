@@ -26,6 +26,7 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
+import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
 import {
   AlertCircle,
   CheckCircle,
@@ -226,6 +227,7 @@ export default function ServiceCard({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold">{service.name}</p>
             {status ? <StatusBadge status={status} size="xs" /> : null}
+            <IntegrationBadge id={service.id} size="xs" />
             {result?.at && (
               <span className="text-[11px] text-muted-foreground">
                 tested {relativeTime(result.at)}

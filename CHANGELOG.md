@@ -19,6 +19,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **One "Powered by" badge for every third-party service in the admin
+  (owner brief 2026-10-06, slice 2; #918).** `IntegrationBadge` renders
+  "Powered by <Platform>" in the platform's colour with a medallion, from one
+  registry of the platforms the site actually uses, keyed by the Integrations
+  page's service ids; an unknown id renders nothing, so the badge can sit
+  beside any service. Placed on every keyed service card on Integrations,
+  every AI provider card, the podcast voice (ElevenLabs), social autoposting
+  (Publer), newsletter settings (Resend) and the Reminders card (Telegram,
+  which also says "Delivered by Telegram" in the form). Logos are a licensing
+  decision per platform and are not shipped; the medallion is the initial in
+  the brand colour until one is recorded. Admin surfaces only: the
+  2026-09-28 rule keeps vendors off public pages.
+
 - **Reminders: edit in place, and a Test Telegram button (owner brief
   2026-10-06, slice 1; #917).** Every reminder in the pane has an Edit
   action that opens it into the same form the New reminder uses — title,
