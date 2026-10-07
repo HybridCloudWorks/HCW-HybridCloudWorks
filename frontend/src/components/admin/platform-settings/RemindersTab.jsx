@@ -10,12 +10,18 @@
  *
  * Owner request the same evening, on seeing the first cut: a form at the top
  * to add ONE reminder, and on Save it lands in a pane below listing every
- * reminder with its details and a red circle X to cancel it. So the tab is
- * two parts over one document: the form, which saves the list with the new
- * row appended and then clears; and the list, where each row can be marked
- * done or cancelled (removed), each a save of its own. Nothing is edited in
- * place — to change a reminder, cancel it and add it again — which keeps
- * every save a single intention. Cancel asks once, inline, before it removes.
+ * reminder with its details and a red circle X to cancel it. And from the
+ * brief that followed (#917): an Edit action on every reminder, opening it
+ * into the same form, saving instantly and updating the pane in place; and a
+ * Test Telegram button at the top that proves the channel through the
+ * production notifier and shows Telegram's own reason when it refuses.
+ *
+ * So the tab is: the test button; the form, which saves the list with the new
+ * row appended and then clears; and the list, where each row can be edited
+ * (the same form, in place), marked done, or cancelled (removed), each a
+ * save of its own. One delivery method exists, so the form says "Delivered
+ * by Telegram" rather than offering a choice of one. Cancel asks once,
+ * inline, before it removes.
  *
  * The `notified` stamps the timer writes ride along on every save unchanged
  * and the server merges any stamp written while the page was open, so saving
@@ -28,7 +34,18 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { BellRing, ExternalLink, Plus, X } from 'lucide-react';
+import {
+  BellRing,
+  CheckCircle2,
+  ExternalLink,
+  Loader2,
+  Pencil,
+  Plus,
+  Send,
+  X,
+  XCircle,
+} from 'lucide-react';
+import { postJSON } from '@/lib/api';
 import {
   SETTING_LABELS,
   SettingSection,
@@ -39,6 +56,7 @@ import {
 
 export const DEFAULT_LEAD_DAYS = 7;
 export const MAX_LEAD_DAYS = 365;
+export const TELEGRAM_TEST_ROUTE = 'cms/platform-settings/reminders/test';
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -145,34 +163,138 @@ export function describeNotified(notified) {
 }
 
 /**
- * The form: one reminder, saved on Add and cleared. The Add button is held
- * back until the row would pass the server, and the reason is shown.
+ * What the test route's answer means, in the words the owner needs. Telegram's
+ * status decides the sentence on a refusal: 403 is a blocked bot, 400 a chat
+ * it cannot find, 401 a bad token.
  */
-export function NewReminderForm({ saving, onAdd }) {
-  const [draft, setDraft] = useState(newReminder);
+export function describeTestResult(result) {
+  if (result?.sent)
+    return { ok: true, text: 'Sent. Check Telegram for "Test from Platform Settings".' };
+  const reason = result?.reason;
+  if (reason === 'cooldown') {
+    return {
+      ok: true,
+      text: 'A test went out less than fifteen minutes ago; that one is the proof. Try again later for a fresh one.',
+    };
+  }
+  if (reason === 'not_configured') {
+    return {
+      ok: false,
+      text: 'Telegram is not configured on the app: the bot token or the chat id is missing.',
+    };
+  }
+  if (reason === 'telegram_error') {
+    const status = Number(result?.status);
+    if (status === 403)
+      return {
+        ok: false,
+        text: 'Telegram refused (403): the bot is blocked. Open its chat and press Unblock or Restart.',
+      };
+    if (status === 400)
+      return {
+        ok: false,
+        text: 'Telegram refused (400): it cannot find the chat; the stored chat id is not yours.',
+      };
+    if (status === 401)
+      return { ok: false, text: 'Telegram refused (401): the stored bot token is not valid.' };
+    return { ok: false, text: `Telegram refused${Number.isFinite(status) ? ` (${status})` : ''}.` };
+  }
+  return { ok: false, text: 'Telegram could not be reached. Try again in a minute.' };
+}
+
+/** The button at the top: one test through the production notifier, and what came back. */
+export function TestTelegramButton({ send = () => postJSON(TELEGRAM_TEST_ROUTE, {}) }) {
+  const [state, setState] = useState({ phase: 'idle' });
+  const run = async () => {
+    setState({ phase: 'sending' });
+    try {
+      const result = await send();
+      setState({ phase: 'done', ...describeTestResult(result) });
+    } catch (error) {
+      setState({ phase: 'done', ok: false, text: error?.message || 'The request failed.' });
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-md border border-border bg-muted/30 p-3">
+      <Button type="button" size="sm" disabled={state.phase === 'sending'} onClick={run}>
+        {state.phase === 'sending' ? (
+          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Send className="mr-2 h-3.5 w-3.5" />
+        )}
+        Test Telegram
+      </Button>
+      <span className="text-xs text-muted-foreground">
+        Sends one message through the same path the reminders use.
+      </span>
+      {state.phase === 'done' ? (
+        <p
+          role="status"
+          className={`flex w-full items-start gap-2 text-sm ${state.ok ? '' : 'text-destructive'}`}
+        >
+          {state.ok ? (
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" aria-hidden="true" />
+          ) : (
+            <XCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          )}
+          <span>{state.text}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** The one delivery method there is, named rather than offered as a choice of one. */
+function DeliveredBy() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/5 px-2 py-0.5 text-xs text-sky-700 dark:text-sky-300">
+      <Send className="h-3 w-3" aria-hidden="true" /> Delivered by Telegram
+    </span>
+  );
+}
+
+/**
+ * The form, for a new reminder or an existing one. `initial` is the row it
+ * edits; `onSubmit` receives the trimmed row and resolves true when the save
+ * took, which clears a new form or closes an edit. Submit is held back until
+ * the row would pass the server, and the reason is shown.
+ */
+export function ReminderForm({
+  initial,
+  heading,
+  submitLabel,
+  showDone = false,
+  saving,
+  onSubmit,
+  onCancel = null,
+}) {
+  const [draft, setDraft] = useState(initial);
   const problem = rowProblem(draft);
   const edit = (patch) => setDraft((current) => ({ ...current, ...patch }));
 
   const submit = async (event) => {
     event.preventDefault();
     if (problem) return;
-    const added = await onAdd({
+    const taken = await onSubmit({
       ...draft,
       title: draft.title.trim(),
       leadDays: Number(draft.leadDays),
       notes: draft.notes.trim(),
       url: draft.url.trim(),
     });
-    if (added) setDraft(newReminder());
+    if (taken && !onCancel) setDraft(newReminder());
   };
 
   return (
     <form
       onSubmit={submit}
       className="space-y-3 rounded-md border border-border p-3"
-      aria-label="New reminder"
+      aria-label={heading}
     >
-      <p className="text-sm font-medium">New reminder</p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">{heading}</p>
+        <DeliveredBy />
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <Input
           aria-label="Title"
@@ -204,6 +326,19 @@ export function NewReminderForm({ saving, onAdd }) {
             className="w-20"
           />
         </label>
+        {showDone ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              aria-label="Done"
+              checked={Boolean(draft.done)}
+              disabled={saving}
+              onChange={(event) => edit({ done: event.target.checked })}
+              className="h-4 w-4"
+            />
+            Done (no more messages)
+          </label>
+        ) : null}
       </div>
       <Input
         aria-label="Link"
@@ -226,19 +361,66 @@ export function NewReminderForm({ saving, onAdd }) {
         <span className="text-xs text-muted-foreground">
           {problem ?? 'Telegram says it once in the window, once on the day, weekly while overdue.'}
         </span>
-        <Button type="submit" size="sm" disabled={saving || Boolean(problem)}>
-          <Plus className="mr-2 h-3.5 w-3.5" /> Add reminder
-        </Button>
+        <span className="flex items-center gap-2">
+          {onCancel ? (
+            <Button type="button" variant="ghost" size="sm" disabled={saving} onClick={onCancel}>
+              Keep as it was
+            </Button>
+          ) : null}
+          <Button type="submit" size="sm" disabled={saving || Boolean(problem)}>
+            {onCancel ? (
+              <Pencil className="mr-2 h-3.5 w-3.5" />
+            ) : (
+              <Plus className="mr-2 h-3.5 w-3.5" />
+            )}
+            {submitLabel}
+          </Button>
+        </span>
       </div>
     </form>
   );
 }
 
-/** One listed reminder: its details, Done, and the red X that cancels it after one confirmation. */
-function ReminderItem({ reminder, today, saving, onToggleDone, onCancel }) {
+/** The top form: adds one reminder and clears when the save took. */
+export function NewReminderForm({ saving, onAdd }) {
+  return (
+    <ReminderForm
+      initial={newReminder()}
+      heading="New reminder"
+      submitLabel="Add reminder"
+      saving={saving}
+      onSubmit={onAdd}
+    />
+  );
+}
+
+/** One listed reminder: its details, Edit, Done, and the red X that cancels it after one confirmation. */
+function ReminderItem({ reminder, today, saving, onEdit, onToggleDone, onCancel }) {
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
   const due = describeDue(reminder, today);
   const said = describeNotified(reminder.notified);
+
+  if (editing) {
+    return (
+      <li>
+        <ReminderForm
+          initial={reminder}
+          heading={`Edit reminder: ${reminder.title}`}
+          submitLabel="Save changes"
+          showDone
+          saving={saving}
+          onSubmit={async (row) => {
+            const taken = await onEdit(row);
+            if (taken) setEditing(false);
+            return taken;
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      </li>
+    );
+  }
+
   return (
     <li className="flex flex-wrap items-start gap-3 rounded-md border border-border p-3">
       <div className="min-w-0 flex-1 space-y-1">
@@ -274,6 +456,16 @@ function ReminderItem({ reminder, today, saving, onToggleDone, onCancel }) {
         </p>
       </div>
       <div className="flex items-center gap-3">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={saving}
+          aria-label={`Edit reminder: ${reminder.title}`}
+          onClick={() => setEditing(true)}
+        >
+          <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+        </Button>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -325,7 +517,7 @@ function ReminderItem({ reminder, today, saving, onToggleDone, onCancel }) {
 }
 
 /** The pane: every reminder, undated first, then open by date, then done. */
-export function ReminderList({ reminders, today, saving, onToggleDone, onCancel }) {
+export function ReminderList({ reminders, today, saving, onEdit, onToggleDone, onCancel }) {
   const order = useMemo(() => displayOrder(reminders), [reminders]);
   const open = reminders.filter((reminder) => !reminder.done).length;
   return (
@@ -350,6 +542,7 @@ export function ReminderList({ reminders, today, saving, onToggleDone, onCancel 
               reminder={reminders[index]}
               today={today}
               saving={saving}
+              onEdit={(row) => onEdit(index, row)}
               onToggleDone={(done) => onToggleDone(index, done)}
               onCancel={() => onCancel(index)}
             />
@@ -361,11 +554,11 @@ export function ReminderList({ reminders, today, saving, onToggleDone, onCancel 
 }
 
 /**
- * The card: form on top, list below, one stored document. Every action is
- * its own save of the whole list — append, flip done, remove — and `onSave`
- * resolves true when the server took it, which is when the form clears.
+ * The card: test button, form on top, list below, one stored document. Every
+ * action is its own save of the whole list — append, replace, flip done,
+ * remove — and `onSave` resolves true when the server took it.
  */
-export function RemindersCard({ value, onSave, saving, meta, today = todayIso() }) {
+export function RemindersCard({ value, onSave, saving, meta, today = todayIso(), sendTest }) {
   const reminders = useMemo(() => value?.reminders ?? [], [value]);
   const saveList = (next) => onSave({ reminders: next });
 
@@ -379,17 +572,20 @@ export function RemindersCard({ value, onSave, saving, meta, today = todayIso() 
           Dated things not to forget: a token that expires, a renewal, a date to re-check something.
           Each one is said on Telegram once within its days-before window, once on the day, and
           weekly after that until it is marked done. The check runs once a day, in the morning
-          Central time. Notes and the link travel with the message, so write them for your phone. To
-          change a reminder, cancel it and add it again.
+          Central time. Notes and the link travel with the message, so write them for your phone.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5 pt-0">
+        <TestTelegramButton {...(sendTest ? { send: sendTest } : {})} />
         <StoredState meta={meta} />
         <NewReminderForm saving={saving} onAdd={(reminder) => saveList([...reminders, reminder])} />
         <ReminderList
           reminders={reminders}
           today={today}
           saving={saving}
+          onEdit={(index, row) =>
+            saveList(reminders.map((current, i) => (i === index ? row : current)))
+          }
           onToggleDone={(index, done) =>
             saveList(reminders.map((row, i) => (i === index ? { ...row, done } : row)))
           }

@@ -103,7 +103,9 @@ export function createNotifier({
       );
       if (!response.ok) {
         log.error?.(`[notify] Telegram API error ${response.status}`);
-        return { sent: false, reason: 'telegram_error' };
+        // The status rides along for the Test Telegram route (lib/notify-test.js):
+        // 403 is a blocked bot, 400 a chat Telegram cannot find, 401 a bad token.
+        return { sent: false, reason: 'telegram_error', status: response.status };
       }
       await store.upsertDoc('system', {
         ...state,

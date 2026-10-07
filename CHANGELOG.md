@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Reminders: edit in place, and a Test Telegram button (owner brief
+  2026-10-06, slice 1; #917).** Every reminder in the pane has an Edit
+  action that opens it into the same form the New reminder uses — title,
+  date, days before, link, notes, and done as the status — saving through
+  the same PUT and updating the pane in place; one delivery method exists,
+  so the form says "Delivered by Telegram" rather than offering a choice of
+  one. At the top of the card, **Test Telegram** sends one message through
+  the production notifier (new editor route
+  `POST cms/platform-settings/reminders/test`) and shows sent, cooldown, or
+  Telegram's own refusal with its status — 403 is a blocked bot, which is
+  what silenced every notification the day this was asked for.
+
 - **A refused Telegram delivery now pages the owner by SMS and mail
   (2026-10-06).** The notifier is best-effort by design, so when the owner's
   account had the bot blocked, Telegram answered 403 to every send for the

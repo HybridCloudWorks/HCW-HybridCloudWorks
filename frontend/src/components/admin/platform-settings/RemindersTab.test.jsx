@@ -1,8 +1,10 @@
 /**
- * Reminders: a form on top adds one reminder and clears when the save took;
- * the pane below lists every reminder with its badge, a Done box and a red
- * circle X that cancels after one confirmation; every action PUTs the whole
- * list with the timer's stamps untouched (owner, 2026-10-06, both requests).
+ * Reminders: a Test Telegram button proves the channel and reads Telegram's
+ * reason; a form on top adds one reminder and clears when the save took; the
+ * pane below lists every reminder with its badge, Edit (the same form, in
+ * place), a Done box and a red circle X that cancels after one confirmation;
+ * every action PUTs the whole list with the timer's stamps untouched (owner,
+ * 2026-10-06; brief #917).
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -12,8 +14,11 @@ import RemindersTab, {
   NewReminderForm,
   ReminderList,
   RemindersCard,
+  TELEGRAM_TEST_ROUTE,
+  TestTelegramButton,
   describeDue,
   describeNotified,
+  describeTestResult,
   displayOrder,
   newReminder,
   rowProblem,
@@ -22,12 +27,13 @@ import { settingRoute } from './settingShared';
 
 const getJSON = vi.fn();
 const sendJSON = vi.fn();
+const postJSON = vi.fn();
 const toast = vi.fn();
 
 vi.mock('@/lib/api', () => ({
   getJSON: (...args) => getJSON(...args),
   sendJSON: (...args) => sendJSON(...args),
-  postJSON: vi.fn(),
+  postJSON: (...args) => postJSON(...args),
 }));
 vi.mock('@/hooks/useAuthReady', () => ({ useAuthReady: () => ({ authReady: true }) }));
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
@@ -93,6 +99,7 @@ beforeEach(() => {
     stored: 'valid',
     updatedAt: '2026-10-06T15:00:01.000Z',
   }));
+  postJSON.mockReset().mockResolvedValue({ success: true, sent: true, reason: null, status: null });
   toast.mockReset();
 });
 
@@ -159,6 +166,51 @@ describe('where a reminder stands', () => {
   });
 });
 
+describe('Test Telegram', () => {
+  it('reads the route answer into the owner words, Telegram status first', () => {
+    expect(describeTestResult({ sent: true }).ok).toBe(true);
+    expect(describeTestResult({ sent: false, reason: 'cooldown' })).toMatchObject({ ok: true });
+    expect(describeTestResult({ sent: false, reason: 'not_configured' }).text).toMatch(
+      /not configured/
+    );
+    expect(describeTestResult({ sent: false, reason: 'telegram_error', status: 403 }).text).toMatch(
+      /blocked/
+    );
+    expect(describeTestResult({ sent: false, reason: 'telegram_error', status: 400 }).text).toMatch(
+      /cannot find the chat/
+    );
+    expect(describeTestResult({ sent: false, reason: 'telegram_error', status: 401 }).text).toMatch(
+      /token/
+    );
+    expect(describeTestResult({ sent: false, reason: 'telegram_error', status: 502 }).text).toBe(
+      'Telegram refused (502).'
+    );
+    expect(describeTestResult({ sent: false, reason: 'exception' }).text).toMatch(
+      /could not be reached/
+    );
+  });
+
+  it('posts to the test route and shows the outcome, green for sent and red for a refusal', async () => {
+    render(<TestTelegramButton />);
+    fireEvent.click(screen.getByRole('button', { name: /Test Telegram/ }));
+    await waitFor(() => expect(postJSON).toHaveBeenCalledWith(TELEGRAM_TEST_ROUTE, {}));
+    expect((await screen.findByRole('status')).textContent).toMatch(/Sent\. Check Telegram/);
+
+    postJSON.mockResolvedValueOnce({
+      success: true,
+      sent: false,
+      reason: 'telegram_error',
+      status: 403,
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Test Telegram/ }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/blocked/));
+
+    postJSON.mockRejectedValueOnce(new Error('Network down'));
+    fireEvent.click(screen.getByRole('button', { name: /Test Telegram/ }));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('Network down'));
+  });
+});
+
 describe('NewReminderForm', () => {
   it('holds Add until the row has a title and a date, names why, then hands over a trimmed row and clears', async () => {
     const onAdd = vi.fn(async () => true);
@@ -166,6 +218,7 @@ describe('NewReminderForm', () => {
     const add = screen.getByRole('button', { name: /Add reminder/ });
     expect(add.hasAttribute('disabled')).toBe(true);
     expect(screen.getByText('Title needed')).toBeTruthy();
+    expect(screen.getByText('Delivered by Telegram')).toBeTruthy();
 
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: '  Renew the thing  ' } });
     expect(screen.getByText('Date needed')).toBeTruthy();
@@ -176,6 +229,7 @@ describe('NewReminderForm', () => {
     });
     fireEvent.change(screen.getByLabelText('Notes'), { target: { value: ' Do it early. ' } });
     expect(add.hasAttribute('disabled')).toBe(false);
+    expect(screen.queryByLabelText('Done')).toBeNull();
 
     fireEvent.submit(screen.getByRole('form', { name: 'New reminder' }));
     await waitFor(() => expect(onAdd).toHaveBeenCalledTimes(1));
@@ -206,16 +260,21 @@ describe('NewReminderForm', () => {
 });
 
 describe('ReminderList', () => {
-  it('lists every reminder with its details and badge, nearest open first, done last', () => {
+  const renderList = (over = {}) =>
     render(
       <ReminderList
         reminders={stored.reminders}
         today={TODAY}
         saving={false}
+        onEdit={vi.fn(async () => true)}
         onToggleDone={vi.fn()}
         onCancel={vi.fn()}
+        {...over}
       />
     );
+
+  it('lists every reminder with its details and badge, nearest open first, done last', () => {
+    renderList();
     const items = screen.getAllByRole('listitem');
     expect(items).toHaveLength(3);
     expect(within(items[0]).getByText('Re-verify the Learn catalogues')).toBeTruthy();
@@ -232,29 +291,13 @@ describe('ReminderList', () => {
   });
 
   it('shows the empty pane when there is nothing', () => {
-    render(
-      <ReminderList
-        reminders={[]}
-        today={TODAY}
-        saving={false}
-        onToggleDone={vi.fn()}
-        onCancel={vi.fn()}
-      />
-    );
+    renderList({ reminders: [] });
     expect(screen.getByText(/Nothing here yet. Add the first one above/)).toBeTruthy();
   });
 
   it('cancels only after the inline confirmation, and Keep backs out', () => {
     const onCancel = vi.fn();
-    render(
-      <ReminderList
-        reminders={stored.reminders}
-        today={TODAY}
-        saving={false}
-        onToggleDone={vi.fn()}
-        onCancel={onCancel}
-      />
-    );
+    renderList({ onCancel });
     fireEvent.click(
       screen.getByRole('button', {
         name: 'Cancel reminder: Cloudflare DNS token for the lab host expires',
@@ -272,23 +315,52 @@ describe('ReminderList', () => {
       })
     );
     fireEvent.click(screen.getByRole('button', { name: 'Yes, cancel' }));
-    // Index into the stored list, not the display order.
     expect(onCancel).toHaveBeenCalledWith(0);
   });
 
   it('flips Done for the right stored row', () => {
     const onToggleDone = vi.fn();
-    render(
-      <ReminderList
-        reminders={stored.reminders}
-        today={TODAY}
-        saving={false}
-        onToggleDone={onToggleDone}
-        onCancel={vi.fn()}
-      />
-    );
+    renderList({ onToggleDone });
     fireEvent.click(screen.getByLabelText('Done: Re-verify the Learn catalogues'));
     expect(onToggleDone).toHaveBeenCalledWith(1, true);
+  });
+
+  it('Edit opens the row into the form in place, prefilled with status, saves it and closes; Keep as it was backs out', async () => {
+    const onEdit = vi.fn(async () => true);
+    renderList({ onEdit });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Edit reminder: Re-verify the Learn catalogues' })
+    );
+    const form = screen.getByRole('form', {
+      name: 'Edit reminder: Re-verify the Learn catalogues',
+    });
+    expect(within(form).getByLabelText('Title').value).toBe('Re-verify the Learn catalogues');
+    expect(within(form).getByLabelText('Due date').value).toBe('2026-10-10');
+    expect(within(form).getByLabelText('Done').checked).toBe(false);
+    expect(within(form).getByText('Delivered by Telegram')).toBeTruthy();
+
+    fireEvent.change(within(form).getByLabelText('Title'), {
+      target: { value: 'Re-verify the Learn catalogues (Q4)' },
+    });
+    fireEvent.change(within(form).getByLabelText('Days before'), { target: { value: '3' } });
+    fireEvent.click(within(form).getByLabelText('Done'));
+    fireEvent.submit(form);
+    await waitFor(() => expect(onEdit).toHaveBeenCalledTimes(1));
+    const [[index, row]] = onEdit.mock.calls;
+    expect(index).toBe(1);
+    expect(row).toMatchObject({
+      id: 'learn-pages',
+      title: 'Re-verify the Learn catalogues (Q4)',
+      leadDays: 3,
+      done: true,
+      notified: { ahead: '2026-10-03T13:00:00.000Z' },
+    });
+    await waitFor(() => expect(screen.queryByRole('form', { name: /Edit reminder/ })).toBeNull());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit reminder: Already handled' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Keep as it was' }));
+    expect(screen.queryByRole('form', { name: /Edit reminder/ })).toBeNull();
+    expect(onEdit).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -312,16 +384,33 @@ describe('RemindersCard and the tab', () => {
     expect(saved.reminders[1].notified).toEqual({ ahead: '2026-10-03T13:00:00.000Z' });
   });
 
-  it('cancelling saves the list without that row; Done saves it flipped', async () => {
+  it('editing replaces that row in the saved list; cancelling removes it; Done flips it', async () => {
     const onSave = vi.fn(async () => true);
     render(
       <RemindersCard value={stored} meta={meta} saving={false} onSave={onSave} today={TODAY} />
     );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'Edit reminder: Cloudflare DNS token for the lab host expires',
+      })
+    );
+    const form = screen.getByRole('form', { name: /Edit reminder: Cloudflare/ });
+    fireEvent.change(within(form).getByLabelText('Notes'), { target: { value: 'Roll it first.' } });
+    fireEvent.submit(form);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave.mock.calls[0][0].reminders[0]).toMatchObject({
+      id: 'cf-token',
+      notes: 'Roll it first.',
+    });
+    expect(onSave.mock.calls[0][0].reminders).toHaveLength(3);
+
     fireEvent.click(screen.getByRole('button', { name: 'Cancel reminder: Already handled' }));
     fireEvent.click(screen.getByRole('button', { name: 'Yes, cancel' }));
     expect(onSave).toHaveBeenLastCalledWith({
       reminders: stored.reminders.filter((r) => r.id !== 'done-one'),
     });
+
     fireEvent.click(screen.getByLabelText('Done: Re-verify the Learn catalogues'));
     const [last] = onSave.mock.calls.at(-1);
     expect(last.reminders.find((r) => r.id === 'learn-pages')).toMatchObject({
@@ -334,6 +423,7 @@ describe('RemindersCard and the tab', () => {
     render(<RemindersTab />);
     await screen.findByText('Your reminders');
     expect(getJSON).toHaveBeenCalledWith(settingRoute('reminders'));
+    expect(screen.getByRole('button', { name: /Test Telegram/ })).toBeTruthy();
     expect(screen.getAllByRole('listitem')).toHaveLength(3);
     fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Foundry review' } });
     fireEvent.change(screen.getByLabelText('Due date'), { target: { value: '2026-12-01' } });
@@ -344,7 +434,6 @@ describe('RemindersCard and the tab', () => {
     expect(method).toBe('PUT');
     expect(body.reminders).toHaveLength(4);
     expect(body.reminders[3].title).toBe('Foundry review');
-    // The saved list is what the pane shows, and the form is clear again.
     await waitFor(() => expect(screen.getAllByRole('listitem')).toHaveLength(4));
     expect(screen.getByLabelText('Title').value).toBe('');
   });
