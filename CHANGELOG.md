@@ -3104,6 +3104,59 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Lab host: the agent leaves the docker group behind its own socket
+  proxy, the daemon remaps user namespaces, and Coder's workspaces move to a
+  rootless daemon (estate review 2026-10-06, finding LAB-5; #951).** The
+  remainder #900 left open. **The agent:** `hcw-labs-agent` is in no group
+  but its own (the role takes it out of `docker`), and the `docker` CLI it
+  spawns reaches the host daemon through `hcw-labs-agent-docker-proxy`,
+  HAProxy 3.4.6 (newest LTS) by index digest, on a Unix socket only the
+  agent's group may open, in a container with no network, a read-only root
+  and no capabilities. Its allowlist, in
+  `roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2`, is the exact
+  calls `docker run --rm` and `docker rm -f` make for a job, recorded from
+  Docker CLI 29.8.1 against a stand-in daemon
+  (`scripts/lab/capture-docker-cli-requests.mjs`, fixture in
+  `scripts/fixtures/`); no pull, exec, inspect or list. Because a path
+  allowlist cannot see a privileged create, the proxy also reads the create
+  body and refuses privileged mode, host namespaces, the remap's opt-out,
+  added capabilities, devices, mounts, any bind but the job's own read-only
+  directory, unmasked paths, other security options or networks, and
+  non-digest images; it refuses any byte outside ASCII and any backslash,
+  which is what keeps those regular expressions sound against Go's
+  case-folding JSON decoder. `scripts/lab-host-docker-proxy.test.mjs`
+  evaluates the file's own rules against the recorded calls and the escapes,
+  and CI parses it with `haproxy -c` at the pinned digest. **User
+  namespaces:** `daemon.json` sets `userns-remap: default` with the
+  containerd image store off (that store does not support the remap), so a
+  job container's root, and Coder's server's and PostgreSQL's, is an
+  unprivileged uid. The two proxies and Portainer opt out to open a socket,
+  as does the one-off Caddy build. The switching run stops every container,
+  restarts the daemon before the later roles (a flushed handler), and
+  copies Coder's PostgreSQL volume (owners shifted into the range) and
+  Portainer's (as is) into the new data root once with
+  `hcw-docker-volume-carry`, refusing a non-empty destination or a copy
+  older than its source; its test runs in CI as root.
+  `-e docker_userns_remap=false` is the way back. **Coder:** the new
+  `coder_sandbox` role runs a rootless Docker daemon
+  (`docker-ce-rootless-extras` at the `docker-ce` pin) as the unprivileged
+  user `hcw-coder-docker`, with its own subordinate ids and the cpu, memory
+  and pids controllers delegated; `coder-docker-proxy` now mounts that
+  daemon's socket directory instead of the host's socket, so a privileged
+  container a compromised server or template asks for is that user's, not
+  root's. An authorisation plugin was rejected (ADR 0032, amendment of
+  2026-10-07). `lab_images` plans each daemon on its own (`--scope jobs`,
+  `--scope workspaces`). A new `privilege_checks` role ends every run by
+  failing unless the agent is out of the docker group, `docker info` shows
+  `name=userns`, a job run as the agent through its proxy succeeds while
+  `docker ps` and a privileged run are refused, Coder's proxy carries the
+  Compose file's policy with the sandbox socket as its one mount, and that
+  daemon is rootless. **Owner steps:** re-run `bootstrap.sh`; running jobs
+  and workspaces stop, and workspaces start again on the sandbox daemon
+  with an empty home volume. The checks to paste afterwards, and what good
+  looks like, are in the Labs host runbook, "Container-runtime privilege
+  separation (LAB-5)".
+
 - **Lab host: Coder v2.38.0 and code-server 4.140.0, with code-server's
   release notice off (owner, 2026-10-07; #911).** The Coder pin moves from
   v2.37.3 to v2.38.0 (released 2026-10-06; index digest read from

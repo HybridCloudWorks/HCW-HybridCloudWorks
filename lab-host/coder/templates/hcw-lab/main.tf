@@ -16,9 +16,12 @@
 #   - 2 GiB of memory and one CPU, hard limits.
 #
 # template.test.mjs beside this file reads it as text and fails when any of
-# those stops being true. The Coder server that runs this template holds the
-# socket (lab-host/coder/docker-compose.yml) and is the only process that
-# does.
+# those stops being true. The Coder server that runs this template holds no
+# socket: it reaches Docker through coder-docker-proxy, and the daemon behind
+# that proxy is the rootless one the coder_sandbox role runs as the
+# unprivileged user hcw-coder-docker (lab-host/coder/docker-compose.yml;
+# LAB-5, 2026-10-07). Every workspace runs on that daemon, so even a
+# container this template did not describe would be that user's, not root's.
 #
 # Published from the host by /usr/local/sbin/hcw-coder-template-push, which
 # pushes this directory's *.tf, lock file and README and then sets the
@@ -44,8 +47,10 @@ terraform {
 # The daemon, through the allowlisting socket proxy on the Compose network
 # (lab-host/coder/docker-compose.yml, `coder-docker-proxy`; LAB-5,
 # 2026-10-06). Before that the coder container held the socket and the
-# provider's default host was that socket. Named here as well as in the
-# container's DOCKER_HOST, so the template reads true on its own.
+# provider's default host was that socket. Since 2026-10-07 the daemon behind
+# the proxy is the coder_sandbox role's rootless one, not the host's. Named
+# here as well as in the container's DOCKER_HOST, so the template reads true
+# on its own.
 provider "docker" {
   host = "tcp://coder-docker-proxy:2375"
 }

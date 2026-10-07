@@ -1,0 +1,60 @@
+---
+# The daemon runs with userns-remap (LAB-5): every container's root is a
+# subordinate uid of the dockremap user, not root on the host, unless the
+# container opts out with --userns=host. Checked here, straight after the
+# restart, so a daemon that did not take the setting stops the play before
+# any role creates a container that would run as host root.
+- name: Read the daemon's data root and security options
+  community.docker.docker_host_info:
+  register: docker_userns_info
+  check_mode: false
+
+- name: Refuse to continue on a daemon that is not remapping user namespaces
+  ansible.builtin.assert:
+    that:
+      - "'name=userns' in docker_userns_info.host_info.SecurityOptions"
+      - docker_userns_info.host_info.DockerRootDir is match('^' ~ (docker_legacy_root | regex_escape) ~ '/[0-9]+\\.[0-9]+$')
+    fail_msg: >-
+      /etc/docker/daemon.json sets userns-remap to {{ docker_daemon_config['userns-remap'] }}, but
+      the running daemon reports the security options
+      {{ docker_userns_info.host_info.SecurityOptions | join(', ') }} and the data root
+      {{ docker_userns_info.host_info.DockerRootDir }}, so its containers' root would be root on this
+      host. Read why with sudo journalctl -u docker -n 50 --no-pager (a containerd image store left
+      on, or a missing dockremap entry in /etc/subuid, are the usual causes), fix it and re-run
+      bootstrap.sh. Nothing was carried or recreated.
+    quiet: true
+  # In check mode the daemon was not restarted, so it still reports the old root.
+  when: not ansible_check_mode
+
+# The remapped root is /var/lib/docker/<uid>.<gid>, named for the first
+# subordinate uid and gid of the dockremap range: a remapped container's uid
+# N is that base plus N on the host.
+- name: Record the remapped range's first uid and gid
+  ansible.builtin.set_fact:
+    docker_userns_uid_base: "{{ (docker_userns_info.host_info.DockerRootDir | basename).split('.')[0] | int }}"
+    docker_userns_gid_base: "{{ (docker_userns_info.host_info.DockerRootDir | basename).split('.')[1] | int }}"
+  when: not ansible_check_mode
+
+- name: Create the directory that records which volumes were carried
+  ansible.builtin.file:
+    path: "{{ docker_userns_carry_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Install hcw-docker-volume-carry, which copies a volume's data into the remapped root
+  ansible.builtin.copy:
+    src: hcw-docker-volume-carry.py
+    dest: /usr/local/libexec/hcw-docker-volume-carry
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Carry each named volume that holds state from the pre-remap root
+  ansible.builtin.include_tasks: userns_carry_volume.yml
+  loop: "{{ docker_userns_carry_volumes }}"
+  loop_control:
+    loop_var: docker_carry
+    label: "{{ docker_carry.name }}"
+  when: not ansible_check_mode

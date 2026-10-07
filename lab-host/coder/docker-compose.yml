@@ -32,11 +32,14 @@
 # (https://coder.com/docs/install/docker: "Coder runs as a non-root user" and
 # gets the socket through --group-add with the docker group's id).
 #
-# The privilege boundary (ADR 0032, decision 4 and its consequences): the
-# Docker socket is mounted into the `coder` service and nowhere else. A
-# workspace is a container the Coder server creates from
-# templates/hcw-lab/main.tf; the test beside that file asserts a workspace
-# never gets the socket, `privileged`, or a host path.
+# The privilege boundary (ADR 0032, decision 4 and its consequences): no
+# service here holds the host's Docker socket. `coder-docker-proxy` holds the
+# socket of a separate, rootless Docker daemon (the coder_sandbox role, run
+# by the unprivileged user hcw-coder-docker; LAB-5, 2026-10-07), and the
+# Coder server reaches that daemon through it and nothing else. A workspace
+# is a container the Coder server creates from templates/hcw-lab/main.tf on
+# that daemon; the test beside that file asserts a workspace never gets a
+# socket, `privileged`, or a host path.
 #
 # To parse this file without the host: bash lab-host/coder/compose-config-check.sh
 # (creates empty stand-ins for the three files in a temporary directory and
@@ -152,34 +155,39 @@ services:
         max-size: 10m
         max-file: "3"
 
-  # The Docker socket, behind a path allowlist (estate review 2026-10-06,
-  # LAB-5). Until then the coder server held the socket itself. This is
-  # HAProxy with one rule per Docker API section: the provisioner's Docker
+  # A Docker socket, behind a path allowlist (estate review 2026-10-06,
+  # LAB-5). Until then the coder server held the host's socket itself. This
+  # is HAProxy with one rule per Docker API section: the provisioner's Docker
   # provider gets containers, images, networks, volumes, the lifecycle verbs
   # it uses and the read-only daemon endpoints, and nothing else answers —
   # no exec on a container it did not create, no build, no commit, no
   # swarm, no system prune, no daemon auth.
   #
-  # WHAT THIS DOES NOT DO (#900 review). It inspects paths, not bodies. Code
-  # running as the coder server can still POST /containers/create with
-  # `Privileged: true` or a bind of `/`, then start it, and that is root on
-  # the host exactly as before. So a Coder compromise is NARROWER with this
-  # proxy — the daemon's other sections are gone — and it is not contained.
-  # Containing it needs a body-aware authorisation layer (a Docker authz
-  # plugin that rejects privileged mode, host binds, host namespaces and
-  # added capabilities) or a separate or rootless daemon for Coder, which
-  # ADR 0032 keeps as the revisit trigger. roles/coder/README.md says the
-  # same under hcw-coder-template-push.
+  # Which daemon (2026-10-07, LAB-5). The proxy inspects paths, not bodies,
+  # so code running as the coder server could still create a privileged
+  # container or bind `/`. That is why the socket behind it is no longer the
+  # host's: it is the rootless daemon the coder_sandbox role runs as the
+  # unprivileged user hcw-coder-docker, listening in /run/hcw-coder-docker
+  # (a directory systemd-tmpfiles creates at boot). Every workspace runs
+  # there, and whatever a compromised server asks that daemon for — a
+  # privileged container, a bind of `/` — is privileged inside that user's
+  # namespace and is that user on the host, never root. The directory is
+  # mounted rather than the socket file, so the proxy still sees the socket
+  # after that daemon restarts and recreates it; read-only, which does not
+  # stop the proxy connecting.
   #
-  # The socket is mounted read-only (the proxy only connects to it; a
-  # read-only mount does not restrict API mutations). The proxy sits on the
-  # `coder-control` network with `coder` alone — PostgreSQL shares the
-  # `coder` network with the server and never sees this one — and publishes
-  # no port. Pinned by digest in ansible/group_vars/all.yml
-  # (coder_docker_proxy_image_digest). One of two socket holders on the host;
-  # the other is Portainer, for the owner only, on the loopback (ADR 0032,
-  # amendment of 2026-09-26). vps-agent reaches the daemon through its docker
-  # group membership. Workspaces never receive the socket (templates/hcw-lab).
+  # userns_mode host: the host daemon remaps every container's root to an
+  # unprivileged range (roles/docker), and a remapped root cannot open
+  # another user's socket. The proxy is one of the three containers of this
+  # host's own that opt out; nothing a workspace or a job creates can.
+  #
+  # The proxy sits on the `coder-control` network with `coder` alone —
+  # PostgreSQL shares the `coder` network with the server and never sees
+  # this one — and publishes no port. Pinned by digest in
+  # ansible/group_vars/all.yml (coder_docker_proxy_image_digest). The host's
+  # own socket is held by Portainer, for the owner only, on the loopback
+  # (ADR 0032, amendment of 2026-09-26), and by the lab agent's own proxy
+  # (roles/labs_agent); workspaces never receive a socket (templates/hcw-lab).
   coder-docker-proxy:
     image: ${CODER_DOCKER_PROXY_IMAGE:?set by the coder role in .env from coder_docker_proxy_image and coder_docker_proxy_image_digest}
     container_name: coder-docker-proxy
@@ -212,8 +220,10 @@ services:
       SESSION: "0"
       DISTRIBUTION: "0"
       CONFIGS: "0"
+      SOCKET_PATH: /run/hcw-coder-docker/docker.sock
+    userns_mode: host
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /run/hcw-coder-docker:/run/hcw-coder-docker:ro
     networks:
       - coder-control
     deploy:

@@ -1,4 +1,6 @@
 ---
+# Notified by the daemon.json write and flushed straight after it
+# (tasks/main.yml), so it runs before any later role creates a container.
 - name: Restart docker
   ansible.builtin.systemd_service:
     name: docker

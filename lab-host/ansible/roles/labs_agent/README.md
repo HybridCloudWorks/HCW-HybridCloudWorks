@@ -12,18 +12,42 @@ ADR 0032 settled this: vps-agent is host-native. The reasons are the ones
 that made it the right call before the ADR said so:
 
 - The agent's entire purpose is to spawn `docker run`. A containerised agent
-  needs the Docker socket mounted and a Docker CLI baked into an image the
+  needs a Docker socket mounted and a Docker CLI baked into an image the
   repository does not have (there is no `vps-agent/Dockerfile`), which is a
-  second supply chain to pin for no isolation gain: socket access is host
-  root either way.
+  second supply chain to pin for no isolation gain. Since 2026-10-07 the
+  agent reaches Docker through its own socket proxy and holds no socket and
+  no docker group (step 1, below), whichever way it runs.
 - The env contract in `vps-agent/.env.example` and the Agents tab's own
   diagnostics (`systemctl restart hcw-labs-agent`, `journalctl -u
   hcw-labs-agent`) already assume a host service.
 
 ## What it does
 
-1. `hcw-labs-agent` system user, primary group of the same name, member of
-   `docker`.
+1. `hcw-labs-agent` system user, primary group of the same name, and **no
+   other group** (LAB-5, 2026-10-07): `groups: []` with `append: false`
+   takes it out of `docker` on a host where an earlier run put it there,
+   because the docker group is root on the host. It reaches Docker through
+   `hcw-labs-agent-docker-proxy` instead (`tasks/docker_proxy.yml`): HAProxy
+   from Docker's official image at `labs_agent_docker_proxy_image_digest`,
+   configured from `templates/docker-proxy.haproxy.cfg.j2`, listening on
+   `/run/hcw-labs-agent-docker/docker.sock`, `root:hcw-labs-agent` `0660`
+   in a directory systemd-tmpfiles creates at boot. It passes on exactly the
+   calls `docker run --rm` and `docker rm -f` make for a job (read from
+   Docker CLI 29.8.1, `scripts/fixtures/docker-cli-agent-requests.json`)
+   and refuses every other call, and every container create whose body asks
+   for privilege, a host namespace, the opt-out of the daemon's user
+   namespaces, an added capability, a device, a mount, or a bind other than
+   the job's own read-only staging directory. The template's header says why
+   regular expressions are sound for those rules and what they cannot do
+   (require a setting to be present; the sandbox flags stay the runner's
+   own contract). The container runs with `--userns=host` (it must open the
+   host's socket under the remap), root with every capability dropped, no
+   network at all, a read-only root filesystem and no privilege gain. The
+   unit's `DOCKER_HOST` names the socket, and `ExecStartPre` waits for it.
+   `scripts/lab-host-docker-proxy.test.mjs` evaluates the file's rules
+   against the recorded calls and the escapes; CI parses the rendered file
+   with `haproxy -c` at the pinned image; and the `privilege_checks` role
+   runs one job through it, as this user, at the end of every run.
 2. Node.js 26 from NodeSource's `node_26.x` repository at
    `labs_agent_node_version`, held; the
    install carries `allow_change_held_packages` so a pin bump on a re-run

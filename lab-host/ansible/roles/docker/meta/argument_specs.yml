@@ -4,9 +4,11 @@ argument_specs:
     short_description: Install Docker Engine, buildx and compose at pinned versions from Docker's apt repository
     description:
       - Adds Docker's signed apt repository for the running Ubuntu release, installs
-        docker-ce, docker-ce-cli, containerd.io, docker-buildx-plugin and docker-compose-plugin
-        at the exact versions given, holds them, writes /etc/docker/daemon.json and enables
-        the service.
+        docker-ce, docker-ce-cli, docker-ce-rootless-extras, containerd.io,
+        docker-buildx-plugin and docker-compose-plugin at the exact versions given, holds
+        them, writes /etc/docker/daemon.json and enables the service.
+      - With userns-remap on, refuses to continue unless the daemon reports name=userns, and
+        carries the named volumes in docker_userns_carry_volumes into the remapped root once.
       - Also installs python3-docker and python3-requests from Ubuntu, which the
         community.docker modules the caddy role uses need on the target interpreter.
     author: HybridCloudWorks
@@ -55,5 +57,40 @@ argument_specs:
         type: dict
         required: false
         description:
-          - Rendered verbatim as /etc/docker/daemon.json. The default sets the json-file
-            log driver with 10 MB x 3 rotation and live-restore.
+          - Rendered verbatim as /etc/docker/daemon.json. The default is built from
+            docker_userns_remap; with it true, the json-file log driver with 10 MB x 3
+            rotation, live-restore, userns-remap default and the containerd image store off,
+            which userns-remap requires (LAB-5).
+          - When the run changes userns-remap, every running container is stopped first and
+            the Restart docker handler is flushed straight after the write, so the roles after
+            this one create their containers in the new data root.
+      docker_userns_remap:
+        type: bool
+        required: false
+        default: true
+        description:
+          - The user-namespace switch (LAB-5). true renders docker_daemon_userns_config into
+            daemon.json (userns-remap default, containerd image store off); false renders
+            docker_daemon_no_userns_config (no remap, containerd image store on, as installed),
+            which is the way back. Either change stops the running containers and restarts the
+            daemon before the later roles run.
+      docker_legacy_root:
+        type: path
+        required: false
+        default: /var/lib/docker
+        description: The data root before the remap, where the volumes to carry are read from.
+      docker_userns_carry_volumes:
+        type: list
+        elements: dict
+        required: false
+        default: []
+        description:
+          - Named volumes copied once from the pre-remap root into the remapped one, each
+            {name, remapped}. remapped true shifts the files into the remapped uid and gid
+            range (a remapped container owns them); false copies them as they are (a
+            --userns=host container owns them). The source is never changed.
+      docker_userns_carry_state_dir:
+        type: path
+        required: false
+        default: /var/lib/hcw-docker/userns-carry
+        description: Holds one marker per carried volume, so each is carried once.

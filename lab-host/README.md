@@ -14,14 +14,16 @@ every step.
 | `hardening` | `hcwadmin` key-only login with passwordless sudo, sshd drop-in (`PasswordAuthentication no`, `PermitRootLogin no`, `KbdInteractiveAuthentication no`), ufw deny-in/allow-out with TCP 22, 80, 443, unattended-upgrades rebooting at 04:30, fail2ban sshd jail | `/etc/ssh/sshd_config.d/00-hcw-hardening.conf`, `/etc/sudoers.d/90-hcw-admin`, `/etc/apt/apt.conf.d/52hcw-unattended-upgrades`, `/etc/fail2ban/jail.d/hcw-sshd.local` |
 | `vault_tools` | `hcw-vault-set`, which sets one key of the Ansible vault from stdin and prints no value ("The vault", below), and the vault's directory, root-only. The Ansible vault the playbook reads, not HashiCorp Vault, which is the `vault` role | `/usr/local/sbin/hcw-vault-set` (root:root, 0750), `/etc/hcw/ansible` (root:root, 0700) |
 | `arc` | Azure Connected Machine agent 1.68.03532.1399 from Microsoft's apt repository, held, then `azcmagent connect` to `rg-lab-hybrid-prod-cus` as `arcs-lab-hybrid-prod-cus-01` with the onboarding service principal from the vault, skipped once Connected. Nothing until `arc_enabled` is true, which is the host's own switch: the arc fact `scripts/lab/Register-LabArc.ps1 -Connect` writes ("Azure Arc", below) | `/opt/azcmagent/`, `/etc/apt/sources.list.d/microsoft-prod.sources`; the connect configuration is a temporary root-only file deleted in the same run; the switch is `/etc/ansible/facts.d/hcw_arc.fact` |
-| `docker` | Docker Engine 29.8.1, buildx 0.37.1 and compose 5.5.1 from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore` | `/etc/docker/daemon.json` |
+| `docker` | Docker Engine 29.8.1, buildx 0.37.1, compose 5.5.1 and the rootless extras from Docker's apt repository, held; `json-file` logs 10 MB x 3, `live-restore`, **`userns-remap: default`** with the containerd image store off (LAB-5): a container's root is an unprivileged uid on the host. The run that turns the remap on stops the running containers, restarts the daemon at once and carries Coder's PostgreSQL volume and Portainer's into the new data root (`roles/docker/README.md`, "User namespaces") | `/etc/docker/daemon.json`, `/usr/local/libexec/hcw-docker-volume-carry`, `/var/lib/hcw-docker/userns-carry/` |
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex. Panes only (owner decision 2026-09-28): every name can be framed by the site alone, and a top-level browser visit is redirected to `https://hybridcloudworks.com/education/labs` (`roles/caddy/README.md`, "Panes only") | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
-| `coder` | Coder Community edition v2.37.3, PostgreSQL 18.6 and a Docker socket proxy (tecnativa/docker-socket-proxy 0.3.0, the only Compose service holding the socket, read-only; LAB-5) under Docker Compose from `../coder/docker-compose.yml`, all by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days; `hcw-coder-template-push`, which publishes the workspace template from the checkout ("Publishing the template", below). On since 2026-09-28, for members of the `HybridCloudWorks` GitHub organisation only | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `/usr/local/sbin/hcw-coder-template-push` (root:root, 0750), `coder-postgres-backup.timer`, `/var/backups/coder/` |
-| `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent` (in `docker`), Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt` |
-| `lab_images` | Every image a lab job runs, pulled by digest before any job needs it: each value of `IMAGES` in `vps-agent/lib/capabilities.js`, and the Coder workspace image from `../coder/templates/hcw-lab/main.tf` while `coder_enabled` is true. Read from the checkouts, never copied, so a pin bump needs no edit here; digests no pin names are removed from the lab's own repositories and nothing else is touched (`roles/lab_images/README.md`) | Docker's image store; the plan is `roles/lab_images/files/lab-images.mjs`, run from the playbook's checkout |
-| `portainer` | Portainer Business Edition 2.45.1 (LTS) by digest, one container with the Docker socket, HTTPS on **127.0.0.1:9443 only**, plain HTTP off, no Caddy route; reached through an SSH tunnel. Nothing until `portainer_enabled` is true | Container `portainer`, volume `portainer-data` |
+| `coder_sandbox` | A **rootless** Docker daemon for Coder's workspaces, run by the unprivileged system user `hcw-coder-docker` from a systemd user unit kept up by lingering, with its own subordinate id range and the cpu, memory and pids controllers delegated so the workspace limits hold (LAB-5). Every workspace runs here, and a privileged container a compromised Coder server asks for is that user's, never root's. Off while Coder is | User `hcw-coder-docker` (home `/var/lib/hcw-coder-docker`, the daemon's data under `~/.local/share/docker`), `/etc/systemd/user/hcw-coder-docker.service`, socket `/run/hcw-coder-docker/docker.sock` (directory from `/etc/tmpfiles.d/hcw-coder-docker.conf`), `/etc/systemd/system/user@.service.d/delegate.conf` |
+| `coder` | Coder Community edition v2.37.3, PostgreSQL 18.6 and a Docker socket proxy (tecnativa/docker-socket-proxy 0.3.0, read-only, holding the `coder_sandbox` daemon's socket and never the host's; LAB-5) under Docker Compose from `../coder/docker-compose.yml`, all by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days; `hcw-coder-template-push`, which publishes the workspace template from the checkout ("Publishing the template", below). On since 2026-09-28, for members of the `HybridCloudWorks` GitHub organisation only | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `/usr/local/sbin/hcw-coder-template-push` (root:root, 0750), `coder-postgres-backup.timer`, `/var/backups/coder/` |
+| `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent`, **in no docker group** (LAB-5): it reaches Docker through `hcw-labs-agent-docker-proxy`, HAProxy 3.4.6 by digest with the allowlist in `roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2` (the calls a job makes, and no create body that asks for privilege, a host namespace, a device, a mount or a bind beyond the job's own directory), on a Unix socket only the agent's group may open. Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt`, `/etc/hcw/labs-agent-docker-proxy/haproxy.cfg`, socket `/run/hcw-labs-agent-docker/docker.sock` (root:hcw-labs-agent, 0660) |
+| `lab_images` | Every image a lab job runs, pulled by digest before any job needs it: each value of `IMAGES` in `vps-agent/lib/capabilities.js` into the host daemon, and the Coder workspace image from `../coder/templates/hcw-lab/main.tf` into the `coder_sandbox` daemon while `coder_enabled` is true. Read from the checkouts, never copied, so a pin bump needs no edit here; digests no pin names are removed from the lab's own repositories and nothing else is touched (`roles/lab_images/README.md`) | Docker's image store; the plan is `roles/lab_images/files/lab-images.mjs`, run from the playbook's checkout |
+| `portainer` | Portainer Business Edition 2.45.1 (LTS) by digest, one container with the Docker socket (and `--userns=host`, which the socket needs under the remap), HTTPS on **127.0.0.1:9443 only**, plain HTTP off, no Caddy route; reached through an SSH tunnel. Nothing until `portainer_enabled` is true | Container `portainer`, volume `portainer-data` |
 | `vault` | HashiCorp Vault 2.1.1 host-native as `vault.service` under user `vault`, the download checked against HashiCorp's signature on SHA256SUMS; raft storage; API on **127.0.0.1:8200** and cluster port on **127.0.0.1:8201**, TLS from a certificate generated on the host. For lab-host secrets only; never initialised or unsealed by the role. Nothing until `vault_enabled` is true | `/usr/local/bin/vault`, `/opt/vault/` (downloads, signing key), `/etc/vault.d/vault.hcl` (root:vault, 0640), `/etc/vault.d/tls/`, `/var/lib/vault` (vault, 0700), `/etc/profile.d/hcw-vault.sh` |
+| `privilege_checks` (from `post_tasks`) | Nothing but its check script: fails the run unless `hcw-labs-agent` is in no docker group, `docker info` reports `name=userns`, the agent's proxy socket is root:hcw-labs-agent 0660, one shell-echo job run as the agent user through the proxy prints its payload while `docker ps` and a privileged `docker run` are refused, and (with Coder on) `coder-docker-proxy` carries every policy key the installed Compose file sets, mounts the sandbox daemon's socket directory alone, and that daemon reports `name=rootless` | `/usr/local/libexec/hcw-labs-agent-proxy-check.mjs` |
 
 Each role's `README.md` explains its decisions; `meta/argument_specs.yml` is
 its variable contract. Every version, digest and checksum is in
@@ -32,13 +34,17 @@ its variable contract. Every version, digest and checksum is in
 `hardening`, because `hcw-vault-set` is how a missing vault key is added and
 a later role that stops on one should find it installed; `arc` next,
 because the agent needs nothing the later roles install and the host should
-appear in Azure even when a later role fails; `coder` after `caddy`, because
+appear in Azure even when a later role fails; `docker` before every role
+that runs a container, because it restarts the daemon at once when its
+configuration changes; `coder_sandbox` before `coder`, because Coder's
+proxy mounts that daemon's socket directory; `coder` after `caddy`, because
 its route is a file in Caddy's `conf.d`, and before `labs_agent`;
 `lab_images` straight after `labs_agent`, because its plan runs on the
 Node.js that role installs and reads the agent's checkout; `portainer`
 and `vault` last, because nothing above needs either, so a failure there
-leaves the lab services configured. Docker Compose on this host is
-for Coder and its PostgreSQL only (ADR 0032); Portainer is a single
+leaves the lab services configured; and `privilege_checks` from
+`post_tasks`, after every role and the handlers they notified. Docker
+Compose on this host is for Coder and its PostgreSQL only (ADR 0032); Portainer is a single
 container the role runs directly, Caddy, the agent and Vault are host
 services, and Coder's Caddy route is `/etc/caddy/conf.d/10-coder.caddy`,
 the pattern `00-apex.caddy` shows.
@@ -48,6 +54,36 @@ node_exporter, Coder, Portainer and Vault listen on `127.0.0.1`, and the
 two that publish through Docker (Coder, Portainer) name `127.0.0.1` in the
 publish itself, because Docker's iptables rules for a published port come
 before ufw's.
+
+## Container-runtime privilege separation (LAB-5)
+
+Two Docker daemons and three ways in, kept apart (estate review
+2026-10-06, finding LAB-5; ADR 0032, amendment of 2026-10-07):
+
+- **The host daemon remaps user namespaces.** `userns-remap: default`, so
+  a job container's root, and Coder's server's and PostgreSQL's, is an
+  unprivileged uid of the `dockremap` range on the host. Only three of this
+  host's own containers opt out (`--userns=host`), because each must open
+  a Docker socket: the two proxies and Portainer.
+- **The agent is in no docker group.** It reaches the host daemon through
+  `hcw-labs-agent-docker-proxy`, whose allowlist is the exact calls a job
+  makes (read from Docker CLI 29.8.1, `scripts/fixtures/docker-cli-agent-requests.json`)
+  and whose create rules refuse a privileged container, a host namespace,
+  the remap's opt-out, a device, a mount, an added capability and any bind
+  but the job's own read-only directory. `scripts/lab-host-docker-proxy.test.mjs`
+  runs the file's rules against the recorded calls and those escapes.
+- **Coder never reaches the host daemon.** Its proxy holds the socket of
+  the `coder_sandbox` daemon, rootless under `hcw-coder-docker`, where every
+  workspace runs. The proxy still reads paths only; the containment is that
+  whatever it lets through is that user's.
+
+`roles/privilege_checks` checks all three at the end of every run and fails
+it with what to do. After the bootstrap that first turns this on, the owner
+pastes the verification in the
+[Labs host runbook](../docs/runbooks/labs-host.md#container-runtime-privilege-separation-lab-5);
+that page also says what the switch costs (running workspaces and jobs are
+stopped, and workspaces start again on the sandbox daemon with an empty
+home volume) and how to take it back.
 
 ## First run
 
@@ -1235,6 +1271,27 @@ A passing result has no `not ok` line and ends with
 one line reads `skip -` instead of comparing the data collection rule; CI
 compares it.
 
+The same job runs the test of `hcw-docker-volume-carry`
+(`ansible/roles/docker/README.md`, "User namespaces"), which copies Coder's
+PostgreSQL volume into the remapped data root. It chowns, so it runs as
+root, which the image is. PowerShell, from the repository root:
+
+```powershell
+docker run --rm --network none -v "${PWD}\lab-host:/work:ro" -w /work/ansible --entrypoint bash ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 roles/docker/tests/hcw-docker-volume-carry.test.sh
+```
+
+The same in bash (Git Bash or Linux), from the repository root:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm --network none -v "$(pwd)/lab-host:/work:ro" -w /work/ansible --entrypoint bash ghcr.io/ansible/community-ansible-dev-tools@sha256:775c81d53058009dd47b97872f4a86d3b0a9ce16ad9af3cc48514ce4197aa787 roles/docker/tests/hcw-docker-volume-carry.test.sh
+```
+
+A passing result has no `not ok` line and ends with
+`hcw-docker-volume-carry.test.sh:` and the number passed, then `0 failed`.
+The agent's Docker proxy configuration is checked by
+`scripts/lab-host-docker-proxy.test.mjs` (the `scripts (operations)` row)
+and parsed by `haproxy -c` in the same `ansible-lint (lab-host)` job.
+
 The Coder files have their own checks — the hardening test, the Compose
 parse and `terraform validate` — listed in
 [`../coder/README.md`](../coder/README.md) and run by the
@@ -1267,13 +1324,14 @@ advisories".
 
 | Pin | Lives in | How to read the current value |
 | --- | --- | --- |
-| Docker, buildx, compose | `docker_release_pins`, one entry per Ubuntu codename (the version strings name the release) | `roles/docker/README.md` |
+| Docker, buildx, compose, rootless extras | `docker_release_pins`, one entry per Ubuntu codename (the version strings name the release); `docker-ce-rootless-extras` takes the engine string | `roles/docker/README.md` |
 | Azure Connected Machine agent | `arc_agent_version` | `roles/arc/README.md` |
 | apt signing keys | `docker_apt_key_checksum`, `labs_agent_node_apt_key_checksum`, `arc_apt_key_checksums` (per codename: Microsoft signs the 26.04 and 24.04 repositories with different keys) | The bash lines below this table; a changed key is a decision, not a refresh |
 | Caddy, Cloudflare module, builder image digest | `caddy_*` | `roles/caddy/README.md`; the digest is the index from `docker buildx imagetools inspect caddy:2.11.4-builder`, and the image is pulled by that digest, not by tag |
 | Coder, PostgreSQL | `coder_image_*`, `coder_postgres_image_*` | `roles/coder/README.md`; index digests from `docker buildx imagetools inspect`, run as `image@digest` |
 | Workspace image, Terraform providers, `code-server` module | `templates/hcw-lab/main.tf` under `../coder` | `../coder/README.md`, "Updating"; republished with `hcw-coder-template-push` after the `bootstrap.sh` run that checks it out ("Publishing the template", above). While `coder_enabled` is true, that run also pulls the new workspace digest (`lab_images`) |
 | Job images | `IMAGES` in `vps-agent/lib/capabilities.js` | The comment above `IMAGES` there. Nothing to bump here: the next run pulls the new digest and removes the one it replaced (`roles/lab_images/README.md`) |
+| The agent's Docker proxy (HAProxy) | `labs_agent_docker_proxy_image_tag`, `labs_agent_docker_proxy_image_digest` | The newest release of HAProxy's newest LTS line (https://endoflife.date/api/v1/products/haproxy/), the `-alpine` tag's index digest from the registry's `Docker-Content-Digest` and `docker buildx imagetools inspect`, which must agree. CI parses the proxy's configuration with `haproxy -c` at the new digest. No floor checks it |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
 | Portainer | `portainer_image_tag`, `portainer_image_digest` | `roles/portainer/README.md`, "Bumping the pin"; the newest LTS from Portainer's release list, the index digest from `docker buildx imagetools inspect`. No floor checks it: endoflife.date has no Portainer product |
 | HashiCorp Vault and its signing key | `vault_version`, `vault_checksum`, `vault_pgp_key_checksum` | `roles/vault/README.md`, "Bumping the pin"; the checksum is the `linux_amd64.zip` line of the release's signed SHA256SUMS, and `scripts/version-floors.json` holds the version to the newest line. A changed key is a decision, not a refresh |

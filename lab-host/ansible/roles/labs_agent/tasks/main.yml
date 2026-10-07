@@ -5,13 +5,18 @@
     system: true
     state: present
 
-- name: Create the agent user and put it in the docker group
+# No supplementary groups, and the docker group above all (LAB-5,
+# 2026-10-07): the docker group is root on this host. append false takes the
+# user out of it on a host where an earlier run put it there. The agent
+# reaches Docker through hcw-labs-agent-docker-proxy instead
+# (tasks/docker_proxy.yml), and the process picks the change up when the
+# unit's change below restarts it.
+- name: Create the agent user, in no group but its own
   ansible.builtin.user:
     name: "{{ labs_agent_user }}"
     group: "{{ labs_agent_group }}"
-    groups:
-      - docker
-    append: true
+    groups: []
+    append: false
     system: true
     shell: /usr/sbin/nologin
     home: "{{ labs_agent_home }}"
@@ -99,6 +104,9 @@
     owner: "{{ labs_agent_user }}"
     group: "{{ labs_agent_group }}"
     mode: "0750"
+
+- name: Run the Docker socket proxy the agent reaches Docker through
+  ansible.builtin.import_tasks: docker_proxy.yml
 
 - name: Check out the repository at labs_agent_repo_ref
   ansible.builtin.git:

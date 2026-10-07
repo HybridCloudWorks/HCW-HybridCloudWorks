@@ -2,7 +2,9 @@
 // over the two files that define it (issue #679, from the boundary comment on
 // the issue):
 //
-//   1. the Docker socket is mounted into the `coder` server service only;
+//   1. no service holds the host's Docker socket: the proxy holds the
+//      rootless sandbox daemon's (LAB-5, 2026-10-07), and the server reaches
+//      Docker only through the proxy;
 //   2. nothing is `privileged`;
 //   3. the workspace mounts no host path, only its own named volume;
 //   4. the workspace joins its own bridge network, not the Compose network;
@@ -109,17 +111,35 @@ test('the Compose file defines exactly the three services ADR 0032 names', () =>
   assert.deepEqual(Object.keys(services).sort(), ['coder', 'coder-docker-proxy', 'coder-postgres']);
 });
 
-test('the Docker socket is mounted read-only into the proxy service and nowhere else (LAB-5)', () => {
-  const socketLines = (lines) => lines.filter((line) => line.includes('docker.sock'));
-  assert.equal(socketLines(services['coder-docker-proxy']).length, 1, 'the proxy mounts the socket once');
-  assert.ok(
-    /^\s*-\s*\/var\/run\/docker\.sock:\/var\/run\/docker\.sock:ro\s*$/.test(socketLines(services['coder-docker-proxy'])[0]),
-    'the mount is the plain socket path, read-only, not a directory above it',
+test('no service holds the host\'s Docker socket; the proxy holds the sandbox daemon\'s, read-only (LAB-5)', () => {
+  const hostSocket = (lines) => lines.filter((line) => /\/var\/run\/docker\.sock|\/run\/docker\.sock/.test(line));
+  for (const [name, lines] of Object.entries(services)) {
+    assert.equal(hostSocket(lines).length, 0, `${name} never mounts or names the host daemon's socket`);
+  }
+  const proxy = services['coder-docker-proxy'];
+  const mounts = proxy.filter((line) => /^\s*-\s*\/.+:.+$/.test(line));
+  assert.deepEqual(
+    mounts.map((line) => line.trim()),
+    ['- /run/hcw-coder-docker:/run/hcw-coder-docker:ro'],
+    'the proxy\'s one mount is the coder_sandbox daemon\'s socket directory, read-only',
   );
-  assert.equal(socketLines(services.coder).length, 0, 'the coder server never sees the socket');
-  assert.equal(socketLines(services['coder-postgres']).length, 0, 'postgres never sees the socket');
-  assert.equal(codeLines(mainTf).filter((line) => line.includes('docker.sock')).length, 0, 'the template never names the socket');
-  assert.equal(codeLines(mainTf).filter((line) => /\/var\/run\b/.test(line)).length, 0, 'the template never reaches under /var/run');
+  assert.ok(
+    proxy.some((line) => /^\s*SOCKET_PATH:\s*\/run\/hcw-coder-docker\/docker\.sock\s*$/.test(line)),
+    'and it connects to that daemon\'s socket',
+  );
+  assert.equal(proxy.filter((line) => /^\s*userns_mode:\s*host\s*$/.test(line)).length, 1, 'the proxy opts out of the host daemon\'s remap, which it needs to open another user\'s socket');
+  for (const name of ['coder', 'coder-postgres']) {
+    assert.equal(services[name].filter((line) => /userns_mode/.test(line)).length, 0, `${name} stays remapped`);
+    assert.equal(services[name].filter((line) => /hcw-coder-docker/.test(line)).length, 0, `${name} never sees the sandbox daemon's socket`);
+  }
+  assert.equal(codeLines(mainTf).filter((line) => line.includes('docker.sock')).length, 0, 'the template never names a socket');
+  assert.equal(codeLines(mainTf).filter((line) => /\/var\/run\b|\/run\/hcw-/.test(line)).length, 0, 'the template never reaches under /var/run or the socket directory');
+});
+
+test('the socket directory the proxy mounts is the one the coder_sandbox role creates (LAB-5)', () => {
+  const sandboxVars = readFileSync(join(here, '..', '..', '..', 'ansible', 'roles', 'coder_sandbox', 'vars', 'main.yml'), 'utf8');
+  assert.match(sandboxVars, /^coder_sandbox_socket_dir: \/run\/hcw-coder-docker$/m);
+  assert.match(sandboxVars, /^coder_sandbox_socket: "\{\{ coder_sandbox_socket_dir \}\}\/docker\.sock"$/m);
 });
 
 test('the coder server keeps its non-root user and reaches the daemon only through the proxy', () => {

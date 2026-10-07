@@ -119,6 +119,10 @@ are recorded once, here, before any of them is implemented.
    (`vps-agent/lib/docker-runner.js`). A workspace never receives the socket,
    a privileged flag or a host path, and the template test in #679 asserts
    that. The privilege boundary this leaves is recorded under consequences.
+   (Since the [amendment of 2026-10-07](#amendment-2026-10-07-container-runtime-privilege-separation-lab-5),
+   LAB-5: the agent is in no `docker` group and reaches Docker through its
+   own allowlisting proxy, the daemon remaps user namespaces, and the Coder
+   server reaches a separate rootless daemon where every workspace runs.)
    The site never signs learners in and never embeds Coder:
    `frontend/staticwebapp.config.json` keeps `frame-src` at `'self'` plus the
    Entra sign-in origin and a closed `connect-src`. The site links out to
@@ -610,6 +614,200 @@ deleted key would lose the Vault for good.
 - Once the seal is on, `bootstrap.sh` must never run at a commit older than
   #726, whose role would write a configuration without it.
 
+## Amendment 2026-10-07: container-runtime privilege separation (LAB-5)
+
+**Status: decided 2026-10-07 under the estate review's finding LAB-5
+(#951), and in effect on the host from the first `bootstrap.sh` run after
+the merge, which the owner makes.** The evidence the review asks for is the
+owner's to collect on the host
+([Labs host runbook](../runbooks/labs-host.md#container-runtime-privilege-separation-lab-5)).
+
+**Context.** Decision 4 accepted that Docker daemon access is root on the
+host, and the consequences bullet below names the two holders and the
+revisit trigger: "moving workspaces and jobs to a rootless or separate
+daemon". The estate review of 2026-10-06 rated that High (LAB-5). #900 put a
+path allowlist in front of the Coder server and tightened the agent's unit,
+and left three things open: the agent's user was still in the `docker`
+group; no container ran in a user namespace, so a container escape was root
+on the host; and a compromised Coder server could still create a privileged
+container through an allowed endpoint, because the proxy reads paths, not
+bodies.
+
+**Decision.**
+
+1. **The agent leaves the docker group and reaches the host daemon through
+   its own socket proxy.** `hcw-labs-agent-docker-proxy` is HAProxy 3.4.6
+   (the newest LTS line) from Docker's official image, pinned by digest,
+   with its configuration in this repository
+   (`lab-host/ansible/roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2`).
+   It listens on a Unix socket owned `root:hcw-labs-agent` with mode 0660,
+   in a container with no network, a read-only root filesystem and every
+   capability dropped, and the unit's `DOCKER_HOST` names it. Its allowlist
+   is the exact calls `docker run --rm` and `docker rm -f` make for a job,
+   read from Docker CLI 29.8.1, the host's pin, against a recording daemon
+   (`scripts/fixtures/docker-cli-agent-requests.json`): ping, a create named
+   `labjob-<12 hex>`, attach, wait and start by container id, and a forced
+   remove of a `labjob-` name. No pull (`lab_images` pulls as root first),
+   no exec, inspect, list, volume, network, image or system call.
+
+   A path allowlist does not read bodies, and the create body is where a
+   privileged container is asked for. So the proxy reads that body too and
+   refuses a create that carries privileged mode, a host or shared
+   namespace, the opt-out of the daemon's user namespaces (`UsernsMode`), an
+   added capability, a device, a mount, a bind other than the job's own
+   staging directory read-only, unmasked kernel paths, a security option
+   other than `no-new-privileges`, a network other than `none`, a sysctl,
+   another runtime or log driver, or an image that is not a digest. These
+   are deny-anywhere regular expressions, and that is sound only because of
+   two facts the proxy also enforces: the agent's bodies are ASCII JSON with
+   no backslash in them (the CLI escapes nothing in them), and with any
+   other byte and every backslash refused, a key cannot be spelled through
+   a JSON escape or a character Go's decoder folds to ASCII (`ſ` to `s`,
+   `K` to `k`). A rule that matches a key anywhere then matches it wherever
+   Docker would read it, in any case and however often it is repeated.
+   `scripts/lab-host-docker-proxy.test.mjs` evaluates the file's own rules
+   against every recorded request, against creates that would turn a job
+   container into a way out, and against calls a job never makes; CI parses
+   the rendered file with `haproxy -c` at the pinned image.
+
+   Why a proxy and not a rootless daemon for the agent, which the review
+   also offered: the job containers stay on the host daemon, which item 2
+   puts in a user namespace anyway, so a rootless daemon for the agent would
+   add a third daemon and image store to contain what the remap already
+   contains, while the proxy also takes away everything a job does not
+   need. And the agent's unit has `ProtectHome=true`, which hides
+   `/run/user`, where a rootless daemon's socket lives.
+
+2. **User namespaces on the host daemon.** `/etc/docker/daemon.json` sets
+   `userns-remap: default`: every container's root is the first id of the
+   `dockremap` user's subordinate range on the host, and its uid N that id
+   plus N. The job containers, Coder's server and PostgreSQL run that way.
+   It needs the containerd image store off, because that store "is not
+   available when using user namespace remapping"
+   ([Docker](https://docs.docker.com/engine/storage/containerd/), read
+   2026-10-07; moby#47377), so the daemon goes back to the overlay2 graph
+   driver, and `docker info` reports `name=userns` in its security options.
+
+   Three of this host's own containers opt out with `--userns=host`, and
+   nothing else can: the two socket proxies and Portainer, which must open
+   a Docker socket that a remapped root cannot. The Caddy builder also runs
+   that way, once, to write the binary into a root-owned directory. None is
+   created through a proxy: they are created by root (Ansible and Compose), and the agent's
+   proxy refuses any create that sets `UsernsMode`. Coder's server never
+   reaches this daemon at all (item 3).
+
+   Turning the remap on gives the daemon a new data root and hides the old
+   one. So the run that switches stops every running container first,
+   restarts the daemon before any later role creates a container, and
+   copies two volumes into the new root once: Coder's PostgreSQL cluster
+   (shifted into the remapped range) and Portainer's database (as it is,
+   since Portainer runs with `--userns=host`). The old root is only read,
+   and `-e docker_userns_remap=false` is the way back through the same
+   stop-and-restart. `lab-host/ansible/roles/docker/tests/hcw-docker-volume-carry.test.sh`
+   runs the copy as it ships against a tree shaped like PostgreSQL's.
+
+3. **Coder's server reaches a separate, rootless daemon, never the host's.**
+   The `coder_sandbox` role runs `dockerd-rootless.sh` (from
+   `docker-ce-rootless-extras`, the same build and pin as `docker-ce`) as
+   the unprivileged system user `hcw-coder-docker`, from a systemd user
+   unit kept up by lingering, with its own subordinate id range and the cpu,
+   memory and pids controllers delegated so the template's limits hold.
+   `coder-docker-proxy` mounts that daemon's socket directory instead of the
+   host's socket, and every workspace runs there. The proxy still reads
+   paths only. What changed is what it reaches: a privileged container with
+   `/` bound, asked for by a compromised server or a bad template, is
+   privileged inside `hcw-coder-docker`'s user namespace, and `/` is what
+   that user may see. `docker info` on that daemon reports `name=rootless`,
+   which is user namespaces by construction, the daemon's own included.
+
+   The review offered an authorisation plugin instead. It was the weaker
+   choice here, for four reasons. A plugin sits in the host daemon and
+   cannot tell Coder's requests from root's own, and root's own include the
+   containers that must bind a socket, so its policy would have to trust a
+   caller marker. A policy that denies by field is only as good as its list
+   and has to parse JSON exactly as Docker does. A plugin that is down stops
+   the daemon answering anyone. And the published managed plugin,
+   `openpolicyagent/opa-docker-authz-v2`, was last pushed at 0.9 in January
+   2024, behind its source releases (0.11 on 2026-10-06). A rootless daemon
+   needs no policy, comes from a repository and pin the host already trusts,
+   and is verified by one line of `docker info`.
+
+**What this does not do.**
+
+- **It does not make the regular expressions a parser.** They cannot
+  require a setting to be present: a regular expression cannot tell
+  `HostConfig` from an unknown key that Docker ignores. So network `none`,
+  the read-only root, `cap-drop ALL` and uid 65534 remain the runner's own
+  contract, asserted by `vps-agent/lib/docker-runner.test.js`, and with the
+  remap they are containment of a job, not of the host. A future CLI that
+  escapes a character in a body would be refused rather than passed; the
+  fixture test and the end-of-run check fail first.
+- **It does not separate jobs from the host daemon's other containers by
+  id.** Attach, wait and start take any 64-hex container id, because the
+  CLI uses the id the create returned. A compromised agent could start a
+  stopped container of the host's own or read the output of a running one;
+  it cannot inspect one (no environment), exec into one, or create one
+  outside the rules.
+- **It does not isolate learners from Coder's server.** Coder can still do
+  anything on the sandbox daemon to any workspace, as before; the change is
+  that it cannot do anything as root on the host.
+- **It does not stop a kernel exploit.** A process that escapes a remapped
+  or rootless container is an unprivileged uid that still shares the
+  kernel. Unprivileged user namespaces stay restricted by Ubuntu's AppArmor
+  for everything but `rootlesskit`.
+- **Portainer is still root.** It holds the host's socket by design, for the
+  owner only, on the loopback (amendment of 2026-09-26).
+
+**Consequences of this amendment.**
+
+- Two daemons and two image stores. `lab_images` plans each: the job images
+  on the host daemon, the workspace image (about 484 MB) on the sandbox's.
+  Portainer sees the host daemon only.
+- On the run that turns it on, running jobs fail, workspaces stop, every
+  image is pulled again, and a workspace starts again with an empty home
+  volume, because its old volume belongs to the host daemon's old data root
+  (kept on disk, served by nothing).
+- `bootstrap.sh` checks all of it at the end of every run (`privilege_checks`):
+  the agent in no docker group, `name=userns`, the agent proxy's socket and
+  container, one job run as the agent user through the proxy while
+  `docker ps` and a privileged `docker run` are refused, Coder's proxy
+  carrying the Compose file's policy with the sandbox socket as its one
+  mount, and `name=rootless` behind it.
+- The cpu, cpuset and io controllers are delegated to every user manager on
+  the host, not only `hcw-coder-docker`'s. That widens what a logged-in user
+  may limit for their own processes and nothing else.
+
+**Alternatives considered, for this amendment.**
+
+- **Rootless Docker for the agent's jobs.** Rejected for the reasons in
+  item 1: the remap already contains the jobs, and the proxy narrows the
+  agent further than any daemon would.
+- **An authorisation plugin on the host daemon** for the agent and Coder
+  both. Rejected for the reasons in item 3.
+- **A second rootful daemon for Coder.** Rejected: a privileged container on
+  any rootful daemon is root on the host, so it separates nothing that
+  matters.
+- **Rootless daemons for everything, and no remap.** Rejected: the host's
+  own containers (the Coder server and PostgreSQL among them) would stay
+  without a user namespace, and the review's acceptance reads `docker info`
+  on the host daemon.
+- **A sandboxing runtime (gVisor, Kata, Sysbox) for jobs and workspaces.**
+  Not taken now: a new runtime to pin, patch and explain for one host, when
+  user namespaces answer the finding. It is the next step if a kernel
+  escape becomes the risk to plan for.
+
+**Revisit when:**
+
+- Docker's containerd image store supports `userns-remap` (moby#47377),
+  which lets the host daemon go back to it;
+- the docker CLI pin moves, which needs the fixture recorded again
+  (`scripts/lab/capture-docker-cli-requests.mjs`; the test fails until it
+  is);
+- a workspace needs something a rootless daemon cannot give it (nested
+  Docker, a device), which reopens item 3 and points at Sysbox;
+- the agent needs a Docker call the proxy refuses, which is a change to the
+  allowlist with its own recording, never a wider rule.
+
 ## Consequences and accepted risks
 
 - **Two Terraform workspaces, two lifecycles.** A change to the lab host is a
@@ -717,6 +915,16 @@ deleted key would lose the Vault for good.
   of the socket and the docker group from the server. The agent keeps its
   docker group; its unit gained system-call and address-family filters and
   its `npm ci` runs with `--ignore-scripts`.
+
+  *Amendment 2026-10-07 (LAB-5), the revisit trigger taken:* neither
+  process can drive the host daemon as root any more. The agent is in no
+  `docker` group and reaches the daemon through its own proxy, whose
+  allowlist is the calls a job makes and whose create rules refuse the ways
+  out; the daemon remaps user namespaces, so a job container's root is an
+  unprivileged uid; and the Coder server's proxy holds the socket of a
+  separate rootless daemon run by `hcw-coder-docker`, where every workspace
+  runs. The [amendment of that date](#amendment-2026-10-07-container-runtime-privilege-separation-lab-5)
+  records the choices and what they leave.
 - **Cloudflare API tokens are zone-scoped, and `lab.hybridcloudworks.com` is
   a name in the production zone.** Cloudflare cannot scope a token to one
   record, so any token with DNS edit on `hybridcloudworks.com` can change the
@@ -823,11 +1031,15 @@ deleted key would lose the Vault for good.
   - The control plane is checked by name, not by count: `docker ps` on the
     host shows the Compose services `coder`, `coder-docker-proxy` and
     `coder-postgres` (and the
-    container `portainer` while `portainer_enabled` is true), and
+    container `portainer` while `portainer_enabled` is true, and since the
+    amendment of 2026-10-07 the agent's `hcw-labs-agent-docker-proxy`), and
     `systemctl` shows `caddy`, `hcw-labs-agent` and `node-exporter` active as
     host-native units (and `vault` while `vault_enabled` is true). Every other container carries either the
     Coder workspace label (`com.coder.resource=true`) or the `hcw.lab-job`
-    label the agent sets, and any container with neither is a finding. The
+    label the agent sets, and any container with neither is a finding. Since
+    2026-10-07 workspaces are listed on the sandbox daemon
+    (`docker -H unix:///run/hcw-coder-docker/docker.sock ps`) and job
+    containers on the host's. The
     count is not asserted, because a running workspace or job legitimately
     adds containers. `which kubectl k3s` returns nothing.
   - `/education/labs` shows the Arc status card fed by the Function App's
@@ -853,6 +1065,14 @@ deleted key would lose the Vault for good.
     **Confirm and Create**, code-server opens inside the pane, and a direct
     visit to `https://coder.lab.hybridcloudworks.com/_hcw/lab/` also lands on
     `/education/labs`.
+  - Since the amendment of 2026-10-07 (LAB-5): every `bootstrap.sh` run
+    ends with the `privilege_checks` role passing, and on the host
+    `id hcw-labs-agent` names no `docker` group, `sudo docker info` lists
+    `name=userns` among its security options, `sudo docker -H
+    unix:///run/hcw-coder-docker/docker.sock info` lists `name=rootless`,
+    and `coder-docker-proxy` carries every policy key of
+    `lab-host/coder/docker-compose.yml` with `/run/hcw-coder-docker` as its
+    one mount (the runbook's commands, with what good looks like).
   - Since the amendment of 2026-09-29, accepted and live that day: on the
     host, `sudo systemctl restart vault && sleep 5 && vault status` shows
     `Seal Type azurekeyvault` and `Sealed false`, and `az role assignment

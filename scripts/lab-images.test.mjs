@@ -292,3 +292,84 @@ describe('the plan', () => {
     expect(plan.remove).toEqual([`${RUNNER}@sha256:${hex('8')}`]);
   });
 });
+
+describe('a plan scoped to one daemon (LAB-5)', () => {
+  // Since 2026-10-07 the host daemon runs the jobs and the coder_sandbox
+  // role's rootless daemon runs the workspaces, so the role plans each
+  // daemon on its own: `--scope jobs` for the host, `--scope workspaces`
+  // for the sandbox. Each daemon's pins are its own images and nothing else.
+  const alpine = `alpine:3.24.2@sha256:${hex('a')}`;
+  const runner = `${RUNNER}:new@sha256:${hex('b')}`;
+  const workspaceDigest = `sha256:${hex('c')}`;
+  const checkout = () => fixtureCheckout({ images: { alpine, hcwLabRunner: runner }, template: templateWith(workspaceDigest) });
+
+  it('on the host daemon pins and pulls the capability images only, and removes a workspace image left there', async () => {
+    const pins = await readPins(checkout());
+    const plan = planImages({
+      checkouts: [pins],
+      scope: 'jobs',
+      images: [image(hex('c'), [`${WORKSPACE}@${workspaceDigest}`]), image(hex('b'), [`${RUNNER}@sha256:${hex('b')}`])],
+    });
+    expect(plan.pull).toEqual([`alpine@sha256:${hex('a')}`, `${RUNNER}@sha256:${hex('b')}`]);
+    expect(plan.pinned).not.toContain(`${WORKSPACE}@${workspaceDigest}`);
+    expect(plan.remove).toEqual([`${WORKSPACE}@${workspaceDigest}`]);
+  });
+
+  it('on the sandbox daemon pins and pulls the workspace image only, and never touches alpine', async () => {
+    const pins = await readPins(checkout());
+    const plan = planImages({
+      checkouts: [pins],
+      scope: 'workspaces',
+      images: [
+        image(hex('8'), [`${WORKSPACE}@sha256:${hex('8')}`]),
+        image(hex('a'), [`alpine@sha256:${hex('a')}`]),
+        image(hex('9'), [`${RUNNER}@sha256:${hex('9')}`]),
+      ],
+    });
+    expect(plan.pull).toEqual([`${WORKSPACE}@${workspaceDigest}`]);
+    expect(plan.pinned).toEqual([`${WORKSPACE}@${workspaceDigest}`]);
+    expect(plan.remove).toEqual([`${WORKSPACE}@sha256:${hex('8')}`, `${RUNNER}@sha256:${hex('9')}`]);
+  });
+
+  it('keeps a superseded workspace image while a workspace still runs on it', async () => {
+    const pins = await readPins(checkout());
+    const plan = planImages({
+      checkouts: [pins],
+      scope: 'workspaces',
+      images: [image(hex('8'), [`${WORKSPACE}@sha256:${hex('8')}`])],
+      containers: [{ Id: 'w1', Names: ['/coder-owner-lab'], ImageID: `sha256:${hex('8')}`, State: 'running' }],
+    });
+    expect(plan.remove).toEqual([]);
+    expect(plan.in_use.map((u) => u.containers)).toEqual([['coder-owner-lab']]);
+  });
+
+  it('is what the CLI prints with --scope, the two commands the role runs', () => {
+    const run = (args) =>
+      JSON.parse(execFileSync(process.execPath, [helper, ...args], { input: '', encoding: 'utf8' }));
+    const jobs = run(['--scope', 'jobs', repoRoot]);
+    const workspaces = run(['--scope', 'workspaces', repoRoot]);
+    const capabilityPulls = Object.values(IMAGES).map((ref) => {
+      const [name, digest] = ref.split('@');
+      return `${parseReference(name).repository}@${digest}`;
+    });
+    expect(jobs.pull).toEqual(capabilityPulls);
+    expect(jobs.pinned).toEqual(capabilityPulls);
+    expect(workspaces.pull).toHaveLength(1);
+    expect(workspaces.pull[0]).toMatch(new RegExp(`^${WORKSPACE}@sha256:[0-9a-f]{64}$`));
+    expect(workspaces.pinned).toEqual(workspaces.pull);
+  });
+
+  it('refuses a scope it does not know, in the module and on the command line', async () => {
+    const pins = await readPins(checkout());
+    expect(() => planImages({ checkouts: [pins], scope: 'everything' })).toThrow(/scope is "everything"/);
+    expect(() =>
+      execFileSync(process.execPath, [helper, '--scope', 'everything', repoRoot], { input: '', encoding: 'utf8', stdio: 'pipe' })
+    ).toThrow(/usage/);
+  });
+
+  it('is the scope the role passes for each daemon', () => {
+    const vars = readFileSync(path.join(repoRoot, 'lab-host', 'ansible', 'roles', 'lab_images', 'vars', 'main.yml'), 'utf8');
+    expect(vars).toMatch(/^lab_images_host_plan_argv: >-\n\s+\{\{ \[lab_images_node, lab_images_helper, '--scope', 'jobs'\] \+ lab_images_checkouts \}\}$/m);
+    expect(vars).toMatch(/^lab_images_sandbox_plan_argv: >-\n\s+\{\{ \[lab_images_node, lab_images_helper, '--scope', 'workspaces'\] \+ lab_images_checkouts \}\}$/m);
+  });
+});

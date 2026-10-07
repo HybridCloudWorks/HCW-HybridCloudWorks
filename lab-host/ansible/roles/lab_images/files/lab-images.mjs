@@ -33,7 +33,15 @@
  * stdin as {"images": [...], "containers": [...]} (what
  * community.docker.docker_host_info returns with verbose_output):
  *
- *   node lab-images.mjs [--pull-workspace] <checkout> [<checkout> ...]
+ *   node lab-images.mjs [--pull-workspace] [--scope all|jobs|workspaces] <checkout> [<checkout> ...]
+ *
+ * --scope says which daemon the listing came from (LAB-5, 2026-10-07). The
+ * host daemon runs the jobs and holds the capability images (`jobs`); the
+ * coder_sandbox role's rootless daemon runs the workspaces and holds the
+ * workspace image (`workspaces`). In either, only that scope's images are
+ * pins, so the other scope's images left in a daemon are removed like any
+ * stale one. `all`, the default, is every pin in one daemon, with the
+ * workspace image pulled only under --pull-workspace.
  *
  * Prints the plan as one JSON object on stdout. Exits 1, with the reason on
  * stderr, when a checkout lacks either file, a pin is not a digest
@@ -193,10 +201,21 @@ function containerName(container) {
   return name ? name.replace(/^\//, '') : String(container.Id || '').slice(0, 12);
 }
 
+/** Which daemon a plan is for: the host's (jobs), the sandbox's (workspaces), or one holding both. */
+export const SCOPES = Object.freeze(['all', 'jobs', 'workspaces']);
+
+/** The pins a daemon in `scope` holds, from one checkout's readPins result. */
+function pinsInScope(checkout, scope) {
+  if (scope === 'jobs') return checkout.capabilities;
+  if (scope === 'workspaces') return [checkout.workspace];
+  return [...checkout.capabilities, checkout.workspace];
+}
+
 /**
  * The plan. `checkouts` is readPins' result for each checkout; the pins of
  * all of them are held (the union), so an agent held at an older commit keeps
- * its images while the playbook's commit gets its own.
+ * its images while the playbook's commit gets its own. `scope` limits the
+ * pins to one daemon's (SCOPES above).
  *
  * @returns {{
  *   pinned: string[],        every pin, as repository@digest
@@ -206,15 +225,22 @@ function containerName(container) {
  *   checkouts: string[],
  * }}
  */
-export function planImages({ checkouts, pullWorkspace = false, images = [], containers = [] }) {
-  const pins = checkouts.flatMap((c) => [...c.capabilities, c.workspace]);
+export function planImages({ checkouts, pullWorkspace = false, scope = 'all', images = [], containers = [] }) {
+  if (!SCOPES.includes(scope)) {
+    throw new Error(`scope is ${JSON.stringify(scope)}; expected one of ${SCOPES.join(', ')}`);
+  }
+  const pins = checkouts.flatMap((c) => pinsInScope(c, scope));
   const pinned = new Set(pins.map((p) => p.pull));
   const pinnedRepositories = new Set(pins.map((p) => p.repository));
   const isLabRepository = (repository) =>
     pinnedRepositories.has(repository) || LAB_REPOSITORY_PATTERN.test(repository);
 
   const pull = unique(
-    checkouts.flatMap((c) => [...c.capabilities, ...(pullWorkspace ? [c.workspace] : [])]).map((p) => p.pull)
+    checkouts
+      .flatMap((c) =>
+        scope === 'all' ? [...c.capabilities, ...(pullWorkspace ? [c.workspace] : [])] : pinsInScope(c, scope)
+      )
+      .map((p) => p.pull)
   );
 
   const remove = [];
@@ -258,9 +284,22 @@ async function readStdin() {
 
 export async function main(args) {
   const pullWorkspace = args.includes('--pull-workspace');
-  const checkoutArgs = unique(args.filter((a) => a !== '--pull-workspace'));
-  if (checkoutArgs.length === 0) {
-    throw new Error('usage: node lab-images.mjs [--pull-workspace] <checkout> [<checkout> ...] < docker-host.json');
+  let scope = 'all';
+  const rest = [];
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--pull-workspace') continue;
+    if (args[i] === '--scope') {
+      scope = args[i + 1];
+      i += 1;
+      continue;
+    }
+    rest.push(args[i]);
+  }
+  const checkoutArgs = unique(rest);
+  if (checkoutArgs.length === 0 || !SCOPES.includes(scope)) {
+    throw new Error(
+      'usage: node lab-images.mjs [--pull-workspace] [--scope all|jobs|workspaces] <checkout> [<checkout> ...] < docker-host.json'
+    );
   }
   const input = (await readStdin()).trim();
   const host = input ? JSON.parse(input) : {};
@@ -269,6 +308,7 @@ export async function main(args) {
   return planImages({
     checkouts,
     pullWorkspace,
+    scope,
     images: host.images || [],
     containers: host.containers || [],
   });

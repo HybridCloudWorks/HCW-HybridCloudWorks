@@ -1,0 +1,64 @@
+---
+argument_specs:
+  main:
+    short_description: Fail the run unless the lab host's container runtime is privilege-separated (LAB-5)
+    description:
+      - Fails unless the agent user is in no docker group, the host daemon reports name=userns, the
+        agent's proxy socket is root:<agent group> 0660 and its container has no network, a
+        read-only root and no capabilities, and one shell-echo job run as the agent user through
+        that proxy prints its payload while docker ps and a privileged docker run are refused.
+      - While Coder is enabled, also fails unless coder-docker-proxy runs with every policy key the
+        installed Compose file sets and mounts the sandbox daemon's socket directory alone, and that
+        daemon reports name=rootless.
+      - Prints the docker group's other members, each of which is root on the host.
+      - Changes nothing but the check script it installs; the check job removes its own container.
+    author: HybridCloudWorks
+    options:
+      privilege_checks_agent_user:
+        type: str
+        required: false
+        description: The agent's user; defaults to labs_agent_user.
+      privilege_checks_agent_app_dir:
+        type: path
+        required: false
+        description: The agent's vps-agent directory, whose runner the check job uses; defaults to labs_agent_home/vps-agent.
+      privilege_checks_agent_tmp_dir:
+        type: path
+        required: false
+        default: /var/lib/hcw-labs-agent/tmp
+        description: The agent unit's TMPDIR, where the check job is staged.
+      privilege_checks_agent_socket:
+        type: path
+        required: false
+        default: /run/hcw-labs-agent-docker/docker.sock
+        description: The agent proxy's socket.
+      privilege_checks_agent_proxy_container:
+        type: str
+        required: false
+        default: hcw-labs-agent-docker-proxy
+        description: The agent proxy's container name.
+      privilege_checks_userns_required:
+        type: bool
+        required: false
+        description:
+          - Fail unless the host daemon reports name=userns. Defaults to docker_userns_remap, so
+            the deliberate way back is a warning instead.
+      privilege_checks_coder_enabled:
+        type: bool
+        required: false
+        description: Check Coder's proxy and the sandbox daemon; defaults to coder_enabled.
+      privilege_checks_coder_compose_file:
+        type: path
+        required: false
+        default: /etc/hcw/coder/docker-compose.yml
+        description: The Compose file the coder role installs, whose proxy policy the container must carry.
+      privilege_checks_sandbox_socket_dir:
+        type: path
+        required: false
+        default: /run/hcw-coder-docker
+        description: The coder_sandbox daemon's socket directory, the one mount Coder's proxy may have.
+      privilege_checks_sandbox_docker_host:
+        type: str
+        required: false
+        default: unix:///run/hcw-coder-docker/docker.sock
+        description: The coder_sandbox daemon's socket.

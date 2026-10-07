@@ -1,0 +1,22 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+#
+# The socket directory is fixed, not a knob: lab-host/coder/docker-compose.yml
+# mounts it into coder-docker-proxy by this literal path, and
+# template.test.mjs asserts that. It is created at boot by systemd-tmpfiles,
+# before docker.service and before the user manager, so the proxy's bind
+# mount and rootlesskit's copy of /run both find it.
+coder_sandbox_socket_dir: /run/hcw-coder-docker
+coder_sandbox_socket: "{{ coder_sandbox_socket_dir }}/docker.sock"
+coder_sandbox_docker_host: "unix://{{ coder_sandbox_socket }}"
+
+# The daemon's own configuration, read by dockerd-rootless.sh's dockerd from
+# $XDG_CONFIG_HOME/docker/daemon.json. `hosts` moves the socket out of
+# $XDG_RUNTIME_DIR (/run/user/<uid>, a 0700 tmpfs that exists only while the
+# user manager runs) to the fixed directory above.
+coder_sandbox_daemon_config:
+  hosts:
+    - "{{ coder_sandbox_docker_host }}"
+  log-driver: json-file
+  log-opts: "{{ coder_sandbox_log_opts }}"

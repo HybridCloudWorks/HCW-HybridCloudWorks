@@ -404,7 +404,10 @@ const refreshable = (bumper) => Object.assign(bumper, { refresh: true });
  * A Docker apt pin, moved in every codename's entry together: the comment in
  * group_vars says the upstream versions are the same for both releases, and a
  * bump that could not keep that is a note. `alsoAt` names packages pinned to
- * the same version string (docker-ce-cli rides docker_version).
+ * the same version string (docker-ce-cli rides docker_version, and so, since
+ * LAB-5 on 2026-10-07, does docker-ce-rootless-extras, which the coder_sandbox
+ * role runs Coder's workspaces under), so a bump the host could not install
+ * fails here instead.
  */
 function dockerAptBumper(field, packageName, alsoAt = []) {
   return refreshable(async ({ http, latest }) => {
@@ -443,7 +446,7 @@ function imageBumper({ image, tagKey, digestKey, tagFor, extra = () => [] }) {
 
 /** How each BEHIND row of the check becomes edits and evidence. Keys match LABELS in lab-pins-upstream.mjs. */
 export const HOST_BUMPERS = {
-  dockerEngine: dockerAptBumper('engine', 'docker-ce', ['docker-ce-cli']),
+  dockerEngine: dockerAptBumper('engine', 'docker-ce', ['docker-ce-cli', 'docker-ce-rootless-extras']),
   containerd: dockerAptBumper('containerd', 'containerd.io'),
   dockerBuildx: dockerAptBumper('buildx', 'docker-buildx-plugin'),
   dockerCompose: dockerAptBumper('compose', 'docker-compose-plugin'),

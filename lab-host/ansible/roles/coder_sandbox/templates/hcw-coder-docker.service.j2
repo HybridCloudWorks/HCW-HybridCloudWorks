@@ -1,0 +1,36 @@
+# {{ ansible_managed }}
+# The rootless Docker daemon Coder's workspaces run on (LAB-5). A user unit,
+# installed for every user manager and run by one: ConditionUser below. The
+# body is what `dockerd-rootless-setuptool.sh install` writes, with the
+# network driver named rather than detected and a check for the socket
+# directory, which must exist before rootlesskit copies /run up.
+[Unit]
+Description=Rootless Docker daemon for Coder's workspaces ({{ coder_sandbox_user }}, LAB-5)
+Documentation=https://docs.docker.com/engine/security/rootless/
+ConditionUser={{ coder_sandbox_user }}
+StartLimitIntervalSec=60s
+StartLimitBurst=3
+
+[Service]
+Environment=PATH=/usr/bin:/usr/sbin:/bin:/sbin
+# Installed by the coder_sandbox role; dockerd-rootless.sh would pick it
+# anyway, and naming it means a missing package fails here, not as a slower
+# fallback.
+Environment=DOCKERD_ROOTLESS_ROOTLESSKIT_NET=slirp4netns
+ExecStartPre=/usr/bin/test -d {{ coder_sandbox_socket_dir }}
+ExecStart=/usr/bin/dockerd-rootless.sh
+ExecReload=/bin/kill -s HUP $MAINPID
+TimeoutSec=0
+RestartSec=2
+Restart=always
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+TasksMax=infinity
+Delegate=yes
+Type=notify
+NotifyAccess=all
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

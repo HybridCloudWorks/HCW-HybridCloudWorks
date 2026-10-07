@@ -1,0 +1,58 @@
+---
+argument_specs:
+  main:
+    short_description: Run a rootless Docker daemon as an unprivileged user for Coder's workspaces
+    description:
+      - Creates the system user hcw-coder-docker, gives it a 65536-id subordinate uid and gid
+        range after every range already in /etc/subuid and /etc/subgid, delegates the cpu,
+        cpuset, io, memory and pids cgroup controllers to user managers, and runs
+        dockerd-rootless.sh (from docker-ce-rootless-extras, which the docker role installs at
+        the docker-ce pin) as that user's systemd user unit, kept running by lingering.
+      - The daemon listens on /run/hcw-coder-docker/docker.sock, a directory systemd-tmpfiles
+        creates at boot, which coder-docker-proxy mounts (lab-host/coder/docker-compose.yml).
+        Coder's server reaches this daemon and no other, so a privileged container it creates
+        is privileged inside this user's namespace only (LAB-5).
+      - Refuses to continue unless Ubuntu's AppArmor profile for /usr/bin/rootlesskit is
+        present where unprivileged user namespaces are restricted, and unless the daemon
+        reports rootless, cgroup v2 under systemd, and memory, CPU quota and pids limits,
+        which the workspace template sets.
+      - While coder_sandbox_enabled is false, turns lingering off, which stops the daemon.
+    author: HybridCloudWorks
+    options:
+      coder_sandbox_enabled:
+        type: bool
+        required: false
+        default: true
+        description: Run the daemon. group_vars/all.yml sets it to coder_enabled.
+      coder_sandbox_user:
+        type: str
+        required: false
+        default: hcw-coder-docker
+        description: The unprivileged system user the daemon runs as.
+      coder_sandbox_home:
+        type: path
+        required: false
+        default: /var/lib/hcw-coder-docker
+        description: The user's home; the daemon keeps its images, containers and volumes under ~/.local/share/docker.
+      coder_sandbox_subid_count:
+        type: int
+        required: false
+        default: 65536
+        description: Size of the subordinate uid and gid range given to the user.
+      coder_sandbox_unit_name:
+        type: str
+        required: false
+        default: hcw-coder-docker
+        description: Name of the systemd user unit in /etc/systemd/user.
+      coder_sandbox_log_opts:
+        type: dict
+        required: false
+        default:
+          max-size: "10m"
+          max-file: "3"
+        description: json-file log options for the daemon's containers.
+      coder_sandbox_start_timeout:
+        type: int
+        required: false
+        default: 120
+        description: Seconds to wait for the daemon's socket after starting the user manager.

@@ -8,7 +8,10 @@
 # runs it, and tasks/main.yml refuses any other connection before using them.
 lab_images_helper: "{{ role_path }}/files/lab-images.mjs"
 lab_images_playbook_checkout: "{{ role_path | dirname | dirname | dirname | dirname }}"
-lab_images_helper_argv: >-
-  {{ [lab_images_node, lab_images_helper]
-     + (['--pull-workspace'] if lab_images_pull_workspace | bool else [])
-     + lab_images_checkouts }}
+# One plan per daemon (LAB-5, 2026-10-07): the host daemon runs the jobs and
+# holds the capability images; the coder_sandbox daemon runs the workspaces
+# and holds the workspace image. Each plan's pins are that daemon's only.
+lab_images_host_plan_argv: >-
+  {{ [lab_images_node, lab_images_helper, '--scope', 'jobs'] + lab_images_checkouts }}
+lab_images_sandbox_plan_argv: >-
+  {{ [lab_images_node, lab_images_helper, '--scope', 'workspaces'] + lab_images_checkouts }}

@@ -271,7 +271,7 @@ describe('the host plan', () => {
     expect(HOST_BUMPERS.containerd.refresh).toBe(true);
   });
 
-  it('moves both codenames of a Docker pin from the signed index chain, with the CLI riding the engine', async () => {
+  it('moves both codenames of a Docker pin from the signed index chain, with the CLI and the rootless extras riding the engine', async () => {
     const base = 'https://download.docker.com/linux/ubuntu/dists';
     const routes = {};
     for (const [codename, release] of [
@@ -279,7 +279,7 @@ describe('the host plan', () => {
       ['noble', '24.04'],
     ]) {
       const v = `5:29.9.0-1~ubuntu.${release}~${codename}`;
-      const packages = `Package: docker-ce\nVersion: ${v}\nSHA256: ${hex('1')}\n\nPackage: docker-ce-cli\nVersion: ${v}\nSHA256: ${hex('2')}\n`;
+      const packages = `Package: docker-ce\nVersion: ${v}\nSHA256: ${hex('1')}\n\nPackage: docker-ce-cli\nVersion: ${v}\nSHA256: ${hex('2')}\n\nPackage: docker-ce-rootless-extras\nVersion: ${v}\nSHA256: ${hex('3')}\n`;
       routes[`${base}/${codename}/stable/binary-amd64/Packages`] = packages;
       routes[`${base}/${codename}/InRelease`] = `SHA256:\n ${sha(packages).slice(7)} 1 stable/binary-amd64/Packages\n`;
     }
@@ -288,6 +288,7 @@ describe('the host plan', () => {
     expect(plan.files[GROUP_VARS_PATH]).toContain('    engine: "5:29.9.0-1~ubuntu.26.04~resolute"');
     expect(plan.files[GROUP_VARS_PATH]).toContain('    engine: "5:29.9.0-1~ubuntu.24.04~noble"');
     expect(plan.applied[0].evidence.map((e) => e.item)).toContain('docker-ce-cli 5:29.9.0-1~ubuntu.24.04~noble (.deb SHA256)');
+    expect(plan.applied[0].evidence.map((e) => e.item)).toContain('docker-ce-rootless-extras 5:29.9.0-1~ubuntu.26.04~resolute (.deb SHA256)');
   });
 
   it('refuses an index whose hash InRelease does not list', async () => {

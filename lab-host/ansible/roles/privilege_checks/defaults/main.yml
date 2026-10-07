@@ -1,0 +1,20 @@
+---
+# What the checks look at. Every path is the one the role that makes it fixes
+# (labs_agent, coder_sandbox, coder); scripts/lab-host-docker-proxy.test.mjs
+# holds these to those roles, so the checks cannot drift onto a path nothing
+# creates.
+privilege_checks_agent_user: "{{ labs_agent_user }}"
+privilege_checks_agent_app_dir: "{{ labs_agent_home }}/vps-agent"
+privilege_checks_agent_tmp_dir: /var/lib/hcw-labs-agent/tmp
+privilege_checks_agent_socket: /run/hcw-labs-agent-docker/docker.sock
+privilege_checks_agent_proxy_container: hcw-labs-agent-docker-proxy
+
+# Whether the host daemon must report user-namespace remapping. Follows the
+# docker role's switch, so the deliberate way back (-e
+# docker_userns_remap=false) is reported as a warning, not a failure.
+privilege_checks_userns_required: "{{ docker_userns_remap | default(true) }}"
+
+privilege_checks_coder_enabled: "{{ coder_enabled }}"
+privilege_checks_coder_compose_file: /etc/hcw/coder/docker-compose.yml
+privilege_checks_sandbox_socket_dir: /run/hcw-coder-docker
+privilege_checks_sandbox_docker_host: unix:///run/hcw-coder-docker/docker.sock

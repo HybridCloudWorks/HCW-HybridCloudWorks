@@ -35,12 +35,17 @@
     name: "{{ caddy_builder_image_ref }}"
     pull: not_present
 
+# --userns=host (LAB-5, 2026-10-07): the daemon remaps container root to an
+# unprivileged range (roles/docker), which cannot write the binary into this
+# root-owned host directory. The builder is the pinned caddy image, run once
+# by root, with no network beyond the module download it exists for.
 - name: Build Caddy with the Cloudflare DNS module
   ansible.builtin.command:
     argv:
       - docker
       - run
       - --rm
+      - --userns=host
       - --volume
       - "{{ caddy_build_dir }}:/out"
       - "{{ caddy_builder_image_ref }}"
