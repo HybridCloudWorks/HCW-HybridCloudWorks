@@ -3167,6 +3167,43 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **Terraform identity, SEC-1 step two: subscription Contributor comes off
+  once the narrow grants are read back (estate review 2026-10-06, finding
+  SEC-1; #971).** `scripts/bootstrap-terraform-oidc.ps1` gains
+  `-RemoveSubscriptionContributor`, off by default. With it the script
+  stops granting Contributor at subscription scope, reads every narrow
+  grant back from Azure (Contributor on each of the nine groups, the
+  `HCW Terraform Subscription Scope` assignment and a definition holding
+  exactly the JSON's actions, and RBAC Administrator whose condition names
+  Owner and Contributor, on all three subscriptions), refuses with nothing
+  removed if one is missing, and only then deletes the identity's three
+  subscription-scope Contributor assignments, printing `Contributor at
+  subscription scope removed` for each and reading each back. `-WhatIf`
+  prints one `Would remove` line per subscription. A plain run keeps step
+  one's behaviour and grants subscription Contributor back, which is the
+  rollback, so every re-run after step two carries the switch. The audit of
+  what `infra/` does outside its nine groups found nothing the narrow grants
+  miss on plan or apply: writes above a group are the custom role's
+  (groups, budgets, provider registration), reads above a group are RBAC
+  Administrator's built-in `*/read`, every cross-group reference has both
+  ends in declared groups, and Contributor carries no data actions, so the
+  custom role gains nothing. The one gap is destroy-time: azurerm's purge of
+  a deleted Cognitive Services account is a subscription-scope delete the
+  role deliberately lacks, so destroying the Foundry account is an owner
+  step. `scripts/terraform-identity-grants.test.mjs` now classifies every
+  `azurerm_*`/`azapi_*` type `infra/` uses by the grant that covers it and
+  fails on an unclassified one, on a resource group other than a declared
+  `azurerm_resource_group`, on a literal Azure id above a declared group
+  (the subscription budgets excepted), on a second delete in the custom
+  role, and if the bootstrap's removal ever runs ahead of its refusal.
+  `Set-TerraformRbacCondition.ps1`'s recovery path already keys on the
+  custom role as well as subscription Contributor, so it keeps working
+  after step two; its comments now say so. ADR 0005 gains the dated
+  amendment "2026-10-07, step two" with the audit table, the gap and the
+  rollback; the deployment runbook, section 0, gains the owner's step-two
+  procedure, the read-back one-liner, and how to read an
+  `AuthorizationFailed` from the first apply.
+
 - **Lab host: the agent leaves the docker group behind its own socket
   proxy, the daemon remaps user namespaces, and Coder's workspaces move to a
   rootless daemon (estate review 2026-10-06, finding LAB-5; #951).** The

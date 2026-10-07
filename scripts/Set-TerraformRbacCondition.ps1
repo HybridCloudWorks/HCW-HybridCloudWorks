@@ -46,7 +46,8 @@
 
     Contributor joined the list on 2026-10-07 (SEC-1, second half). The
     bootstrap now grants Contributor on each resource group infra/ declares
-    and, once its second step lands, no longer on the subscription. Without
+    and, once it has been run with -RemoveSubscriptionContributor (SEC-1
+    step two), no longer on the subscription. Without
     Contributor here a run could assign the subscription-wide grant straight
     back to itself, or to an identity it controls, and the scoping would be
     one role assignment deep. infra/ assigns narrower built-ins only
@@ -257,9 +258,11 @@ $assignments = Get-RbacAdminAssignments -Principal $PrincipalId
 # with no RBAC Administrator beside it is a half-finished run (a delete that
 # was not followed by its create). Re-create there, with the condition,
 # rather than stopping on "run bootstrap first". The marker is subscription
-# Contributor until SEC-1's second step removes it, and the custom
+# Contributor until SEC-1's second step removes it (the bootstrap's
+# -RemoveSubscriptionContributor), and the custom
 # "HCW Terraform Subscription Scope" role (scripts/terraform-identity-grants.json)
-# from 2026-10-07 on, so the path keeps working on both sides of that step.
+# from 2026-10-07 on, so the path keeps working on both sides of that step:
+# after step two the custom role is the only marker, and it is enough.
 $MarkerRoles = @('Contributor', 'HCW Terraform Subscription Scope')
 $contributorScopes = @(
   Get-IdentityAssignments -Principal $PrincipalId |

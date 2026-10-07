@@ -106,6 +106,68 @@ the sentence true, and what still does not.
   keys), so it is a designed custom role, not Reader; recorded here as the
   option, not built.
 
+## Amendment 2026-10-07, step two — subscription Contributor removed (SEC-1)
+
+Step one ran on 2026-10-07: the nine group Contributors, the custom role and
+the conditioned RBAC Administrator were granted on all three subscriptions
+beside subscription Contributor, and a plan and apply on `hcw-azure`
+succeeded. That proved nothing broke, not that the narrow grants suffice.
+Step two removes the wide grant.
+
+- **What is removed.** The identity's Contributor assignment at each of the
+  three target subscriptions (`sub-app-site-prod-cus`,
+  `sub-plat-conn-prod-cus`, `sub-plat-mgmt-prod-cus`), by
+  `scripts/bootstrap-terraform-oidc.ps1 -RemoveSubscriptionContributor`. The
+  switch first reads every narrow grant back from Azure (each group's
+  Contributor, the custom role's assignment and its definition, and an RBAC
+  Administrator whose condition refuses Owner and Contributor) and removes
+  nothing if one is missing. The owner runs it; the deployment runbook,
+  section 0, "Step two", has the commands and what success looks like.
+- **What `infra/` does outside the nine groups, and what covers it after.**
+  Audited from every `azurerm_*` and `azapi_*` resource and data source:
+
+  | What | Where it acts | Covered by, once subscription Contributor is gone |
+  | --- | --- | --- |
+  | Create and update the nine resource groups | subscription | custom role (`resourceGroups/read`, `/write`) |
+  | The two subscription budgets | subscription | custom role (`Microsoft.Consumption/budgets/read`, `/write`, `/delete`) |
+  | Provider registration (azurerm's `resource_providers_to_register`; azapi touches only namespaces in the same list) | subscription | custom role (`providers/read`, one `register/action` per namespace) |
+  | Control-plane reads above a group: the provider list, any name-availability check, the soft-deleted Key Vault lookup on create, role definitions by name | subscription | RBAC Administrator: its built-in definition carries `*/read`, and the condition restricts only role-assignment writes and deletes |
+  | Role assignments (`azurerm_role_assignment`, all scoped inside the groups) | groups and resources | RBAC Administrator, under its condition |
+  | `data.azurerm_client_config` | none | read from the token, no Azure call |
+  | Cross-group and cross-subscription references: the hub and spoke peerings, diagnostic settings, the data collection rule and Application Insights writing to the Management workspace, the budgets' action group | both ends in declared groups | Contributor on each group |
+  | The lab policy assignment (`lab_hybrid_policy_enabled`) | `rg-lab-hybrid-prod-cus` | nothing the identity holds, before or after: Contributor excludes `Microsoft.Authorization/*/Write`; the owner grants Resource Policy Contributor on the group first (labs-host runbook) |
+  | Data-plane operations | resources | unchanged: Contributor carries no data actions at any scope |
+  | Management groups, tenant, Entra | none | `infra/` declares nothing there; no `azuread` provider |
+
+- **What the custom role gained: nothing, and why.** Every write `infra/`
+  makes above a group was already in it; every read above a group is
+  RBAC Administrator's. Adding reads to the custom role would duplicate
+  that without narrowing anything. `scripts/terraform-identity-grants.test.mjs`
+  now classifies every Azure type `infra/` uses by the grant that covers it
+  and fails on an unclassified one, fails if a block names a resource group
+  other than a declared `azurerm_resource_group` or builds a literal Azure id
+  above a declared group (the subscription budgets excepted), and holds the
+  role's only delete to the budgets'.
+- **The known gap, destroy-time only.** azurerm purges a deleted Cognitive
+  Services account by default, and the purge
+  (`Microsoft.CognitiveServices/locations/resourceGroups/deletedAccounts/delete`)
+  is a subscription-scope action. It is deliberately not granted: the role
+  carries no delete above a group but the budgets'. Destroying or replacing
+  the Foundry account is therefore an owner step, like removing a group, or
+  a later change sets `purge_soft_delete_on_destroy = false` for
+  `cognitive_account` in the provider features.
+- **Rollback.** Run the bootstrap without the switch. Its default list of
+  subscription roles still includes Contributor, so a plain run grants it
+  wherever it is missing (as the owner, whose Owner right is not subject to
+  the identity's condition). The same fact means every re-run after step two
+  carries the switch, or it restores the wide grant.
+- **What the proof covers.** A plan exercises reads; only an apply exercises
+  writes. Today's permanent diff (`3 to add, 1 to change, 3 to destroy`)
+  writes the azapi app-settings pair and the Function App only, so a clean
+  apply proves those paths. The first apply that creates or changes anything
+  else is the real test of the rest, and the runbook says how to read an
+  `AuthorizationFailed` from it.
+
 ## Related decisions and references
 
 - [ADR 0009](../decisions/0009-production-state.md)

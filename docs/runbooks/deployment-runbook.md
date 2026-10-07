@@ -172,9 +172,9 @@ amendment of 2026-10-07):
 | Role Based Access Control Administrator, with the ABAC condition below | each target subscription | `infra/` creates role assignments and Contributor cannot. The condition is what stops it granting Owner, Contributor or a Key Vault officer role |
 | `HCW Terraform Subscription Scope` (custom, `scripts/terraform-identity-grants.json`) | each target subscription | The only things `infra/` does above a resource group: create and update its groups, keep the two subscription budgets, register its resource providers. No resource-group delete |
 | Contributor | each resource group `infra/` declares, listed in the same JSON | Everything inside a group |
-| Contributor | each target subscription | **Step one of two.** Kept until a later change removes it; see below |
+| Contributor | each target subscription | **Step one only.** A run with `-RemoveSubscriptionContributor` (step two) removes it; a plain run grants it back, which is the rollback. See below |
 
-The subscription-wide Contributor goes in a second, separate change, after a
+The subscription-wide Contributor goes in a second, separate step, after a
 plan and an apply have run on the narrow grants above. The two steps are
 apart on purpose: while both exist a run proves nothing broke but cannot
 prove the narrow grants are enough, and removing the wide one in the same
@@ -182,11 +182,96 @@ change would make the first run to find a missing action the run that has
 already lost it. None of it can lock a run out mid-apply, because these
 assignments are not in Terraform state; only the script changes them.
 
-Once the second step lands, a **new resource group** in `infra/` takes one
+#### Step two: remove subscription Contributor
+
+What `infra/` does outside its nine groups, and which grant covers it once
+the wide one is gone, is audited in ADR 0005 (amendment "2026-10-07, step
+two"); `terraform-identity-grants.test.mjs` fails when `infra/` gains an
+Azure type nobody has classified that way. The custom role needed nothing
+new. The switch reads every narrow grant back before it deletes anything,
+and stops with nothing removed if one is missing.
+
+These read `scripts/bootstrap-terraform-oidc.ps1` and
+`scripts/terraform-identity-grants.json` from the working tree, so run them
+on an up-to-date `main`. The second line prints `True` when the switch is
+there:
+
+```powershell
+git switch main; git pull --ff-only
+```
+
+```powershell
+Select-String -Path scripts/bootstrap-terraform-oidc.ps1 -Pattern 'RemoveSubscriptionContributor' -Quiet
+```
+
+Preview. Success is a `=== SEC-1 step two` section of `[ok]` lines (the
+custom role's definition; per subscription the custom role and a
+conditioned RBAC Administrator; Contributor on each of the nine groups)
+followed by exactly three `[write]  Would remove Contributor at subscription
+scope on ...` lines, one per subscription. A `[stop]` listing missing grants
+means nothing would be removed; it names what to fix.
+
+```powershell
+./scripts/bootstrap-terraform-oidc.ps1 -RemoveSubscriptionContributor -WhatIf
+```
+
+Then for real, answering `Y` at each confirmation. Success is three
+`[write]  ... — Contributor at subscription scope removed` lines, each
+followed by an `[ok]  ... — no Contributor at subscription scope (read
+back)`.
+
+```powershell
+./scripts/bootstrap-terraform-oidc.ps1 -RemoveSubscriptionContributor
+```
+
+Then start a **Plan and apply** run at
+<https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs> ("New run").
+Today's permanent diff is `Plan: 3 to add, 1 to change, 3 to destroy` (the
+azapi app-settings pair and the Function App); confirm it and watch the apply
+finish.
+
+The read-back, any time: success is two rows per subscription, `Role Based
+Access Control Administrator` and `HCW Terraform Subscription Scope`, and
+no `Contributor` row.
+
+```powershell
+$p = az identity show -n id-plat-terraform-prod-cus-01 -g rg-mgmt-boot-prod-cus --subscription sub-plat-mgmt-prod-cus --query principalId -o tsv; foreach ($s in 'sub-app-site-prod-cus', 'sub-plat-conn-prod-cus', 'sub-plat-mgmt-prod-cus') { az role assignment list --assignee $p --all --subscription $s -o json | ConvertFrom-Json | Where-Object { $_.scope -match '^/subscriptions/[^/]+$' } | Select-Object @{ n = 'subscription'; e = { $s } }, roleDefinitionName }
+```
+
+**Rollback** is a plain run, which grants subscription Contributor wherever
+it is missing (the owner's Owner right makes the grant, so the identity's
+condition, which refuses Contributor, is not in the way). Success is three
+`[write]  ... — Contributor assigned` lines.
+
+```powershell
+./scripts/bootstrap-terraform-oidc.ps1
+```
+
+Roll back when a plan or apply fails with `AuthorizationFailed`. The message
+names the action and the scope, and the scope says which grant is short: a
+bare `/subscriptions/<id>` is the custom role (add the action to
+`scripts/terraform-identity-grants.json` with a test, re-run with the
+switch), a scope inside one of the nine groups is that group's Contributor,
+and `Microsoft.Authorization/roleAssignments/write` is RBAC Administrator or
+its condition.
+
+**What the proof covers.** A plan exercises the reads; only an apply
+exercises writes, and today's permanent diff writes the azapi app-settings
+pair and the Function App only. A clean apply proves those paths. The first
+apply that creates or changes anything else (a new alert, a budget change,
+a new group) is the real test of the rest; read its output before confirming
+the next.
+
+**After step two every re-run carries the switch.** A plain run is the
+rollback, so re-applying the condition or adding a group's grant without
+`-RemoveSubscriptionContributor` puts the wide grant back.
+
+Once step two is done, a **new resource group** in `infra/` takes one
 extra pass: the apply that creates it cannot create anything inside it.
 Add the group to `scripts/terraform-identity-grants.json` in the same pull
 request (`terraform-identity-grants.test.mjs` fails until you do), apply,
-re-run this script, and apply again; or land the empty group first.
+re-run this script with `-RemoveSubscriptionContributor`, and apply again;
+or land the empty group first.
 **Removing** a group is an owner step for the same reason the custom role
 has no delete: the apply destroys its contents and stops at the group,
 which the owner deletes by hand before the next plan.
@@ -268,7 +353,9 @@ an Owner or User Access Administrator assignment. Since 2026-10-07 it also
 refuses Contributor, so the resource-group scoping above cannot be undone by
 one role assignment. The bootstrap script applies it at the end of its role
 step, and re-running the bootstrap is how an existing estate picks up both
-the new grants and the changed condition. The condition script alone, from a
+the new grants and the changed condition (with `-RemoveSubscriptionContributor`
+once step two is done, or the re-run grants subscription Contributor back).
+The condition script alone, from a
 desktop signed in as the owner:
 
 ```powershell
