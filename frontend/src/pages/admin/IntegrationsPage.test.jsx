@@ -85,14 +85,14 @@ beforeEach(() => {
 });
 
 describe('the header and tabs', () => {
-  it('names the page Integrations Hub and offers the four tabs, in order', () => {
+  it('names the page Integrations Hub and offers the five tabs, in order, the Directory last', () => {
     render(<IntegrationsPage />);
     expect(screen.getByRole('heading', { name: /Integrations Hub/ })).toBeTruthy();
     expect(
       hubTabs()
         .getAllByRole('tab')
         .map((tab) => tab.textContent)
-    ).toEqual(['Overview', 'Services', 'Keys', 'Identity']);
+    ).toEqual(['Overview', 'Services', 'Keys', 'Identity', 'Directory']);
   });
 
   it('opens on Overview with no tab in the URL, which is where an old bookmark lands', async () => {
@@ -159,9 +159,9 @@ describe('the header and tabs', () => {
     fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
     expect(setSearchParams).toHaveBeenLastCalledWith({ tab: 'services' });
     fireEvent.keyDown(tabs[0], { key: 'ArrowLeft' });
-    expect(setSearchParams).toHaveBeenLastCalledWith({ tab: 'identity' });
+    expect(setSearchParams).toHaveBeenLastCalledWith({ tab: 'directory' });
     fireEvent.keyDown(tabs[0], { key: 'End' });
-    expect(setSearchParams).toHaveBeenLastCalledWith({ tab: 'identity' });
+    expect(setSearchParams).toHaveBeenLastCalledWith({ tab: 'directory' });
   });
 });
 
@@ -191,7 +191,7 @@ describe('each tab loads its own data', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/HTTP 403/));
     // The page around the tab is still there.
     expect(screen.getByRole('heading', { name: /Integrations Hub/ })).toBeTruthy();
-    expect(hubTabs().getAllByRole('tab')).toHaveLength(4);
+    expect(hubTabs().getAllByRole('tab')).toHaveLength(5);
 
     searchParams = 'tab=identity';
     rerender(<IntegrationsPage />);

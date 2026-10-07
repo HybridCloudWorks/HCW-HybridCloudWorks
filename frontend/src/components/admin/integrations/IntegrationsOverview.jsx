@@ -15,34 +15,25 @@
  * Services tab, each with the time it ran, and each is recorded for next time.
  */
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { FlaskConical, Loader2, RefreshCw } from 'lucide-react';
 import { getSessionizeSpeakerId } from '@/lib/adminSettings';
-import { buildIntegrationView, sortByStatus, SERVICE_STATUS } from './integrationView';
-import { persistedVerdict } from './integrationStatus';
+import { sortByStatus, SERVICE_STATUS } from './integrationView';
 import { SERVICES } from './serviceRegistry';
 import { relativeTime } from './StateDot';
-import useSecretStatus from './useSecretStatus';
+import useServiceCards, { effectiveResult } from './useServiceCards';
 import { TabError, TabLoading } from './TabNotice';
 
 /** Sessionize takes its speaker id; every other test takes nothing. */
 export const testArgFor = (service) =>
   service.setting === 'sessionizeSpeakerId' ? getSessionizeSpeakerId() : undefined;
 
-/**
- * This session's result, else the persisted record's latest verdict, as the
- * `{ ok, message, at }` the status sort reads.
- */
-export function effectiveResult(result, record) {
-  if (result) return result;
-  const verdict = persistedVerdict(record);
-  return verdict
-    ? { ok: verdict.ok, message: verdict.message, at: verdict.at, recorded: true }
-    : undefined;
-}
+// effectiveResult lives in useServiceCards.js now (shared with the Directory);
+// re-exported so this module's callers and tests keep their import.
+export { effectiveResult };
 
 function StatusLine({ status, result, testing }) {
   const presentation = SERVICE_STATUS[status];
@@ -100,23 +91,7 @@ function ServiceTile({ service, result, testing, onOpen }) {
 }
 
 export default function IntegrationsOverview({ tests, onOpenGroup }) {
-  const { data, loading, error, reload } = useSecretStatus();
-  const { ensurePersisted } = tests;
-  useEffect(() => {
-    ensurePersisted?.();
-  }, [ensurePersisted]);
-
-  const { serviceCards } = buildIntegrationView({
-    services: SERVICES,
-    sections: data?.sections ?? [],
-    secrets: data?.secrets ?? [],
-  });
-  const results = Object.fromEntries(
-    serviceCards.map((card) => [
-      card.id,
-      effectiveResult(tests.results[card.id], tests.persisted?.[card.id]),
-    ])
-  );
+  const { serviceCards, results, data, loading, error, reload } = useServiceCards(tests);
   const tiles = sortByStatus(serviceCards, results);
   const testable = SERVICES.filter((service) => service.test && !service.skipInTestAll);
 

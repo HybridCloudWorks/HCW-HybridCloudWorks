@@ -12,6 +12,8 @@ export const TABS = Object.freeze([
   { id: 'services', label: 'Services' },
   { id: 'keys', label: 'Keys' },
   { id: 'identity', label: 'Identity' },
+  // The directory is descriptive, so it sits after the operational tabs (#919).
+  { id: 'directory', label: 'Directory' },
 ]);
 
 export const DEFAULT_TAB = 'overview';
