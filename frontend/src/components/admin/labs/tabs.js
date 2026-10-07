@@ -18,6 +18,8 @@ export const TABS = Object.freeze([
   { id: 'console', label: 'Console' },
   { id: 'agents', label: 'Agents' },
   { id: 'settings', label: 'Settings' },
+  // Coder's own dashboard, framed: the only way to its pages (owner, 2026-10-07).
+  { id: 'coder', label: 'Coder' },
 ]);
 
 /**

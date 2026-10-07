@@ -36,6 +36,7 @@ import JobsTab from '@/components/admin/labs/JobsTab';
 import ConsoleTab from '@/components/admin/labs/ConsoleTab';
 import AgentsTab from '@/components/admin/labs/AgentsTab';
 import SettingsTab from '@/components/admin/labs/SettingsTab';
+import CoderTab from '@/components/admin/labs/CoderTab';
 import useLabsLive from '@/components/admin/labs/useLabsLive';
 import { FALLBACK_JOB_TYPES, fleetState, fleetStatusWord } from '@/components/admin/labs/labsView';
 import { TABS, resolveTab } from '@/components/admin/labs/tabs';
@@ -52,6 +53,7 @@ const PANELS = {
   console: ConsoleTab,
   agents: AgentsTab,
   settings: SettingsTab,
+  coder: CoderTab,
 };
 
 /** The "How this works" lines a first-time operator reads. */
@@ -61,6 +63,7 @@ const HELP = [
   'The Agent is the job runner on the lab host (vps-agent). It claims jobs of the types it is registered for, runs one fixed sandboxed command per job, and reports the result; the Agents tab registers and diagnoses it.',
   'Validate on the Catalogue tab enqueues a lab’s check with its sample payload and opens the Console on the job, so you see what a learner’s check would return.',
   'Adding a lab is one catalogue row plus one entry in the workspace template and the launcher map: no new route or page.',
+  'Coder’s own pages open only inside the site. The Coder tab frames the dashboard, signed in as you, with Workspaces, Templates, Your tokens, Users and the audit log one click away; the status-token renewal starts on Your tokens.',
 ];
 
 export default function LabsPage() {

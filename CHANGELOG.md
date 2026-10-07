@@ -19,6 +19,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Admin Labs → Coder tab: Coder's own dashboard, framed (owner,
+  2026-10-07).** Coder's pages open only inside the site (the lab host's
+  panes-only rule), and since #925 the lab panes never show one, so the
+  operator had no way to Coder's Tokens page, where the status-token
+  renewal starts. The tab frames the dashboard, signed in as the operator,
+  with Workspaces, Templates, Your tokens, Users and the audit log one click
+  away, a Reload, and the lab pane's GitHub sign-in link for a signed-out
+  frame. Same sandbox and permissions as the lab pane; nothing here calls
+  Coder's API, the frame does, as Coder's own front end.
+
 - **The lab launcher starts a stopped workspace itself (owner, 2026-10-07;
   #911).** "The lab was enabled but I still needed to start it." A workspace
   whose last build stopped or was cancelled is now started with the call
