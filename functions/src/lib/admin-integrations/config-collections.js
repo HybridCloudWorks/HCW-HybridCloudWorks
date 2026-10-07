@@ -16,11 +16,21 @@
  *     only be named on a server at its vendor's host, a write that moves
  *     where a credential is sent needs `super_admin`, and every write here
  *     leaves an `admin_audit_logs` row.
+ *   - Since #995 (2026-10-07) a server may carry `allowedTools`, the only
+ *     tools `mcpProxy` will call on it. A server whose key requires a list
+ *     (PUBLER_API_KEY) cannot be saved without one, any write that names
+ *     `allowedTools` needs `super_admin`, and so does switching such a
+ *     server on or off: enabling it is what puts its tools in reach.
  *
  * Each handler body is a module-level function over `ctx` (guard, store, now,
  * aiConfigChanged); the factory at the bottom only wires them.
  */
-import { validateMcpKeyBinding, validateMcpUrl } from '../ai/mcp.js';
+import {
+  requiresToolAllowlist,
+  validateMcpKeyBinding,
+  validateMcpToolPolicy,
+  validateMcpUrl,
+} from '../ai/mcp.js';
 import { json, LIST_WINDOW, validBody } from '../http/admin-handler.js';
 
 /** Route-segment → container allowlist for the client-id config collections. */
@@ -52,6 +62,7 @@ const readableDoc = (container, doc) => (container === 'mcp_servers' ? stripOAut
 function mcpWriteError(fields, existing = null) {
   const touchesUrl = Object.prototype.hasOwnProperty.call(fields, 'url');
   const touchesKey = Object.prototype.hasOwnProperty.call(fields, 'apiKeyEnvVar');
+  const touchesTools = Object.prototype.hasOwnProperty.call(fields, 'allowedTools');
   try {
     if (touchesUrl) validateMcpUrl(fields.url);
     // The key-to-host binding (AP-B1) is a property of the pair, so a PATCH
@@ -62,6 +73,17 @@ function mcpWriteError(fields, existing = null) {
       validateMcpKeyBinding({
         url: touchesUrl ? fields.url : existing?.url,
         apiKeyEnvVar: touchesKey ? fields.apiKeyEnvVar : existing?.apiKeyEnvVar,
+      });
+    }
+    // The tool list is a property of the pair too (#995): a key that needs
+    // a list placed on a server without one, or the list removed from a
+    // server whose key needs it, is refused either way. A PUT that omits
+    // the list keeps the stored one (carryForwardTokens), so the stored
+    // half is the right one to check against.
+    if (touchesKey || touchesTools) {
+      validateMcpToolPolicy({
+        apiKeyEnvVar: touchesKey ? fields.apiKeyEnvVar : existing?.apiKeyEnvVar,
+        allowedTools: touchesTools ? fields.allowedTools : existing?.allowedTools,
       });
     }
   } catch (error) {
@@ -91,6 +113,26 @@ function movesCredentialRouting(container, fields, existing) {
   return changed('url') || changed('apiKeyEnvVar');
 }
 
+/**
+ * Whether a write on `mcp_servers` changes which tools can be called (#995):
+ * any body that names `allowedTools`, or one that names `enabled` on a
+ * server whose key requires a tool list. Those need `super_admin` like a
+ * routing move. An editor may still switch Firecrawl, Replicate and the
+ * keyless servers on and off, as before.
+ */
+function changesToolReach(container, fields, existing) {
+  if (container !== 'mcp_servers') return false;
+  const has = (key) => Object.prototype.hasOwnProperty.call(fields, key);
+  if (has('allowedTools')) return true;
+  const keyName = has('apiKeyEnvVar') ? fields.apiKeyEnvVar : existing?.apiKeyEnvVar;
+  return has('enabled') && requiresToolAllowlist(keyName);
+}
+
+/** The writes that need `super_admin` on top of `editor`. */
+const needsSuperAdmin = (container, fields, existing) =>
+  movesCredentialRouting(container, fields, existing) ||
+  changesToolReach(container, fields, existing);
+
 /** The `admin_audit_logs.action` every ai_providers / mcp_servers write records. */
 export const CONFIG_AUDIT_ACTION = 'ai_config_updated';
 
@@ -99,7 +141,11 @@ export const CONFIG_AUDIT_ACTION = 'ai_config_updated';
  * effort, like every audit writer here: the save has landed. */
 async function auditConfigWrite(ctx, context, { container, id, user, existing, fields, action }) {
   try {
-    const routing = (doc) => ({ url: doc?.url ?? null, apiKeyEnvVar: doc?.apiKeyEnvVar ?? null });
+    const routing = (doc) => ({
+      url: doc?.url ?? null,
+      apiKeyEnvVar: doc?.apiKeyEnvVar ?? null,
+      allowedTools: doc?.allowedTools ?? null,
+    });
     await ctx.store.upsertDoc('admin_audit_logs', {
       id: ctx.uuid(),
       action: CONFIG_AUDIT_ACTION,
@@ -134,7 +180,11 @@ async function auditConfigWrite(ctx, context, { container, id, user, existing, f
  * Same rule for the refresh token the 12-hour timer rotates with.
  */
 function carryForwardTokens(doc, incoming, existing) {
-  for (const key of ['oauthToken', 'oauthRefreshToken']) {
+  // `allowedTools` rides along for a different reason (#995): a PUT that
+  // omits it must not widen a server back to every tool, so an omitted list
+  // keeps the stored one. Only a write that names it, at super_admin,
+  // changes it.
+  for (const key of ['oauthToken', 'oauthRefreshToken', 'allowedTools']) {
     if (!Object.prototype.hasOwnProperty.call(incoming, key) && existing?.[key] !== undefined) {
       doc[key] = existing[key];
     }
@@ -240,7 +290,7 @@ async function putConfig(ctx, request, context) {
     if (prepared.error) return prepared.error;
     const { id, existing, incoming } = prepared;
 
-    if (movesCredentialRouting(container, incoming, existing)) {
+    if (needsSuperAdmin(container, incoming, existing)) {
       const elevated = await ctx.guard.requireRole(request, 'super_admin');
       if (elevated.error) return elevated.error;
     }
@@ -279,7 +329,7 @@ async function patchConfig(ctx, request, context) {
   try {
     const prepared = await prepareConfigPatch(ctx.store, container, request);
     if (prepared.error) return prepared.error;
-    if (movesCredentialRouting(container, prepared.updates, prepared.existing)) {
+    if (needsSuperAdmin(container, prepared.updates, prepared.existing)) {
       const elevated = await ctx.guard.requireRole(request, 'super_admin');
       if (elevated.error) return elevated.error;
     }

@@ -135,6 +135,7 @@ nav:
       - Labs host access and Arc onboarding: runbooks/labs-host.md
       - Docker Hub publishing (OIDC connection): runbooks/docker-hub-publishing.md
       - Copilot code review MCP servers: runbooks/copilot-code-review-mcp.md
+      - Publer REST proxy and MCP server: runbooks/publer.md
   - Standards:
       - IaC repository standard: standards/iac-repository-standard.md
       - Naming convention: standards/naming-convention.md

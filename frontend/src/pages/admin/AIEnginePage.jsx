@@ -643,6 +643,7 @@ function McpServerCard({ server, onToggle, onSync, onRemove }) {
     'microsoftdocs-mcp',
     'drawio-mcp',
     'hostinger-mcp',
+    'publer-mcp',
   ].includes(server.id);
 
   return (
@@ -656,8 +657,18 @@ function McpServerCard({ server, onToggle, onSync, onRemove }) {
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-sm">{server.name}</span>
               <StatusBadge status={server.status} />
-              {server.tools?.length > 0 && (
-                <span className="text-xs text-slate-500">{server.tools.length} tools</span>
+              {Array.isArray(server.allowedTools) ? (
+                // Read-only: the API enforces the list, and only a
+                // super_admin config write changes it (#995).
+                <span className="text-xs text-slate-500">
+                  {server.tools?.length > 0
+                    ? `${server.allowedTools.length} of ${server.tools.length} tools allowed`
+                    : `${server.allowedTools.length} tools allowed`}
+                </span>
+              ) : (
+                server.tools?.length > 0 && (
+                  <span className="text-xs text-slate-500">{server.tools.length} tools</span>
+                )
               )}
             </div>
             <p className="text-xs text-slate-500 mt-0.5 truncate">{server.url}</p>

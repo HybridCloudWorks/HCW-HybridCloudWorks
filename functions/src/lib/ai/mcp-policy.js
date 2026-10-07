@@ -31,6 +31,9 @@ export function readMcpSecret(env, name) {
 export const MCP_KEY_ENV_PATTERN = /^MCP_[A-Z0-9_]+$/;
 export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
   'FIRECRAWL_API_KEY',
+  // Usable only with a tool allowlist (TOOL_ALLOWLIST_REQUIRED_KEYS below):
+  // Publer's MCP can publish and delete, so the key alone is not enough.
+  'PUBLER_API_KEY',
   'REPLICATE_API_KEY',
   'VPS_API_TOKEN',
 ]);
@@ -49,6 +52,10 @@ export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
  */
 export const INTEGRATION_KEY_HOSTS = Object.freeze({
   FIRECRAWL_API_KEY: Object.freeze(['mcp.firecrawl.dev', 'api.firecrawl.dev']),
+  // Publer's MCP server only (2026-10-07). The same key also opens Publer's
+  // REST API at app.publer.com, but that is publerProxy's route, not an MCP
+  // server's, so it is deliberately not listed: the MCP binding is one host.
+  PUBLER_API_KEY: Object.freeze(['mcp.publer.com']),
   REPLICATE_API_KEY: Object.freeze(['mcp.replicate.com', 'api.replicate.com']),
   VPS_API_TOKEN: Object.freeze(['localhost', '127.0.0.1', '[::1]']),
 });
@@ -102,6 +109,77 @@ export function validateMcpApiKeyEnvVar(value) {
 }
 
 /**
+ * Shared keys whose servers may only call the tools their document names in
+ * `allowedTools` (#995, 2026-10-07). Publer's MCP server can create,
+ * schedule, publish and delete posts, and `mcpProxy` needs only the editor
+ * role, so without a list any editor could publish through it, past the
+ * Social Hub's own publishing rules. A server naming one of these keys must
+ * carry a non-empty `allowedTools`; a missing or empty list is refused at
+ * save time and every call to such a server is refused at call time.
+ */
+export const TOOL_ALLOWLIST_REQUIRED_KEYS = Object.freeze(['PUBLER_API_KEY']);
+
+const keyNameOf = (apiKeyEnvVar) => (typeof apiKeyEnvVar === 'string' ? apiKeyEnvVar.trim() : '');
+
+/** Whether a server naming this key must carry `allowedTools`. */
+export function requiresToolAllowlist(apiKeyEnvVar) {
+  return TOOL_ALLOWLIST_REQUIRED_KEYS.includes(keyNameOf(apiKeyEnvVar));
+}
+
+/**
+ * The shape of `allowedTools`: absent (undefined or null) returns null, which
+ * means no list; otherwise an array of non-empty tool names, returned
+ * trimmed. Anything else throws, so a malformed list fails closed.
+ */
+export function validateMcpAllowedTools(value) {
+  if (value === undefined || value === null) return null;
+  if (!Array.isArray(value) || value.some((name) => typeof name !== 'string' || !name.trim())) {
+    throw new Error('allowedTools must be an array of tool names');
+  }
+  return value.map((name) => name.trim());
+}
+
+/**
+ * The key and the tool list as a pair: the list's shape, and a non-empty
+ * list where the key requires one. Returns the list (or null for none).
+ */
+export function validateMcpToolPolicy({ apiKeyEnvVar, allowedTools }) {
+  const list = validateMcpAllowedTools(allowedTools);
+  if (requiresToolAllowlist(apiKeyEnvVar) && (!list || list.length === 0)) {
+    throw new Error(
+      `a server using ${keyNameOf(apiKeyEnvVar)} must name the tools it may call in allowedTools`
+    );
+  }
+  return list;
+}
+
+/**
+ * Why a tool call on this server is refused, or null when it may go ahead.
+ * Checked before any upstream request, whatever the caller's role.
+ *
+ * A server with no `allowedTools` may call any tool name, which is exactly
+ * what every server could do before #995: `mcpProxy` has never limited a
+ * call to the synced tool list, so Firecrawl, Replicate, the VPS token and
+ * keyless or `MCP_*` servers keep that behaviour until someone gives them a
+ * list. A server that does carry a list is held to it, an empty one
+ * included. A server whose key requires a list and has none refuses every
+ * call.
+ */
+export function mcpToolRefusal({ serverId, server, tool }) {
+  let list;
+  try {
+    list = validateMcpToolPolicy({
+      apiKeyEnvVar: server?.apiKeyEnvVar,
+      allowedTools: server?.allowedTools,
+    });
+  } catch (error) {
+    return `Tool "${tool}" refused on MCP server "${serverId}": ${error.message}`;
+  }
+  if (list === null || list.includes(tool)) return null;
+  return `Tool "${tool}" is not in the allowedTools of MCP server "${serverId}"`;
+}
+
+/**
  * Resolve OAuth first, then the configured Azure Function App setting. The
  * server's `url` is part of the decision since AP-B1: a shared integration
  * key resolves to no header unless the URL's host is one the key is bound
@@ -126,6 +204,18 @@ export function resolveMcpAuthHeaders({ oauthToken, apiKeyEnvVar, url, env = pro
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
+ * Hosts whose MCP URL may carry no query string (2026-10-07). Publer's
+ * settings page hands out its server URL as `https://mcp.publer.com?api_key=`
+ * followed by the key, and its server accepts the key that way. Pasted into
+ * the URL field, the key would sit in Cosmos in plain text, be returned on
+ * every read of the server list, and be copied into the audit row's
+ * before/after. The key belongs in PUBLER_API_KEY, which the server reads
+ * from Key Vault and sends as a header, and Publer's MCP takes no other
+ * query parameter, so any query on this host is refused.
+ */
+const NO_QUERY_HOSTS = new Set(['mcp.publer.com']);
+
+/**
  * Reject malformed or credential-bearing URLs before making an outbound call.
  * https is required (ADR 0033): a bearer token over plain http is readable on
  * the wire. The one exception is a loopback host, where no wire is crossed —
@@ -146,6 +236,11 @@ export function validateMcpUrl(value) {
   }
   if (parsed.username || parsed.password) {
     throw new Error('MCP server URL must not contain embedded credentials');
+  }
+  if (NO_QUERY_HOSTS.has(parsed.hostname) && parsed.search) {
+    throw new Error(
+      `MCP server URL for ${parsed.hostname} must not carry a query string; the key goes in its app setting, not the URL`
+    );
   }
   return parsed.toString();
 }

@@ -19,6 +19,42 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Publer MCP: `PUBLER_API_KEY` usable as an MCP key, bound to
+  `mcp.publer.com` only, a server-side MCP tool allowlist that keeps
+  Publer's write tools out of reach (#995), a disabled `Publer MCP` seed
+  entry, and a Publer runbook with the 2026-10-07 readiness check (nothing
+  published).**
+  `functions/src/lib/ai/mcp-policy.js` refused `PUBLER_API_KEY` as an MCP
+  key name, so Publer's MCP server could not be registered with the key the
+  Social Hub already holds. The name is now on the allowlist with
+  `mcp.publer.com` as its one host (`app.publer.com`, the REST host, stays
+  `publerProxy`'s and is refused for an MCP server), and a URL on that host
+  may carry no query string, because Publer's settings page hands out its
+  server URL with the key as `?api_key=`, which would otherwise sit in
+  Cosmos, in every read of the server list and in the audit row. No header
+  code: Publer's server accepts the resolver's plain `Bearer`, and a Sync
+  through the repository's own path reached its 47 tools. The AI Engine
+  seed gains `publer-mcp`, switched off, written the first time a
+  super_admin opens the MCP Servers tab, with a setup page.
+  `docs/runbooks/publer.md` records the transport, the auth shape, which
+  tools read and which write, and the owner's read-only verification
+  (`get_publer_user`). **Tool allowlist (#995):** an MCP server may carry
+  `allowedTools`, and `callMcpTool` (so `mcpProxy` and the platform jobs)
+  refuses any other tool with 403, naming the tool and the server, before
+  any upstream request and whatever the caller's role. A server using
+  `PUBLER_API_KEY` must carry a non-empty list: saving one without it is
+  refused and a stored one without it refuses every call. The seed's list
+  is Publer's 27 read and 7 session tools, never the 13 that create,
+  schedule, publish, edit, delete or upload. Writing `allowedTools`, and
+  switching a `PUBLER_API_KEY` server on or off, need `super_admin`; a PUT
+  that omits the list keeps the stored one; Sync never touches it; the
+  `ai_config_updated` audit row records it before and after. Firecrawl,
+  Replicate, the VPS token and keyless servers carry no list and still
+  accept any tool name, as before. The MCP card reads "34 of 47 tools
+  allowed". Tests: `functions/src/lib/ai/mcp.test.js`,
+  `functions/src/lib/admin-integrations.test.js`, and
+  `frontend/src/lib/aiEngine.test.js` (the seed against the API policy).
+
 - **Governance remainders of the 2026-10-06 estate review: the Terraform
   run identity's Contributor scoped to its resource groups, code owners on
   the auth and lab paths, a 100-day restore-drill check, and Arc guest

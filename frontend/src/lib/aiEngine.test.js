@@ -40,6 +40,13 @@ import {
   visibleModelsFor as visibleModelsInTheApi,
 } from '../../../functions/src/lib/ai/model-catalog.js';
 import { USAGE_SOURCES } from '../../../functions/src/lib/ai/usage.js';
+import {
+  mcpToolRefusal,
+  validateMcpKeyBinding,
+  validateMcpToolPolicy,
+  validateMcpUrl,
+} from '../../../functions/src/lib/ai/mcp-policy.js';
+import { DEFAULT_MCP_SERVERS, PUBLER_MCP_ALLOWED_TOOLS } from './aiEngine/seed.js';
 import { SOURCE_LABELS, labelForSource } from '../pages/admin/AIEngineUsageTab.jsx';
 
 const ids = DEFAULT_PROVIDERS.map((p) => p.id);
@@ -321,5 +328,45 @@ describe('usage aggregation counts unpriced rows (ADR 0033)', () => {
     expect(labelForSource(USAGE_SOURCES.aiUnspecified)).toBe('AI — task not named');
     expect(labelForSource('admin_test')).toBe('AI Engine — Test');
     expect(labelForSource('something-else')).toBe('something-else');
+  });
+});
+
+describe('the seeded Publer MCP server passes the API policy (#995)', () => {
+  const publer = DEFAULT_MCP_SERVERS.find((server) => server.id === 'publer-mcp');
+  const WRITE_TOOLS = [
+    'submit_publer_posts',
+    'publish_publer_draft',
+    'update_publer_post',
+    'reschedule_publer_post',
+    'change_publer_post_state',
+    'delete_publer_posts',
+    'confirm_delete_publer_posts',
+    'create_publer_post_from_file',
+    'create_publer_photo_draft',
+    'create_publer_ideas',
+    'upload_publer_media_from_url',
+    'upload_publer_chat_media',
+    'upload_publer_media',
+  ];
+
+  it('ships switched off, at the bound host, with the 34 read and session tools', () => {
+    expect(publer.enabled).toBe(false);
+    expect(validateMcpUrl(publer.url)).toBe('https://mcp.publer.com/');
+    expect(validateMcpKeyBinding(publer)).toBe('PUBLER_API_KEY');
+    expect(validateMcpToolPolicy(publer)).toEqual([...PUBLER_MCP_ALLOWED_TOOLS]);
+    expect(PUBLER_MCP_ALLOWED_TOOLS).toHaveLength(34);
+    expect(new Set(PUBLER_MCP_ALLOWED_TOOLS).size).toBe(34);
+  });
+
+  it('names none of the 13 write tools, so the API refuses each one', () => {
+    for (const tool of WRITE_TOOLS) {
+      expect(publer.allowedTools).not.toContain(tool);
+      expect(
+        mcpToolRefusal({ serverId: publer.id, server: { ...publer, enabled: true }, tool })
+      ).toMatch(/not in the allowedTools/);
+    }
+    expect(
+      mcpToolRefusal({ serverId: publer.id, server: publer, tool: 'get_publer_user' })
+    ).toBeNull();
   });
 });
