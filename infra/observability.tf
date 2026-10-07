@@ -736,8 +736,14 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "telegram_delivery" {
   evaluation_frequency = "PT15M"
   window_duration      = "PT1H"
 
-  # Stateful, as alert-app-exceptions: one page per incident, one Resolved mail
-  # once an hour has passed with no refusal.
+  # Stateful, as alert-app-exceptions: one page per incident. It stays fired
+  # while any refusal sits inside the trailing hour, and then for Azure's own
+  # resolution period on top — the condition unmet for three consecutive
+  # evaluations, at this frequency forty-five minutes — so the Resolved mail
+  # arrives roughly an hour and three quarters after the last refusal, not
+  # after one hour. A refusal inside that interval joins the open incident
+  # rather than paging again, which is the trade a stateful rule makes
+  # (review of #914).
   auto_mitigation_enabled = true
 
   criteria {
