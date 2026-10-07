@@ -175,33 +175,65 @@ describe('onAuthStateChanged — only a change of account is news', () => {
     return { callback, onEvent };
   }
 
+  // The payloads in MSAL 5's own shapes (review of #985): ACQUIRE_TOKEN_SUCCESS
+  // carries an AuthenticationResult with `.account`; LOGIN_SUCCESS carries the
+  // AccountInfo itself (StandardController emits `result.account`).
+  const tokenResult = (account) => ({
+    accessToken: 'at',
+    idToken: 'it',
+    scopes: ['api://x/access_as_admin'],
+    account,
+  });
+
   it('stays quiet when a token is renewed for the account already signed in', async () => {
     const { callback, onEvent } = await subscribed();
-    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: { account: { ...ACCOUNT } } });
-    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: { account: { ...ACCOUNT } } });
+    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: tokenResult({ ...ACCOUNT }) });
+    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: tokenResult({ ...ACCOUNT }) });
     expect(callback).toHaveBeenCalledTimes(1);
   });
 
   it('reports a token that arrives for a different account', async () => {
     const { callback, onEvent } = await subscribed();
     const other = { localAccountId: 'oid-2', username: 'b@example.com', name: 'B' };
-    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: { account: other } });
+    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: tokenResult(other) });
     expect(callback).toHaveBeenCalledTimes(2);
-    expect(callback.mock.calls[1][0]).toMatchObject({ uid: 'oid-2' });
+    expect(callback.mock.calls[1][0]).toMatchObject({ uid: 'oid-2', email: 'b@example.com' });
     expect(mocks.setActiveAccount).toHaveBeenLastCalledWith(other);
   });
 
-  it('reports a sign-in even for the same account', async () => {
+  it('reports a sign-in, whose payload is the account itself, even for the same account', async () => {
     const { callback, onEvent } = await subscribed();
-    onEvent({ eventType: 'msal:loginSuccess', payload: { account: { ...ACCOUNT } } });
+    onEvent({ eventType: 'msal:loginSuccess', payload: { ...ACCOUNT } });
     expect(callback).toHaveBeenCalledTimes(2);
+    expect(callback.mock.calls[1][0]).toMatchObject({
+      uid: 'oid-1',
+      email: 'a@example.com',
+      displayName: 'A',
+    });
+    expect(mocks.setActiveAccount).toHaveBeenLastCalledWith(
+      expect.objectContaining({ localAccountId: 'oid-1' })
+    );
+  });
+
+  it('reports a sign-in to a different account with that account', async () => {
+    const { callback, onEvent } = await subscribed();
+    const other = { localAccountId: 'oid-2', username: 'b@example.com', name: 'B' };
+    onEvent({ eventType: 'msal:loginSuccess', payload: other });
+    expect(callback.mock.calls[1][0]).toMatchObject({ uid: 'oid-2', email: 'b@example.com' });
+  });
+
+  it('ignores a sign-in event that carries no account', async () => {
+    const { callback, onEvent } = await subscribed();
+    onEvent({ eventType: 'msal:loginSuccess', payload: null });
+    onEvent({ eventType: 'msal:loginSuccess', payload: tokenResult(undefined) });
+    expect(callback).toHaveBeenCalledTimes(1);
   });
 
   it('reports the first token when no account was active yet', async () => {
     mocks.getActiveAccount.mockReturnValue(null);
     mocks.getAllAccounts.mockReturnValue([]);
     const { callback, onEvent } = await subscribed();
-    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: { account: ACCOUNT } });
+    onEvent({ eventType: 'msal:acquireTokenSuccess', payload: tokenResult(ACCOUNT) });
     expect(callback).toHaveBeenLastCalledWith(expect.objectContaining({ uid: 'oid-1' }));
   });
 });

@@ -80,7 +80,12 @@ This project has not cut a tagged release; entries are grouped under
   authorization-code redirect, and `page.route()` answers
   login.microsoftonline.com (metadata, `/authorize` echoing MSAL's state,
   `/token` carrying its nonce) and `/api`. Nothing in the application knows
-  it is under test, and no test switch was added to it.
+  it is under test, and no test switch was added to it. It fails closed: a
+  request to any third host is aborted and fails the test (the icon font is
+  answered locally), a tenant or client other than the placeholder is
+  refused, and the local web server is never reused, so a bundle built with
+  real settings, from a local `.env` say, fails the run instead of sending
+  the stub's bearer to a real API.
   `e2e/admin-authenticated.spec.js` asserts that the callback lands on the
   route the person asked for, that a registry refusal shows "Access Denied"
   and nothing of the admin, that an `insufficient_scope` 401 shows the

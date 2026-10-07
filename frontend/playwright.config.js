@@ -71,11 +71,22 @@ export default defineConfig({
         command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort',
         // The placeholder identity the signed-in admin spec runs against
         // (e2e/fixtures/stub-build-env.js), the same values the CI e2e job's
-        // Build step sets. A local frontend/.env is read after these by
-        // vite.config.js and wins, so build without one for this suite.
+        // Build step sets.
+        //
+        // FAIL CLOSED, NOT TRUSTED (review of #985). Two things can still put
+        // a different bundle under the suite: a local frontend/.env, which
+        // vite.config.js reads after process.env so it wins over these, and
+        // a server already listening, which reuse would adopt without
+        // building. Reuse is therefore off: every run builds what it tests.
+        // The .env case is not overridden here, because that would mean a
+        // test-only precedence rule in the production build config; instead
+        // the fixture (e2e/fixtures/entra.js) aborts any request to a third
+        // host and refuses any tenant or client that is not the placeholder,
+        // so a mis-built bundle fails the run and its bearer never leaves the
+        // browser.
         env: { ...STUB_BUILD_ENV },
         url: 'http://127.0.0.1:4173',
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: false,
         timeout: 180_000,
       },
 });

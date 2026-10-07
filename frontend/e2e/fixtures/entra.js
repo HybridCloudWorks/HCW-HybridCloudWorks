@@ -1,4 +1,5 @@
 import { test as base, expect } from '@playwright/test';
+import { STUB_BUILD_ENV } from './stub-build-env.js';
 
 /**
  * A credential-free identity for the admin browser journey (QA-1, AP-F1).
@@ -33,6 +34,9 @@ import { test as base, expect } from '@playwright/test';
  */
 
 const LOGIN_HOST = 'https://login.microsoftonline.com';
+
+/** Static font hosts, answered locally (see `install`). */
+const FONT_HOSTS = new Set(['https://fonts.googleapis.com', 'https://fonts.gstatic.com']);
 
 /** The signed-in person. `example.test` is a reserved name (RFC 6761). */
 export const STUB_USER = Object.freeze({
@@ -120,7 +124,11 @@ class IdentityStub {
     this.tokenRequests = [];
     /** Every getCurrentAdminStatus call, with the bearer it carried. */
     this.statusRequests = [];
-    /** Identity-host requests nothing here expected. A test fails on any. */
+    /**
+     * Requests nothing here expected: an identity-host path the stub does not
+     * model, a tenant or client that is not the placeholder, or anything
+     * bound for a third host. A test fails on any.
+     */
     this.unexpected = [];
     this.statusAnswer = STATUS_ANSWERS.admin;
     this.apiOverrides = new Map();
@@ -139,6 +147,32 @@ class IdentityStub {
   }
 
   async install() {
+    // FAIL CLOSED (review of #985). The two hosts below are the only places
+    // this page may talk to. A bundle built with real settings — a local
+    // frontend/.env wins over the placeholders in vite.config.js, and a reused
+    // server may not be this build at all — would aim the stub's bearer at a
+    // real API. That request is aborted here, before it leaves the browser,
+    // and the test fails naming it.
+    //
+    // The one other host the shell asks for is the icon font (index.html's
+    // Google Fonts stylesheet). It carries no credential and nothing here
+    // asserts on glyphs, so it is answered locally with an empty stylesheet:
+    // modelled, never forwarded.
+    await this.page.route(
+      (url) =>
+        /^https?:$/.test(url.protocol) && url.origin !== this.origin && url.origin !== LOGIN_HOST,
+      (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (FONT_HOSTS.has(url.origin) && request.method() === 'GET') {
+          return url.origin === 'https://fonts.googleapis.com'
+            ? route.fulfill({ status: 200, contentType: 'text/css', body: '' })
+            : route.fulfill({ status: 404, body: '' });
+        }
+        this.unexpected.push(`${request.method()} ${request.url()} (third host, aborted)`);
+        return route.abort('blockedbyclient');
+      }
+    );
     await this.page.route(`${LOGIN_HOST}/**`, (route) => this.identityHost(route));
     await this.page.route(
       (url) => url.origin === this.origin && url.pathname.startsWith('/api/'),
@@ -153,6 +187,22 @@ class IdentityStub {
       return route.fulfill({ status: 204, headers: corsHeaders(request) });
     }
     const [tenant] = url.pathname.split('/').filter(Boolean);
+    // Only the placeholder directory and application. A bundle carrying a real
+    // tenant or client id was not built for this suite (a local .env, a reused
+    // server), and its journey is not the one under test.
+    const isDiscovery = url.pathname.endsWith('/discovery/instance');
+    const clientId =
+      url.searchParams.get('client_id') ??
+      new URLSearchParams(request.postData() || '').get('client_id');
+    if (
+      (!isDiscovery && tenant !== STUB_BUILD_ENV.VITE_ENTRA_TENANT_ID) ||
+      (clientId !== null && clientId !== STUB_BUILD_ENV.VITE_ENTRA_CLIENT_ID)
+    ) {
+      this.unexpected.push(
+        `${request.method()} ${url.pathname} (tenant ${tenant}, client ${clientId}: not the placeholder build)`
+      );
+      return route.fulfill({ status: 400, headers: corsHeaders(request), body: '' });
+    }
     const issuer = `${LOGIN_HOST}/${tenant}/v2.0`;
     const endpoint = (name) => `${LOGIN_HOST}/${tenant}/oauth2/v2.0/${name}`;
 
@@ -287,8 +337,9 @@ class IdentityStub {
 /**
  * `identity`: the stub, installed before the test's first navigation.
  *
- * The test fails if the page threw, or if the identity host was asked for
- * something the stub does not model — either would mean the journey under test
+ * The test fails if the page threw, if the identity host was asked for
+ * something the stub does not model or for a real tenant, or if the page tried
+ * a third host — any of them means the journey under test
  * was not the one that ran.
  */
 export const test = base.extend({
@@ -298,7 +349,7 @@ export const test = base.extend({
     const stub = new IdentityStub(page, baseURL);
     await stub.install();
     await provide(stub);
-    expect(stub.unexpected, 'identity-host requests the stub does not model').toEqual([]);
+    expect(stub.unexpected, 'requests outside the stubbed placeholder build').toEqual([]);
     expect(pageErrors, 'uncaught errors in the page').toEqual([]);
   },
 });

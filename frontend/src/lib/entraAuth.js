@@ -245,8 +245,14 @@ export function onAuthStateChanged(callback) {
       event.eventType === EventType.LOGIN_SUCCESS ||
       event.eventType === EventType.ACQUIRE_TOKEN_SUCCESS
     ) {
-      const account = event.payload?.account;
-      if (account) {
+      // TWO PAYLOAD SHAPES (review of #985). MSAL 5 emits LOGIN_SUCCESS with
+      // the AccountInfo itself (StandardController: `emitEvent(LOGIN_SUCCESS,
+      // …, result.account)`) and ACQUIRE_TOKEN_SUCCESS with an
+      // AuthenticationResult that carries `.account`. Reading `.account` off
+      // both dropped every real sign-in event.
+      const account =
+        event.eventType === EventType.LOGIN_SUCCESS ? event.payload : event.payload?.account;
+      if (account?.homeAccountId || account?.localAccountId) {
         const previous = msal.getActiveAccount();
         msal.setActiveAccount(account);
         // A TOKEN RENEWAL IS NOT A SIGN-IN (QA-1, found by the browser journey
