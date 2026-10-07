@@ -936,7 +936,10 @@ foreach ($id in $TargetSubscriptionIds) {
 # idempotent and honours -WhatIf. Without an identity (a -WhatIf discovery
 # run before the identity exists) there is nothing to condition yet.
 if ($identity -and $identity.principalId) {
-  & (Join-Path $PSScriptRoot 'Set-TerraformRbacCondition.ps1') -PrincipalId $identity.principalId -WhatIf:$WhatIfPreference
+  # Every target, stated: the condition script reads one subscription per
+  # call, and this script's CLI context is the identity's home, so without the
+  # list only Management was conditioned (2026-10-07, connectivity missed).
+  & (Join-Path $PSScriptRoot 'Set-TerraformRbacCondition.ps1') -PrincipalId $identity.principalId -TargetSubscriptionIds $TargetSubscriptionIds -WhatIf:$WhatIfPreference
 } else {
   Write-Act 'Would apply the RBAC Administrator condition (scripts/Set-TerraformRbacCondition.ps1) once the identity exists'
 }

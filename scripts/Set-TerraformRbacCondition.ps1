@@ -79,6 +79,16 @@
     Skip the identity lookup and use this principal id. The bootstrap script
     passes it.
 
+.PARAMETER TargetSubscriptionIds
+    The subscriptions whose RBAC Administrator rows are conditioned. `az role
+    assignment list --all` reads one subscription, the CLI's current one, so
+    without this list the script saw only that subscription: on 2026-10-07 the
+    bootstrap ran it from the Management context and connectivity's row stayed
+    unconditioned while the output read "every row should show a condition".
+    When omitted, every enabled subscription in the signed-in tenant whose name
+    matches sub-app-*, sub-plat-mgmt-* or sub-plat-conn-* is scanned; the
+    bootstrap passes its own targets.
+
 .EXAMPLE
     pwsh -NoProfile -File scripts/Set-TerraformRbacCondition.ps1 -WhatIf
 
@@ -95,7 +105,8 @@ param(
   [string] $IdentityName = 'id-plat-terraform-prod-cus-01',
   [string] $ResourceGroupName = 'rg-mgmt-boot-prod-cus',
   [string] $SubscriptionName = 'sub-plat-mgmt-prod-cus',
-  [string] $PrincipalId
+  [string] $PrincipalId,
+  [string[]] $TargetSubscriptionIds = @()
 )
 
 Set-StrictMode -Version Latest
@@ -204,14 +215,39 @@ Write-Host 'Condition:'
 Write-Host "  $condition"
 Write-Host ''
 
+# Which subscriptions to read. `--all` is "every scope in ONE subscription",
+# the CLI's current one, so the list is read once per target subscription
+# with --subscription stated; the current context plays no part.
+if ($TargetSubscriptionIds.Count -eq 0) {
+  $patterns = @('sub-app-*', 'sub-plat-mgmt-*', 'sub-plat-conn-*')
+  $TargetSubscriptionIds = @(
+    Invoke-AzJson @('account', 'list', '--all', '-o', 'json') |
+      Where-Object { $_.state -eq 'Enabled' -and $_.tenantId -eq $account.tenantId } |
+      Where-Object { $n = $_.name; @($patterns | Where-Object { $n -like $_ }).Count -gt 0 } |
+      ForEach-Object { $_.id }
+  )
+  if ($TargetSubscriptionIds.Count -eq 0) {
+    throw 'No subscription in this tenant matches sub-app-*, sub-plat-mgmt-* or sub-plat-conn-*; pass -TargetSubscriptionIds.'
+  }
+}
+Write-Host "Scanning $($TargetSubscriptionIds.Count) subscription(s): $($TargetSubscriptionIds -join ', ')"
+
 # No --role beside --all: az 2.x resolves a role NAME against a scope it does
 # not have when --all is given and crashes with "No value for given
 # attribute" (seen on the owner's first run, 2026-10-06). Every assignment
-# of the identity is read and the role is filtered here.
+# of the identity is read, per subscription, and the role is filtered here.
+function Get-IdentityAssignments {
+  param([string] $Principal)
+  $rows = @()
+  foreach ($sub in $TargetSubscriptionIds) {
+    $rows += @(Invoke-AzJson @('role', 'assignment', 'list', '--assignee', $Principal, '--all', '--subscription', $sub, '-o', 'json'))
+  }
+  return $rows
+}
+
 function Get-RbacAdminAssignments {
   param([string] $Principal)
-  $all = @(Invoke-AzJson @('role', 'assignment', 'list', '--assignee', $Principal, '--all', '-o', 'json'))
-  return @($all | Where-Object { $_.roleDefinitionName -eq $RoleName })
+  return @(Get-IdentityAssignments -Principal $Principal | Where-Object { $_.roleDefinitionName -eq $RoleName })
 }
 
 $assignments = Get-RbacAdminAssignments -Principal $PrincipalId
@@ -226,7 +262,7 @@ $assignments = Get-RbacAdminAssignments -Principal $PrincipalId
 # from 2026-10-07 on, so the path keeps working on both sides of that step.
 $MarkerRoles = @('Contributor', 'HCW Terraform Subscription Scope')
 $contributorScopes = @(
-  Invoke-AzJson @('role', 'assignment', 'list', '--assignee', $PrincipalId, '--all', '-o', 'json') |
+  Get-IdentityAssignments -Principal $PrincipalId |
     Where-Object { $MarkerRoles -contains $_.roleDefinitionName -and $_.scope -match '^/subscriptions/[^/]+$' } |
     ForEach-Object { $_.scope } |
     Select-Object -Unique
