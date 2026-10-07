@@ -253,15 +253,22 @@ module "code-server" {
   agent_id        = coder_agent.main.id
   folder          = local.lab_folder
   install_prefix  = "${local.home}/.code-server"
-  install_version = "4.139.1"
+  install_version = "4.140.0"
   use_cached      = true
   subdomain       = true
   order           = 1
 
+  # No release notices. code-server tells its users when a newer release is
+  # out; here the release is this pin, and the notice's link opens a window
+  # that the site's sandboxed pane cannot navigate, which a learner saw as a
+  # blank window beside the lab (#911). The module passes this string to the
+  # code-server command line as it is (module 1.6.0, `additional_args`).
+  additional_args = "--disable-update-check"
+
   # The editor's User settings. The module (1.6.0, `settings`) merges them
   # into ~/.local/share/code-server/User/settings.json before code-server
   # starts, on every start, with jq or python3 (the image has python3). Each
-  # is checked against VS Code 1.139.1, the release code-server 4.139.1
+  # is checked against VS Code 1.140.0, the release code-server 4.140.0
   # carries; template.test.mjs pins them and both versions.
   settings = {
     # Workspace Trust off. With it on, the lab folder opened in Restricted

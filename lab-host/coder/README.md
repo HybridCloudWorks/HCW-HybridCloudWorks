@@ -84,7 +84,7 @@ no-store`. It has no top-level exemption.
 settings through the module's `settings` input (module 1.6.0), which merges
 them into `~/.local/share/code-server/User/settings.json` before
 code-server starts, on every start. Each name was checked against VS Code
-1.139.1, the release code-server 4.139.1 carries:
+1.140.0, the release code-server 4.140.0 carries:
 
 | Setting | Why |
 | --- | --- |
