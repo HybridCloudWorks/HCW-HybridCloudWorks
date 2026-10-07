@@ -6,11 +6,14 @@
  * this holds it there:
  *
  *   1. THE LOGIC, driven with a mocked fetch, clock, frame and navigation:
- *      only allowlisted labs, GET only, only three API paths; a visitor with
- *      no session is told to sign in above; a missing workspace shows
- *      Coder's own create page once the template is known to exist, a
- *      missing template the site's sentence and never Coder's page, and a
- *      stopped workspace Coder's own workspace page;
+ *      only allowlisted labs; GET to four paths and ONE write, the start of
+ *      the learner's own stopped or cancelled workspace, once per visit,
+ *      with the CSRF token read from Coder's own page, falling back to
+ *      Coder's workspace page when refused or tokenless and never starting a
+ *      failed build; a visitor with no session is told to sign in above; a
+ *      missing workspace shows Coder's own create page once the template is
+ *      known to exist, a missing template the site's sentence and never
+ *      Coder's page;
  *      the pane moves to code-server only when the build is running, the
  *      agent connected and ready, and code-server healthy, and only to the
  *      one name Coder builds for this workspace, under a fixed suffix; the

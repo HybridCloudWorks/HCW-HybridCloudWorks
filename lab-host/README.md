@@ -408,12 +408,17 @@ files from `../coder/launcher/` that the `coder` role installs in
 (`ansible/roles/coder/templates/10-coder.caddy.j2`). Coder's dashboard opens code-server in a new window or tab, which the
 panes-only rule turns into the labs page, so from the dashboard the editor
 never opened in a pane. The launcher reads the learner's workspace with
-their own session, GET only. A workspace that does not exist yet gets
+their own session. A workspace that does not exist yet gets
 Coder's own create page, once the launcher has read that the `hcw-lab`
 template exists (without it, the pane says `Lab workspaces aren't available
-right now.` rather than show Coder's own error), and a stopped one Coder's
-own workspace page, in a frame inside the pane, where the learner confirms
-or presses Start. Once
+right now.` rather than show Coder's own error), where the learner confirms.
+A stopped one the launcher starts itself (owner, 2026-10-07; #911): the one
+write it makes, the same `POST …/builds { transition: "start" }` Coder's
+Start button makes, with the CSRF token read from Coder's own page, once per
+visit, on the template's active version when the workspace is outdated so a
+template change reaches every lab on its next open. A failed build is not
+started blind, and when Coder refuses or its page carries no token the
+launcher frames Coder's workspace page with Start, as before. Once
 code-server is healthy the launcher replaces itself with code-server's own
 name, `code-server--<workspace>--<owner>.coder.lab.hybridcloudworks.com`.
 Each learner has one workspace per lab, named in the launcher's

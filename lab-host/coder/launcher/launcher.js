@@ -15,12 +15,23 @@
  * from Coder's API.
  *
  * WHAT IT MAY DO, and nothing more:
- *   - GET only, same origin, with the learner's session cookie, to three
- *     paths: who is signed in, their workspace for this lab, and, before
- *     Coder's create page is ever framed, the template. No request here
- *     changes anything in Coder, so it needs no CSRF token. Creating or
- *     starting a workspace is Coder's own UI in a frame of the same origin,
- *     with Coder's own consent dialog and buttons.
+ *   - GET, same origin, with the learner's session cookie, to four paths:
+ *     who is signed in, their workspace for this lab, before Coder's create
+ *     page is ever framed the template, and Coder's own index page for the
+ *     CSRF token. None of these changes anything in Coder.
+ *   - ONE write, and only this one: `POST /api/v2/workspaces/{id}/builds`
+ *     with `{ transition: "start" }` (and the template's active version id
+ *     when the workspace is outdated), for the learner's own workspace for
+ *     this lab, only when its last build stopped or was cancelled, once per
+ *     visit, carrying the CSRF token Coder embeds in its own page as
+ *     `X-CSRF-TOKEN` — the same call, and the same token, Coder's Start
+ *     button sends (#911, owner 2026-10-07). Never a create, never a delete,
+ *     never another learner's workspace: the id comes from the workspace
+ *     read above, which Coder scopes to the signed-in learner. When Coder
+ *     refuses, or its page carries no token, the launcher frames Coder's
+ *     workspace page with Start, as it always did. Creating a workspace is
+ *     still Coder's own UI in a frame of the same origin, with Coder's own
+ *     consent dialog.
  *   - Everything it builds comes from constants below: the lab id and the
  *     workspace name from LAB_WORKSPACES, the template name, and the host
  *     suffix it navigates to. The query string only selects a key of
