@@ -66,6 +66,13 @@ describe('the pin sets', () => {
 
   it('reads changed paths from git status --porcelain', () => {
     expect(changedPaths(' M lab-image/versions.env\n?? x.txt\n')).toEqual(['lab-image/versions.env', 'x.txt']);
+    // git() trims its output, so the first line arrives without its leading
+    // space; the path must survive that (the 2026-10-07 digest PR refusal).
+    expect(changedPaths('M lab-host/coder/templates/hcw-lab/main.tf\n M vps-agent/lib/capabilities.js')).toEqual([
+      'lab-host/coder/templates/hcw-lab/main.tf',
+      'vps-agent/lib/capabilities.js',
+    ]);
+    expect(changedPaths('R  old.txt -> new.txt\n?? "with space.txt"')).toEqual(['new.txt', 'with space.txt']);
   });
 
   it('writes a body with the evidence, the notes, the owner\'s next step and the issue', () => {

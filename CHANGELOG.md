@@ -3792,6 +3792,14 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The first digest pull request after #986 refused its own files.**
+  `scripts/open-lab-pin-pr.mjs` read `git status --porcelain` through a
+  helper that trims its output, so the first line lost its leading space and
+  a fixed three-character slice ate the path's first letter:
+  `ab-host/coder/templates/hcw-lab/main.tf` was "outside the set" and the
+  publish run's last job exited 2 on 2026-10-07. `changedPaths` now parses
+  the status code instead of slicing by width, follows a rename to its new
+  name, and has a test for the trimmed first line.
 - **The admin portal re-checked access in a loop whenever the answer was not
   "authorized" (found by the signed-in browser journey, 2026-10-07).**
   `onAuthStateChanged` told its subscribers about every

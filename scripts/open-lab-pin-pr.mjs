@@ -144,12 +144,26 @@ function api(token, repo) {
   };
 }
 
-/** Changed paths in the working tree, from `git status --porcelain`. */
+/**
+ * Changed paths in the working tree, from `git status --porcelain`.
+ *
+ * Each line is a two-character status, one space, then the path; a rename
+ * is `R  old -> new`. The status is parsed, not sliced by width: `git()`
+ * trims its output, which drops the leading space of the first line (` M
+ * lab-host/x` becomes `M lab-host/x`), and a fixed slice then ate the
+ * path's first letter. On 2026-10-07 the first digest pull request after
+ * #986 refused its own template file as `ab-host/coder/templates/...`.
+ */
 export function changedPaths(porcelain) {
   return String(porcelain)
     .split('\n')
-    .filter(Boolean)
-    .map((line) => line.slice(3).replace(/^"|"$/g, ''));
+    .filter((line) => line.trim())
+    .map((line) => {
+      const match = /^\s?[ MADRCUT?!]{1,2}\s(.*)$/.exec(line);
+      const path = (match ? match[1] : line).replace(/^"|"$/g, '');
+      const arrow = path.indexOf(' -> ');
+      return arrow === -1 ? path : path.slice(arrow + 4).replace(/^"|"$/g, '');
+    });
 }
 
 /**
