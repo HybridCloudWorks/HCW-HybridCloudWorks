@@ -3943,6 +3943,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The Hybrid Lab's health signals say what is true, and the repository
+  move leaves no trap behind (#1009).** From the read-only review of
+  2026-10-08.
+  - The Coder status token's expiry check reads a 404 on its own record as
+    the missing `api_key:read` scope, as it reads a 403: Coder v2.38
+    answers an unauthorized read as not found, so the check could never
+    say what to do. The Integrations card now says to re-issue the token
+    with that scope.
+  - A graceful stop no longer sends a critical "Lab agent offline" on the
+    spot. The agent is still marked offline at once; `checkAgentHealth`
+    says "offline" once it has been down five minutes, once per outage
+    (`offlineNotifiedAt` on the agent's document), and the first heartbeat
+    back sends "Lab agent back online after N min", retried by the timer if
+    it could not go. That morning's 04:30 reboot, back in 43 seconds, had
+    sent a red alert and nothing after it.
+  - An agent whose fresh heartbeat says `stopping` or `offline` is not
+    online. The goodbye heartbeat wrote `lastSeenAt`, so the public door
+    stayed open for 90 seconds after a stop.
+  - The public estate card's "Last heartbeat" was Arc's last status change,
+    so a healthy host read as silent for days. It is now "Arc status
+    since", beside a new "Job runner heartbeat" row, and policy checks that
+    can never pass on the lab (the guest-configuration baseline, Defender's
+    update and SQL assessments, the seal-key vault's private link and
+    firewall) count as not applicable, each for a recorded reason, instead
+    of as failures.
+  - `checkAgentHealth` logs marks, recoveries and messages at warn, which
+    `host.json` ingests, and `vps-agent` writes its errors and warnings with
+    the syslog priority prefixes `<3>` and `<4>`, so the lab host's data
+    collection rule picks them up.
+  - Every shipped `github.com/HybridCloudWorks/` URL now names
+    `saulpatinojr`, including the lab host's clone URL, the agent's
+    checkout and the Coder template's clone; the CMS draft import, which
+    refuses redirects, fetches from the new owner with its draft ids
+    unchanged. `bootstrap.sh` repoints an existing checkout's origin, and
+    CI fails on the old address. Coder's allowed GitHub organisation is
+    unchanged, pending #1015.
+  - The labs host pages say what is merged and what the host has applied,
+    and the runbook states the order after a merge: `bootstrap.sh`, then
+    the Coder template push at once.
 - **`lab-pins-upstream.mjs` escapes the package name in its apt index
   regex. The fix had been stranded since #899.** Commit `7c0e84fa` was
   pushed to `feat/lab-supply-chain` 25 seconds after #899 merged, which

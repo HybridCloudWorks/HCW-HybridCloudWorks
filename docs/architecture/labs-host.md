@@ -5,12 +5,17 @@ in Azure. It is the on-premises half of the hybrid estate described in
 [ADR 0032](../decisions/0032-learner-labs-platform.md), and this page is where
 its shape is written down so that a change to it is a change to a document.
 
-**State: planned.** Nothing on this page is provisioned. The Hostinger account
-holds an empty VPS that no Terraform manages yet. The Terraform that will
-adopt it is in [`infra-lab/`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/infra-lab)
-(#661). The `hcw-lab` workspace, the Arc resource group and every identity in
-the table below are work tracked under #656. When a row becomes real, its
-status changes here in the same pull request.
+**State: live, and behind `main`.** The host runs: it is configured by the
+playbook in `lab-host/`, Arc-connected, Coder answers on its public name, and
+the job runner heartbeats (read-only review of 2026-10-08, #1009). This page
+describes what `main` holds, and the host holds what its last `bootstrap.sh`
+run checked out, which was before the changes listed under
+[Applied state](#applied-state). Nothing re-runs the playbook on its own
+(#950), so a merged change is on the host only after the owner's next run. A
+row whose change has not reached the host says so. The Terraform that adopts
+the VPS is in [`infra-lab/`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/infra-lab)
+(#661); its state is the Provisioning row. When a row changes, its status
+changes here in the same pull request.
 
 This page carries no addresses. The host's IP, its Hostinger identifiers and
 its SSH host keys are read from the `hcw-lab` workspace and from the host
@@ -20,15 +25,40 @@ itself, never from a published page.
 
 | Attribute | Value | Status |
 | --- | --- | --- |
-| Provider | Hostinger, billed outside Azure ([cost analysis](cost-analysis.md)) | planned |
+| Provider | Hostinger, billed outside Azure ([cost analysis](cost-analysis.md)) | live |
 | Plan | KVM 4 recommended (4 vCPU, 16 GB RAM, NVMe) — large enough for Coder workspaces beside the job runner | planned |
 | Provisioning | Terraform in [`infra-lab/`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/infra-lab): `hostinger/hostinger` provider 0.1.23, HCP Terraform workspace `hcw/hcw-lab`, working directory `infra-lab/`, auto-apply off. The existing VPS is **adopted by an `import` block, never created**, because creating a `hostinger_vps` is a purchase and destroying one cancels it; `infra-lab/README.md` has the owner's steps and the plan counts to read before any apply | code in repository; workspace not yet created |
-| Configuration | Ansible, from a playbook in this repository | planned |
+| Configuration | Ansible, from a playbook in this repository, run by the owner with `lab-host/bootstrap.sh` | live, and behind `main`: last converged 2026-10-07 around 04:33 UTC ([Applied state](#applied-state)) |
 | Operating system | Ubuntu 26.04 LTS, x86-64 (owner decision 2026-09-26: the latest LTS, and the VPS stays on it). `lab-host/` still accepts 24.04 LTS as a stated fallback and refuses anything else | running on the VPS; a clean reinstall is pending (owner decision 2026-09-26, [ADR 0032](../decisions/0032-learner-labs-platform.md) amendment of that date) |
-| Runtime | Docker Engine only; no Kubernetes (owner decision 2026-09-24) | planned |
-| Public names | `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com`, Cloudflare DNS records managed from `hcw-lab` (`infra-lab/dns.tf`: the `lab` A record and CNAMEs to it for `*.lab`, `coder.lab` and `*.coder.lab`, all DNS-only; `coder.lab` has its own record because `*.coder.lab` makes it an empty non-terminal that `*.lab` does not answer for). One Caddy certificate carries all three names, issued by DNS-01. The target is the `_acme-challenge.lab` and `_acme-challenge.coder.lab` delegations into a dedicated lab zone; until that zone exists (owner decision 2026-09-25: none yet) there are no delegation records and Caddy writes its challenges in the production zone, the interim ADR 0032 accepts | planned |
+| Runtime | Docker Engine only; no Kubernetes (owner decision 2026-09-24) | live |
+| Public names | `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com`, Cloudflare DNS records managed from `hcw-lab` (`infra-lab/dns.tf`: the `lab` A record and CNAMEs to it for `*.lab`, `coder.lab` and `*.coder.lab`, all DNS-only; `coder.lab` has its own record because `*.coder.lab` makes it an empty non-terminal that `*.lab` does not answer for). One Caddy certificate carries all three names, issued by DNS-01. The target is the `_acme-challenge.lab` and `_acme-challenge.coder.lab` delegations into a dedicated lab zone; until that zone exists (owner decision 2026-09-25: none yet) there are no delegation records and Caddy writes its challenges in the production zone, the interim ADR 0032 accepts | live; DNS, the edge and the CSP matched the repository on 2026-10-08 (#1009) |
 | Hybrid control plane | Azure Arc-enabled server in `rg-lab-hybrid-prod-cus`; heartbeat, auth syslog, service syslog at Warning and above, and four host counters to the Log Analytics workspace in `rg-mgmt-plat-prod-cus`; three alert rules there page the owner on heartbeat absence (30 min), root disk past 85%, and a watched unit failing (LAB-2, 2026-10-06) | live |
 | Owner | Workload owner | — |
+
+## Applied state
+
+Merged is not applied. A change to `lab-host/` reaches the host when the
+owner runs `bootstrap.sh`, which checks out `origin/main` and runs the
+playbook; a change to the Coder template reaches Coder when the owner pushes
+the template after that run ([runbook](../runbooks/labs-host.md#after-a-merge-the-playbook-then-the-template-at-once)).
+Nothing does either on a schedule (#950).
+
+The read-only review of 2026-10-08 (#1009) found the host last converged
+around 2026-10-07T04:33Z, with the agent last restarted at 04:33:04Z. These
+changes merged after that and were not on it:
+
+| Change | Merged (UTC) | On the host |
+| --- | --- | --- |
+| LAB-6: guest configuration off on the Arc agent (#984) | 2026-10-07 06:21 | Not yet. Arc still reported `guestConfigurationEnabled: "true"` |
+| LAB-3: the lab supply chain, including the held-package timer (#986) | 2026-10-07 06:40 | Not yet |
+| Lab image digests (#989) | 2026-10-07 07:16 | Not yet |
+| LAB-5: the agent behind its own Docker proxy and in no docker group, user-namespace remapping on the host daemon, Coder's workspaces on a rootless daemon (#987) | 2026-10-07 07:26 | Not yet |
+| Lab images published to Docker Hub only (#1002), and the digests that followed (#1003) | 2026-10-08 05:53 and 06:24 | Not yet. The run that applies them must be followed at once by the template push |
+
+Each row below that describes one of these says when it merged and that it
+is not yet on the host. When the owner's run has applied them, this section
+records the date of that run and the commit it checked out, and those rows
+lose the note.
 
 ## What runs on it
 
@@ -37,12 +67,12 @@ itself, never from a published page.
 | Caddy | TLS termination and reverse proxy for the lab names; the only thing listening on 80 and 443. A build that includes the `caddy-dns/cloudflare` module, because the stock package and the official image do not and DNS-01 needs it. It also enforces [panes only](#panes-only) | Host-native systemd service; pinned version and SHA256 in `lab-host/ansible/group_vars` |
 | Coder (Community edition) | Browser labs; learner sign-in by GitHub OAuth; Docker-based workspaces from the `lab-image/` images | Docker Compose, behind Caddy |
 | PostgreSQL (Coder's database) | Coder's metadata: users, templates, workspace records. Listens on the Compose network only, never on the host | Docker Compose, a named volume |
-| Docker socket proxy (`coder-docker-proxy`) | The one Compose service that holds a Docker socket, read-only, and since 2026-10-07 it is the sandbox daemon's (below), never the host's; the Coder server reaches Docker through it over a control network the two alone share, and gets only the API sections the proxy allows (containers, images, networks, volumes, lifecycle), never exec, build, swarm or system. The proxy reads paths, not bodies, so a privileged create still succeeds, and lands on the rootless sandbox daemon as an unprivileged user (LAB-5) | Docker Compose, control network only, no published port, `--userns=host` to open the sandbox daemon's socket |
-| Sandbox Docker daemon (`coder_sandbox`) | A second, **rootless** Docker daemon, run by the unprivileged system user `hcw-coder-docker`; every Coder workspace runs on it, so a workspace escape or a privileged container a compromised Coder server asks for is that user's, never root's (LAB-5, 2026-10-07). The cpu, memory and pids controllers are delegated to it, so the template's limits hold | systemd user unit `hcw-coder-docker` kept up by lingering; socket `/run/hcw-coder-docker/docker.sock`; data under `/var/lib/hcw-coder-docker` |
-| `vps-agent` | Pull-based lab job runner (`vps-agent/`); dials out to the Functions API, runs each job in `docker run --network none`. Its user is in no docker group (since 2026-10-07, LAB-5): the CLI it spawns reaches the host daemon through `hcw-labs-agent-docker-proxy`, which passes the calls a job makes and refuses any create that asks for privilege, a host namespace, a device, a mount or a bind beyond the job's own directory | Host-native systemd service `hcw-labs-agent`, user `hcw-labs-agent`, `/opt/hcw-labs-agent`; the proxy is one container on no network, with a Unix socket only the agent's group may open |
+| Docker socket proxy (`coder-docker-proxy`) | The one Compose service that holds a Docker socket, read-only, and with LAB-5 it is the sandbox daemon's (below), never the host's (merged 2026-10-07 in #987, not yet on the host: [Applied state](#applied-state)); the Coder server reaches Docker through it over a control network the two alone share, and gets only the API sections the proxy allows (containers, images, networks, volumes, lifecycle), never exec, build, swarm or system. The proxy reads paths, not bodies, so a privileged create still succeeds, and lands on the rootless sandbox daemon as an unprivileged user (LAB-5) | Docker Compose, control network only, no published port, `--userns=host` to open the sandbox daemon's socket |
+| Sandbox Docker daemon (`coder_sandbox`) | A second, **rootless** Docker daemon, run by the unprivileged system user `hcw-coder-docker`; every Coder workspace runs on it, so a workspace escape or a privileged container a compromised Coder server asks for is that user's, never root's (LAB-5, merged 2026-10-07 in #987, not yet on the host: [Applied state](#applied-state)). The cpu, memory and pids controllers are delegated to it, so the template's limits hold | systemd user unit `hcw-coder-docker` kept up by lingering; socket `/run/hcw-coder-docker/docker.sock`; data under `/var/lib/hcw-coder-docker` |
+| `vps-agent` | Pull-based lab job runner (`vps-agent/`); dials out to the Functions API, runs each job in `docker run --network none`. With LAB-5 its user is in no docker group (merged 2026-10-07 in #987, not yet on the host: [Applied state](#applied-state)): the CLI it spawns reaches the host daemon through `hcw-labs-agent-docker-proxy`, which passes the calls a job makes and refuses any create that asks for privilege, a host namespace, a device, a mount or a bind beyond the job's own directory | Host-native systemd service `hcw-labs-agent`, user `hcw-labs-agent`, `/opt/hcw-labs-agent`; the proxy is one container on no network, with a Unix socket only the agent's group may open |
 | node-exporter | Host metrics for the lab status page; listens on localhost only | Host-native systemd service |
 | Azure Connected Machine agent and Azure Monitor Agent | Arc onboarding as `arcs-lab-hybrid-prod-cus-01`; heartbeat, `auth`/`authpriv` syslog, the `daemon`/`syslog`/`kern`/`cron`/`user` facilities at Warning and above, and four host counters (CPU, memory, root disk used and free), by the data collection rule `dcr-lab-hybrid-prod-cus` | Host services. The Connected Machine agent is installed and connected by the Ansible `arc` role, switched on by the host's arc fact; the Azure Monitor Agent is an Arc extension added after onboarding. Both are started by the owner's `scripts/lab/Register-LabArc.ps1 -Connect` ([runbook](../runbooks/labs-host.md), "Arc onboarding", step 4) |
-| Coder workspaces and lab job containers | Transient. Workspaces carry Coder's `com.coder.resource=true` label and stop after an hour; job containers carry the `hcw.lab-job` label and live for one job. Since 2026-10-07 every container on the host daemon runs with user-namespace remapping (its root is an unprivileged uid on the host), and workspaces run on the sandbox daemon | Job containers: the host daemon, started by `vps-agent` through its proxy. Workspaces: the sandbox daemon, started by Coder through its proxy |
+| Coder workspaces and lab job containers | Transient. Workspaces carry Coder's `com.coder.resource=true` label and stop after an hour; job containers carry the `hcw.lab-job` label and live for one job. With LAB-5 (merged 2026-10-07 in #987, not yet on the host: [Applied state](#applied-state)) every container on the host daemon runs with user-namespace remapping (its root is an unprivileged uid on the host), and workspaces run on the sandbox daemon | Job containers: the host daemon, started by `vps-agent` through its proxy. Workspaces: the sandbox daemon, started by Coder through its proxy |
 | Portainer Business Edition | The owner's view of the host's Docker: containers, images, volumes, logs. Holds the Docker socket (with `--userns=host`, which the socket needs under the remap), so it is root on the host; it sees the host daemon, not the sandbox daemon the workspaces run on; reachable only through an SSH tunnel. Off until the owner turns it on (owner decision 2026-09-26) | One container, `portainer`, with a named volume; HTTPS on `127.0.0.1:9443` only, no Caddy route |
 | HashiCorp Vault | Secrets for the lab host only, never production HybridCloudWorks secrets (those stay in Key Vault `kv-site-prod-cus-01`). Initialised by the owner over SSH. Since 2026-09-29 it unseals itself at every start with the key `vault-seal` in the lab-only Key Vault `kv-labhybrid-prod-cus-01`, as the Arc machine's identity (#726; ADR 0032, amendment of 2026-09-29, accepted and live that day). The five Shamir keys are recovery keys. On since 2026-09-26 (#729; owner decision that day) | Host-native systemd service `vault`, user `vault`, raft storage in `/var/lib/vault`; `127.0.0.1:8200` and `127.0.0.1:8201` only. With auto-unseal, the unit also joins the `himds` group and reaches Key Vault over HTTPS |
 
@@ -67,7 +97,9 @@ outbound:
 - `vps-agent` polls the Functions API over 443 with its own Entra certificate;
 - the Arc and Azure Monitor agents call Azure over 443;
 - Coder reaches GitHub for OAuth over 443;
-- Docker pulls digest-pinned images from Docker Hub over 443 (GHCR until 2026-10-08).
+- Docker pulls digest-pinned images over 443: from Docker Hub as `main`
+  holds it (#1002, merged 2026-10-08), and from GHCR until the owner's next
+  playbook run and template push apply that ([Applied state](#applied-state)).
 
 No inbound port is opened for the site, for Azure or for lab jobs. The site's
 servers reach the host in one direction only, through a server-side status

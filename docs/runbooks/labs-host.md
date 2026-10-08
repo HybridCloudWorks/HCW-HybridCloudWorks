@@ -3,7 +3,8 @@
 How to reach the Hostinger lab host from a desktop over SSH and VS Code (the
 first section); how to reinstall it, and what the first `bootstrap.sh` run
 checks before it changes anything; how the lab agent goes live, which is one
-PowerShell line; how to check, after the run that turns it on, that the
+PowerShell line; the order of the run after a merge (the playbook, then the
+Coder template, at once); how to check, after the run that turns it on, that the
 container runtime is privilege-separated and how to take that back (LAB-5);
 how the owner reaches Portainer and
 initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26),
@@ -668,11 +669,69 @@ anything, and the line beside the button reads *Validation on the lab isn't
 available right now. You can still download the files and validate
 locally.*
 
+## After a merge: the playbook, then the template, at once
+
+Nothing applies a merged change to the host on its own (#950), so the host
+is behind `main` until the owner runs it
+([Labs host, Applied state](../architecture/labs-host.md#applied-state)).
+The rule for that run:
+
+> **Run `bootstrap.sh` and then the Coder template push immediately;
+> `lab_images` removes the GHCR images the old template version still
+> names.**
+
+Why. The lab images moved from GHCR to Docker Hub on 2026-10-08 (#1002,
+#1003). The `lab_images` role keeps the images the checked-out commit names
+and removes the others from both daemons once no container uses them. So
+the first run after that merge removes the GHCR `hcw-lab` image from the
+sandbox daemon, while Coder's active template version still names that GHCR
+digest until the push publishes the version that names Docker Hub. A
+workspace started between the two finds its image gone and has to pull it
+back from a registry this repository no longer publishes to. The push
+closes the gap, so it follows the run, not the next day.
+
+1. Bash, on the host (PowerShell `ssh hcw-lab` from the workstation gets
+   there):
+
+   ```bash
+   sudo /opt/hcw-src/lab-host/bootstrap.sh
+   ```
+
+   Good is a `PLAY RECAP` line for `localhost` with `failed=0`. On the first
+   run since #1009, a checkout cloned from the old organisation also logs
+   `repointing origin of /opt/hcw-src from` the old address `to
+   https://github.com/saulpatinojr/HCW-HybridCloudWorks.git`, once, and
+   every run logs `fetching` with the address it really fetches from.
+
+2. Straight after, PowerShell on the workstation. Make the short-lived
+   `hcw-setup` token in a pane as step 1 of "The status token for the
+   site" in `lab-host/README.md` shows, paste this line, then paste the
+   token at the masked prompt:
+
+   ```powershell
+   $t = [Net.NetworkCredential]::new('', (Read-Host 'hcw-setup token' -AsSecureString)).Password
+   ```
+
+   Then publish the template from the commit the run just checked out:
+
+   ```powershell
+   $t | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-coder-template-push"
+   ```
+
+   Good is a last line starting `hcw-coder-template-push: published hcw-lab
+   from /opt/hcw-src/lab-host/coder/templates/hcw-lab. Active version:` and
+   ending `Default autostop: 1h0m0s.` Anything else, and what it means, is
+   the table under "Publishing the template" in `lab-host/README.md`.
+
 ## Container-runtime privilege separation (LAB-5)
 
 Estate review 2026-10-06, finding LAB-5; ADR 0032, amendment of 2026-10-07.
-Since that change the lab host runs two Docker daemons and nobody but root
-reaches either directly:
+Merged on 2026-10-07 (#987), and **not yet on the host** at the 2026-10-08
+review (#1009): the host last converged before the merge
+([Labs host, Applied state](../architecture/labs-host.md#applied-state)).
+This section describes the host from the first `bootstrap.sh` run after the
+merge, which this run's checks prove. From that run the lab host runs two
+Docker daemons and nobody but root reaches either directly:
 
 - the **host daemon** remaps user namespaces (`userns-remap: default`), so a
   job container's root, and Coder's server's and PostgreSQL's, is an
@@ -739,6 +798,10 @@ are not: Compose warning that `volume "coder-postgres-data" already exists
 but was not created by Docker Compose` (the carried volume, created by the
 docker role on purpose), and the docker role reporting `changed` on the stop
 and the carry tasks (they run once).
+
+This is also the run that takes the lab images to Docker Hub (#1002,
+#1003), so the template push follows it at once:
+[After a merge: the playbook, then the template, at once](#after-a-merge-the-playbook-then-the-template-at-once).
 
 ### Checking it afterwards
 
@@ -1218,7 +1281,10 @@ fix is installed.
 
 ### What runs on its own
 
-- **Every day, on the host:** `hcw-held-upgradable.timer` (the `hardening`
+- **Every day, on the host,** from the playbook run that applies #986
+  (merged 2026-10-07, not yet on the host at the 2026-10-08 review:
+  [Labs host, Applied state](../architecture/labs-host.md#applied-state)):
+  `hcw-held-upgradable.timer` (the `hardening`
   role, at 07:15 host time) logs one line per held package that apt could
   upgrade, at `daemon.warning` with the tag `hcw-held-upgradable`, which the
   Arc data collection rule ships to the Management workspace as a `Syslog`
@@ -1466,12 +1532,17 @@ policy assignment shows a compliance state"; and the labs page reads the
 machine's compliance. The script prints the variable whenever the
 assignment is missing and the run identity can write it.
 
-*2026-10-07:* guest configuration is now off on the Arc agent (owner
-decision, ADR 0032 amendment of that date; the `arc` role sets it), so the
-assignment has no agent on the host to evaluate it and cannot produce a
-compliance state. The answer above stands as written until the owner
-decides on #952 whether to keep the switch, remove the assignment, or turn
-guest configuration back on.
+*2026-10-07:* the `arc` role turns guest configuration off on the Arc agent
+(owner decision, ADR 0032 amendment of that date; #984). From the playbook
+run that applies it, the assignment has no agent on the host to evaluate it
+and cannot produce a compliance state. That run had not happened at the
+2026-10-08 review, when Arc still reported `guestConfigurationEnabled:
+"true"` (#1009; [Labs host, Applied state](../architecture/labs-host.md#applied-state)).
+The public estate card counts the baseline as not applicable to the lab
+rather than as a failure (`NOT_APPLICABLE_POLICIES` in
+`functions/src/lib/labs/estate.js`). The answer above stands as written
+until the owner decides on #952 whether to keep the switch, remove the
+assignment, or turn guest configuration back on.
 
 **What success looks like.** The run ends with the two variables, the plan
 to expect and the `-Connect` line, then `Changed:` naming what it did, and
