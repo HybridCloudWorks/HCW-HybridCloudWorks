@@ -1,18 +1,22 @@
 # Docker Hub publishing — the OIDC connection
 
-> **Status: live since 2026-09-29 (#779, closed).** The owner created the
-> OIDC connection and set both repository variables, and run
+> **Status: live since 2026-09-29 (#779, closed); Docker Hub only since
+> 2026-10-08.** The owner created the OIDC connection and set both
+> repository variables, and run
 > [36516945081](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/runs/36516945081)
 > published both images:
 > - `hybridcloudworks/hcw-lab` and `hybridcloudworks/hcw-lab-runner` on
->   Docker Hub carry the same digests as GHCR;
+>   Docker Hub carried the same digests as GHCR, which was then the first
+>   registry;
 > - an anonymous registry token reads their manifests;
 > - `gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest`
 >   verifies the SLSA provenance.
 >
-> Every later push to `main` that rebuilds the image publishes to both. Steps
-> 1 to 3 below are what was done once, and what to repeat if the connection
-> is ever recreated.
+> Every later push to `main` that rebuilds the image publishes to Docker
+> Hub. Until 2026-10-08 the images went to GHCR first and were copied here
+> by digest; since then `publish` pushes here directly and GHCR is no longer
+> published ("Since it went live"). Steps 1 to 3 below are what was done
+> once, and what to repeat if the connection is ever recreated.
 >
 > **The rule changed on 2026-10-07.** The repository moved from the
 > `HybridCloudWorks` organisation to the personal account `saulpatinojr`,
@@ -20,39 +24,34 @@
 > its ID and resources; only its rule needs editing, to the value in step 1.
 > See "After a repository transfer" below.
 
-The lab images, `hcw-lab` and `hcw-lab-runner`, are published to GHCR on
-every push to `main` that changes them. This page turns on the second
-registry, Docker Hub, under the organisation `hybridcloudworks`. No Docker
-password, personal access token or organisation access token is stored
-anywhere. GitHub Actions proves which workflow is running with its own OIDC
+The lab images, `hcw-lab` and `hcw-lab-runner`, are published to Docker
+Hub, under the organisation `hybridcloudworks`, on every push to `main`
+that changes them. Docker Hub is their only registry. No Docker password,
+personal access token or organisation access token is stored anywhere. GitHub Actions proves which workflow is running with its own OIDC
 token, and Docker exchanges that for a Docker access token that lasts a few
 minutes and is used once.
 
 ## What the workflow does
 
-`publish-lab-image.yml` has three jobs. `build` and `publish` are unchanged:
-`publish` pushes both images to GHCR and attests them. The new third job,
-`publish-dockerhub`, runs only after `publish` succeeds and only while the
-repository variable `DOCKERHUB_ENABLED` is `true`:
+`publish-lab-image.yml`'s `publish` job runs only after `build` succeeds,
+only from `main` (a push, a dispatch or the weekly rebuild), and only while
+the repository variable `DOCKERHUB_ENABLED` is `true`:
 
-1. Checks that `DOCKERHUB_CONNECTION` holds a connection ID (a UUID), and
-   fails with a message naming the variable if it does not.
-2. Signs in to Docker Hub through the OIDC connection, with
-   `docker/login-action` v4.6.0.
-3. Copies each image from GHCR to Docker Hub **by digest**
-   (`docker buildx imagetools create --prefer-index=false`). The copy keeps
-   the manifest's own bytes, so each image has the same digest in both
-   registries. The job reads the digest back from Docker Hub and fails if it
-   differs from GHCR's.
-4. Attests each image's provenance under its Docker Hub name, and pushes the
+1. Checks that `DOCKERHUB_CONNECTION` holds a connection ID (a UUID), before
+   building anything, and fails with a message naming the variable if it
+   does not.
+2. Builds both targets, smoke-tests each, and runs the sandbox check.
+3. Signs in to Docker Hub through the OIDC connection, with
+   `docker/login-action` v4.6.0, asking for a token that lasts 900 seconds.
+4. Pushes each image with `docker push`, tagged with the commit SHA and
+   `latest`, and reads its digest back from Docker Hub.
+5. Attests each image's provenance under its Docker Hub name, and pushes the
    attestation to Docker Hub beside the image.
-5. Writes the two Docker Hub references, with their digests, to the run
-   summary.
+6. Writes the two references, with their digests, to the run summary.
 
-A separate job, rather than more steps in `publish`, so that GHCR never
-waits on Docker Hub. A Docker Hub failure turns the run red after GHCR has
-already published and attested. **Re-run failed jobs** repeats only the
-Docker Hub job, against the same two digests.
+`propose-pins` then reads each digest again from Docker Hub by tag, and
+`pin-pull-request` opens the pull request that moves the two consumers to
+them.
 
 ## How the sign-in works
 
@@ -66,10 +65,10 @@ Docker Hub job, against the same two digests.
 | Rules match the `sub` claim. `*` is a wildcard. | VERIFIED: same page |
 | The exact on-screen labels for resources and scopes. | NOT VERIFIED: the form is behind sign-in, and Docker's pages describe the fields without naming the controls |
 | `docker/login-action` added Docker Hub OIDC in v4.5.0. This repository pins v4.6.0 (`dbcb8138…`). The workflow grants `id-token: write`, passes the organisation name as `username`, omits `password`, and sets `DOCKERHUB_OIDC_CONNECTIONID`. | VERIFIED: [v4.5.0 release notes](https://github.com/docker/login-action/releases/tag/v4.5.0); the [README at v4.6.0](https://github.com/docker/login-action/blob/v4.6.0/README.md#docker-hub) |
-| The exchange: the action requests a GitHub ID token with the audience `https://identity.docker.com`, then posts it to `https://identity.docker.com/oauth/token` as an RFC 8693 token exchange (`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token_type=urn:ietf:params:oauth:token-type:id_token`, plus `connection_id` and `expires_in`). It masks the returned access token and runs `docker login` with it. `expires_in` defaults to 300 seconds; the environment variable `DOCKERHUB_OIDC_EXPIREIN` accepts 300 to 3600. | VERIFIED: [`src/dockerhub.ts` at v4.6.0](https://github.com/docker/login-action/blob/v4.6.0/src/dockerhub.ts). `DOCKERHUB_OIDC_EXPIREIN` is in the source, not the README, and the workflow does not set it |
+| The exchange: the action requests a GitHub ID token with the audience `https://identity.docker.com`, then posts it to `https://identity.docker.com/oauth/token` as an RFC 8693 token exchange (`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token_type=urn:ietf:params:oauth:token-type:id_token`, plus `connection_id` and `expires_in`). It masks the returned access token and runs `docker login` with it. `expires_in` defaults to 300 seconds; the environment variable `DOCKERHUB_OIDC_EXPIREIN` accepts 300 to 3600. | VERIFIED: [`src/dockerhub.ts` at v4.6.0](https://github.com/docker/login-action/blob/v4.6.0/src/dockerhub.ts). `DOCKERHUB_OIDC_EXPIREIN` is in the source, not the README. The workflow sets it to 900 since 2026-10-08, when the login moved in front of full pushes |
 | This repository's OIDC subject uses GitHub's immutable-identifier form: `repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main` on `main`. | VERIFIED: `GET /repos/saulpatinojr/HCW-HybridCloudWorks/actions/oidc/customization/sub` returned `use_immutable_subject: true` and that prefix on 2026-10-08, and the failing Azure logins after the transfer presented the same subject. Before 2026-10-07 the owner half was `HybridCloudWorks@312844660` (same call, 2026-09-28). Docker's rulesets page notes the immutable form |
-| A single-image copy keeps its digest only with `--prefer-index=false`. | VERIFIED by measurement, 2026-09-28, buildx v0.37.1 (the runner's version): `ghcr.io/hybridcloudworks/hcw-lab-runner@sha256:c02d87ac…` copied to a local registry kept `sha256:c02d87ac…`. Without the flag, buildx wraps the image in a new manifest list with a new digest. [imagetools create reference](https://docs.docker.com/reference/cli/docker/buildx/imagetools/create/) |
-| The copy does not carry GHCR's attestation across. | VERIFIED by the same measurement: the destination had no attestation tag afterwards |
+| Until 2026-10-08, when the copy step went: a single-image copy keeps its digest only with `--prefer-index=false`. | VERIFIED by measurement, 2026-09-28, buildx v0.37.1 (the runner's version): `ghcr.io/hybridcloudworks/hcw-lab-runner@sha256:c02d87ac…` copied to a local registry kept `sha256:c02d87ac…`. Without the flag, buildx wraps the image in a new manifest list with a new digest. [imagetools create reference](https://docs.docker.com/reference/cli/docker/buildx/imagetools/create/) |
+| Until 2026-10-08: the copy does not carry GHCR's attestation across. | VERIFIED by the same measurement: the destination had no attestation tag afterwards |
 | `actions/attest` pushes to Docker Hub when the subject name uses `docker.io` as its registry part. | VERIFIED: [actions/attest README](https://github.com/actions/attest#container-image), "When pushing to Docker Hub, please use "docker.io" as the registry portion of the image name." |
 | A `docker push` to a missing repository creates it with the namespace's default privacy. | VERIFIED: [Docker Hub settings](https://docs.docker.com/docker-hub/settings/#configure-default-repository-privacy). Not relied on: both repositories already exist and are public |
 
@@ -80,10 +79,8 @@ Docker Hub job, against the same two digests.
   Business, Hardened Images, or acceptance into Docker-Sponsored Open Source
   (#678). If step 1 shows an upgrade prompt instead of the form, or refuses
   **Create connection**, stop there. Nothing in the repository needs
-  changing: the Docker Hub job stays skipped until `DOCKERHUB_ENABLED` is
-  set. "If the organisation cannot create a connection yet", below, is the
-  way to put the images on Docker Hub in the meantime without storing a
-  token.
+  changing: the publish job stays skipped until `DOCKERHUB_ENABLED` is
+  set, and nothing is published anywhere.
 - **The repositories exist.** They do (see the status note above). If one is
   ever deleted, recreate it as **Public** at
   <https://hub.docker.com/orgs/hybridcloudworks/repositories>, because a
@@ -173,8 +170,8 @@ It prints the UUID, then `true`.
 
 The next push to `main` that changes the lab image publishes to Docker Hub
 on its own. To publish now, dispatch the workflow from `main`. The dispatch
-rebuilds, smoke-tests and republishes GHCR as well, which is what the
-workflow always does:
+rebuilds and smoke-tests both images before it pushes them, which is what
+the workflow always does:
 
 ```powershell
 gh workflow run publish-lab-image.yml --repo saulpatinojr/HCW-HybridCloudWorks --ref main
@@ -192,24 +189,23 @@ The run is also listed at
 
 ## What success looks like
 
-- **The run:** three green jobs: `Build and smoke`, `Publish to GHCR` and
-  `Publish to Docker Hub`. The summary has a `Published` block with the two
-  GHCR references, and a `Published to Docker Hub` block with the two
-  `docker.io/hybridcloudworks/…` references. The `sha256:` values are the
-  same in both blocks.
+- **The run:** `Build and smoke`, `Publish to Docker Hub` and `Plan the
+  consumers' digest pins` green, and `Open or update the digest pull
+  request` too when the digests moved. The summary has a `Published` block
+  with the two `docker.io/hybridcloudworks/…` references and their digests.
 - **Docker Hub:** <https://hub.docker.com/r/hybridcloudworks/hcw-lab/tags>
   and <https://hub.docker.com/r/hybridcloudworks/hcw-lab-runner/tags> each
   list `latest` and the commit's full SHA as tags.
-- **The same bytes.** These pull from Docker Hub, anonymously, the exact
-  digest GHCR holds for `latest`. A pull by digest succeeds only if Docker
-  Hub has that manifest:
+- **The published bytes, anonymously.** These read the digest Docker Hub
+  serves for `latest` and pull exactly it, with no sign-in. Each digest
+  printed should equal the one in the run's `Published` block:
 
   ```powershell
-  $d = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; docker pull "hybridcloudworks/hcw-lab@$d"
+  $d = docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; $d; docker pull "hybridcloudworks/hcw-lab@$d"
   ```
 
   ```powershell
-  $r = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab-runner:latest --format '{{.Manifest.Digest}}'; docker pull "hybridcloudworks/hcw-lab-runner@$r"
+  $r = docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-lab-runner:latest --format '{{.Manifest.Digest}}'; $r; docker pull "hybridcloudworks/hcw-lab-runner@$r"
   ```
 
   Each ends with a `Digest: sha256:…` line and `Status: Downloaded newer image for …`,
@@ -223,19 +219,19 @@ The run is also listed at
   ```
 
   The same command against `ghcr.io/hybridcloudworks/hcw-lab:latest`
-  succeeded on 2026-09-28, which is the baseline.
+  succeeded on 2026-09-28. The first publish after 2026-10-08 is the
+  baseline for the Docker Hub-only form.
 
 ## When it fails
 
 | Where, and what it says | Cause | Fix |
 | --- | --- | --- |
 | `Publish to Docker Hub` shows as skipped | `DOCKERHUB_ENABLED` is not `true` | Step 3 |
-| `DOCKERHUB_CONNECTION holds a connection ID, and both digests arrived`: `DOCKERHUB_ENABLED is true, but the repository variable DOCKERHUB_CONNECTION is not an OIDC connection ID` | The variable is missing or holds something else | Step 2 |
+| `DOCKERHUB_CONNECTION holds a connection ID`: `DOCKERHUB_ENABLED is true, but the repository variable DOCKERHUB_CONNECTION is not an OIDC connection ID` | The variable is missing or holds something else | Step 2 |
 | `Log in to Docker Hub through the OIDC connection`: `Docker Hub API: bad status code 4xx: {…}` | Docker refused the exchange. Usually the subject did not match the ruleset, or the connection is deactivated or was deleted | The run's summary has a table, **Docker refused the token exchange**, from the step `Explain a refused Docker token exchange`. It shows the token's `sub`, `aud`, `ref` and `repository` claims (never the token) and says whether `sub` equals the rule in step 1. Then open the connection's **Edit** page in Docker Home: its **Failures** table shows each refused exchange and why. A subject mismatch means the rule is not exactly the one in step 1. A deleted connection needs a new one, and its new ID in step 2. The first real run, 36508154993 on 2026-09-29, failed here with `400 {"error":"access_denied"}` |
 | The same step: `Docker Hub API: operation not permitted` | A 401 with no body from Docker | As above |
-| A copy step: `unauthorized`, `insufficient_scope` or `requested access to the resource is denied` | The ruleset's resources or scopes do not include push on that repository | Edit the ruleset: both repositories, read and write |
-| A copy or attest step fails as unauthorized several minutes after the login succeeded | The Docker token expired (300 seconds by default) | Re-run the failed job. If it keeps happening, the job needs `DOCKERHUB_OIDC_EXPIREIN` (300 to 3600) on the login step, a pull request |
-| A copy step: `… is sha256:X on Docker Hub, but sha256:Y on GHCR.` | Something other than this job wrote the tag between the copy and the read-back | Do not re-run blindly: find what else pushes to `hybridcloudworks/hcw-lab*` |
+| A push or attest step: `unauthorized`, `insufficient_scope` or `requested access to the resource is denied` | The ruleset's resources or scopes do not include push on that repository | Edit the ruleset: both repositories, read and write |
+| A push or attest step fails as unauthorized many minutes after the login succeeded | The Docker token expired (the workflow asks for 900 seconds) | Re-run the failed job. If it keeps happening, raise `DOCKERHUB_OIDC_EXPIREIN` on the login step (at most 3600), a pull request |
 | **Create connection** refused, or an upgrade prompt in step 1 | The organisation's subscription does not include OIDC connections | "Before you start" |
 
 ## After a repository transfer
@@ -259,7 +255,7 @@ keeps its ID and its resources. Only the rule needs changing.
 4. Publish (step 4) and check "What success looks like".
 
 `EXPECTED_RULE` in `publish-lab-image.yml` holds the same string, and
-`scripts/oidc-subjects.test.mjs` checks it against `infra/oidc.tf` and
+`scripts/check-oidc-owner.mjs` checks it against `infra/oidc.tf` and
 against the repository CI runs in. A transfer therefore fails a pull request
 before it fails a publish. It cannot reach Docker Home, so this edit stays a
 manual step.
@@ -270,7 +266,8 @@ Done once already: on 2026-10-07 the repository moved from the
 
 ## Turning it off
 
-Either of these stops Docker Hub publishing without touching GHCR:
+This stops publishing the lab images altogether, since Docker Hub is their
+only registry:
 
 ```powershell
 gh variable set DOCKERHUB_ENABLED --repo saulpatinojr/HCW-HybridCloudWorks --body false
@@ -279,37 +276,6 @@ gh variable set DOCKERHUB_ENABLED --repo saulpatinojr/HCW-HybridCloudWorks --bod
 In Docker Home, **Deactivate** on the connection's row pauses it too, but
 then the job runs and fails at the login step. Setting the variable to
 `false` is the quiet way. Images already on Docker Hub stay there.
-
-## If the organisation cannot create a connection yet
-
-The Docker-Sponsored Open Source application (#678) wants the images on
-Docker Hub, and OIDC connections may need that programme first. To break the
-loop without storing a token anywhere, copy the current images once, from
-your own machine, as yourself. This is a manual step, and the next workflow
-run does not repeat it.
-
-Sign in to Docker Hub interactively (a browser device-code prompt):
-
-```powershell
-docker login
-```
-
-Then copy each image by its GHCR digest, which keeps the digest:
-
-```powershell
-$d = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; docker buildx imagetools create --prefer-index=false --tag docker.io/hybridcloudworks/hcw-lab:latest "ghcr.io/hybridcloudworks/hcw-lab@$d"
-```
-
-```powershell
-$r = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab-runner:latest --format '{{.Manifest.Digest}}'; docker buildx imagetools create --prefer-index=false --tag docker.io/hybridcloudworks/hcw-lab-runner:latest "ghcr.io/hybridcloudworks/hcw-lab-runner@$r"
-```
-
-Success prints `pushing sha256:… to docker.io/hybridcloudworks/hcw-lab:latest`
-for each. `gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks`
-(without `--bundle-from-oci`) then succeeds, because GitHub's attestation
-API looks the image up by digest and finds the GHCR attestation. No
-attestation is stored on Docker Hub itself until the workflow publishes
-there.
 
 ## Why not an organisation access token
 
@@ -326,8 +292,7 @@ federation means zero long-lived cloud credentials in GitHub").
 
 - **The site:** `LAB_IMAGE` in `frontend/src/data/labs/catalogue.js`, which
   drives the `/education/labs` "Run it locally" commands, names
-  `hybridcloudworks/hcw-lab:latest` on Docker Hub (#795). GHCR stays a
-  mirror of the same digest.
+  `hybridcloudworks/hcw-lab:latest` on Docker Hub (#795).
 - **#779:** closed on 2026-09-29, after the three checks under "What success
   looks like" passed.
 - **2026-10-07, repository transfer:** the rule in step 1, `EXPECTED_RULE`
@@ -338,3 +303,17 @@ federation means zero long-lived cloud credentials in GitHub").
   saulpatinojr/HCW-HybridCloudWorks` accepts those is NOT VERIFIED. The
   first publish after the move gives a `latest` that was signed under the
   new owner.
+- **2026-10-08, Docker Hub only:** the first publish after the transfer
+  failed at the GHCR push with `permission_denied: The requested
+  installation does not exist` (run 37730460748). The repository's token
+  can no longer write the organisation's package namespace, and the owner
+  chose one registry over two. `publish` now pushes straight to Docker Hub
+  through this connection, the separate copy job is gone, and the two
+  consumers (`vps-agent/lib/capabilities.js` and the Coder template) pin
+  `docker.io/hybridcloudworks/…`. The digests pinned that day were already
+  on Docker Hub byte for byte, so nothing was rebuilt for the move. The
+  lab host's `lab_images` role still removes images under the former
+  `ghcr.io/hybridcloudworks/hcw-lab*` once no pin names them. The images
+  already on GHCR stay there, public and frozen. The section that copied
+  GHCR's images to Docker Hub by hand before the connection existed went
+  with it, since there is no GHCR copy to read from any more.

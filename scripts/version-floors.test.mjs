@@ -388,7 +388,9 @@ describe('reading the lab job images', () => {
     const uncovered = Object.entries(IMAGES).filter(([key, ref]) => {
       const where = `${JOB_IMAGES_FILE} > IMAGES.${key}`;
       const pinned = today.pins.some((p) => p.where === where && p.raw === ref);
-      const builtHere = Object.keys(BUILT_HERE).some((image) => ref.startsWith(`${image}:`) || ref.startsWith(`${image}@`));
+      // BUILT_HERE is keyed without Docker Hub's host, as splitImage names it.
+      const name = ref.replace(/^docker\.io\//, '');
+      const builtHere = Object.keys(BUILT_HERE).some((image) => name.startsWith(`${image}:`) || name.startsWith(`${image}@`));
       return !pinned && !builtHere && !unsourced.has(where);
     });
     expect(uncovered.map(([key, ref]) => `IMAGES.${key} = ${ref}`)).toEqual([]);

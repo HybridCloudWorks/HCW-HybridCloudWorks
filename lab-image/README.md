@@ -1,20 +1,22 @@
 # hcw-lab image
 
-One Dockerfile, two targets, published to GHCR by
+One Dockerfile, two targets, published to Docker Hub as
+`docker.io/hybridcloudworks/hcw-lab-runner` and
+`docker.io/hybridcloudworks/hcw-lab` by
 [`publish-lab-image.yml`](../.github/workflows/publish-lab-image.yml) on every
 push to `main` that touches this directory (issue #658, Phase 1 in #674,
-Phase 2 in #675). Since 2026-09-29 (#779) the same workflow also copies both
-to Docker Hub, as `docker.io/hybridcloudworks/hcw-lab-runner` and
-`docker.io/hybridcloudworks/hcw-lab`. It copies by digest, so each image has
-the same digest in both registries, and it signs in through a Docker OIDC
-connection, so no Docker token is stored anywhere.
+Phase 2 in #675). The workflow signs in through a Docker OIDC connection, so
+no Docker token is stored anywhere. Docker Hub is the only registry since
+2026-10-08. Before that the images went to GHCR first and were copied to
+Docker Hub by digest (since 2026-09-29, #779); the GHCR copies stay public
+but are no longer updated.
 [Docker Hub publishing](../docs/runbooks/docker-hub-publishing.md) has the
 setup and the checks.
 
 | Target   | Image                                     | Carries                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | -------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `runner` | `ghcr.io/hybridcloudworks/hcw-lab-runner` | terraform, kubeconform, helm, ansible-core; a Terraform provider filesystem mirror at `/opt/terraform/mirror`; every Azure Verified Module the Landing Zone Builder emits, at the version it emits, and every registry module those call, at `/opt/avm/<name>@<version>`; one release of the Kubernetes JSON schemas at `/opt/kubeconform/schemas`; the three capability commands in [`bin/`](bin/). Runs as uid 65534 (`nobody`) with `/workspace` mounted read-only. This is what `vps-agent` runs jobs in. |
-| `full`   | `ghcr.io/hybridcloudworks/hcw-lab`        | Everything in `runner`, plus Azure CLI, kubectl, git, curl, jq and the three packages code-server needs (`ca-certificates`, `libatomic1`, `procps`); uid 65534's shell is `bash` and its home `/tmp/home`, because Coder runs everything through the passwd shell (#693). `CMD` is `bash`. This is what a lab page tells a learner to pull, and the base of the Coder template.                                                            |
+| `runner` | `docker.io/hybridcloudworks/hcw-lab-runner` | terraform, kubeconform, helm, ansible-core; a Terraform provider filesystem mirror at `/opt/terraform/mirror`; every Azure Verified Module the Landing Zone Builder emits, at the version it emits, and every registry module those call, at `/opt/avm/<name>@<version>`; one release of the Kubernetes JSON schemas at `/opt/kubeconform/schemas`; the three capability commands in [`bin/`](bin/). Runs as uid 65534 (`nobody`) with `/workspace` mounted read-only. This is what `vps-agent` runs jobs in. |
+| `full`   | `docker.io/hybridcloudworks/hcw-lab`        | Everything in `runner`, plus Azure CLI, kubectl, git, curl, jq and the three packages code-server needs (`ca-certificates`, `libatomic1`, `procps`); uid 65534's shell is `bash` and its home `/tmp/home`, because Coder runs everything through the passwd shell (#693). `CMD` is `bash`. This is what a lab page tells a learner to pull, and the base of the Coder template.                                                            |
 
 Both targets are built on the official `python:3.14.7-slim-trixie` image,
 pinned by index digest: CPython 3.14.7 on Debian 13 (trixie). ansible-core,
@@ -65,46 +67,12 @@ vendored module tree is 7.5 MB and the Kubernetes schemas 62 MB on disk.
 
 ## Run the toolchain locally
 
-The `full` image is the follow-along toolchain for the lab pages. Pull it,
-then run it with the current directory mounted at `/workspace`; both
-commands drop into `bash` there as `nobody`. Both GHCR packages are public
-(the owner step in #674; an anonymous request for each manifest answered 200
-on 2026-09-28), so no `docker login` is needed.
-
-PowerShell:
-
-```powershell
-docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
-```
-
-```powershell
-docker run --rm -it -v "${PWD}:/workspace" ghcr.io/hybridcloudworks/hcw-lab:latest
-```
-
-bash:
-
-```bash
-docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
-```
-
-```bash
-docker run --rm -it -v "$PWD:/workspace" ghcr.io/hybridcloudworks/hcw-lab:latest
-```
-
-A successful run prints a `nobody@<container id>:/workspace$` prompt, and
-`terraform version` there reports the version in `versions.env`. Add `:ro`
-to the mount to run the way the job sandbox does. For anything automated,
-pin the digest rather than the tag, exactly as
-[`vps-agent/lib/capabilities.js`](../vps-agent/lib/capabilities.js) does:
-the publish workflow writes each pushed image's digest to its job summary,
-and that is the first-party place to copy it from.
-
-### From Docker Hub
-
-The same image is on Docker Hub, where `hybridcloudworks/hcw-lab` is short
-for `docker.io/hybridcloudworks/hcw-lab`. It has been there since 2026-09-29
-(#779), and it is what the site's "Run it locally" commands pull. Both
-repositories are public, so the pull is anonymous.
+The `full` image is the follow-along toolchain for the lab pages, and the
+one the site's "Run it locally" commands pull. It is on Docker Hub, where
+`hybridcloudworks/hcw-lab` is short for `docker.io/hybridcloudworks/hcw-lab`.
+Both repositories are public, so the pull is anonymous. Pull it, then run it
+with the current directory mounted at `/workspace`; both commands drop into
+`bash` there as `nobody`.
 
 PowerShell:
 
@@ -126,33 +94,39 @@ docker pull hybridcloudworks/hcw-lab:latest
 docker run --rm -it -v "$PWD:/workspace" hybridcloudworks/hcw-lab:latest
 ```
 
-The two registries serve the same bytes, so this pulls from Docker Hub the
-exact digest GHCR holds for `latest`, and succeeds only if Docker Hub has it.
-PowerShell:
+A successful run prints a `nobody@<container id>:/workspace$` prompt, and
+`terraform version` there reports the version in `versions.env`. Add `:ro`
+to the mount to run the way the job sandbox does. For anything automated,
+pin the digest rather than the tag, exactly as
+[`vps-agent/lib/capabilities.js`](../vps-agent/lib/capabilities.js) does:
+the publish workflow writes each pushed image's digest to its job summary,
+and that is the first-party place to copy it from. This prints the digest
+Docker Hub serves for `latest` and pulls exactly it:
 
 ```powershell
-$d = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; docker pull "hybridcloudworks/hcw-lab@$d"
+$d = docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; $d; docker pull "hybridcloudworks/hcw-lab@$d"
 ```
 
 Success ends with `Status: Downloaded newer image for hybridcloudworks/hcw-lab@sha256:…`
 (or `Image is up to date`) and the same `sha256:` value on the `Digest:` line.
 
-The provenance attestation verifies against this repository under the Docker
-Hub name. The first line reads it from GitHub's attestation API, which keys on
-the digest and so also finds the GHCR attestation. The second reads the bundle
-stored beside the image on Docker Hub:
+The provenance attestation verifies against this repository. The first line
+reads it from GitHub's attestation API, which keys on the digest. The second
+reads the bundle stored beside the image on Docker Hub:
 
 ```powershell
-gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks
+gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks
 ```
 
 ```powershell
-gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks --bundle-from-oci
+gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks --bundle-from-oci
 ```
 
 Each prints `✓ Verification succeeded!` and names
 `.github/workflows/publish-lab-image.yml@refs/heads/main` as the build
-workflow.
+workflow. An image published before the repository moved to
+`saulpatinojr` on 2026-10-07 was signed under the old owner, so verify one
+published since.
 
 ## What works offline
 

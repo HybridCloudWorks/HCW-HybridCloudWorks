@@ -23,7 +23,21 @@ import { BUMP_SETS } from './lab-pins-upstream.mjs';
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const workflow = (name) => readFileSync(join(REPO, '.github', 'workflows', name), 'utf8');
 const commandLines = (source) => source.split(/\r?\n/).filter((line) => !/^\s*#/.test(line));
-const job = (source, name, next) => source.slice(source.indexOf(`\n  ${name}:\n`), next ? source.indexOf(`\n  ${next}:\n`) : undefined);
+/**
+ * One job's text, from its key to the next job's. Both keys must exist: a
+ * missing one makes indexOf return -1, and the slice then runs to the end of
+ * the file, so assertions about one job would read the jobs after it (the
+ * removal of publish-dockerhub on 2026-10-08 did exactly that until review
+ * caught it).
+ */
+const job = (source, name, next) => {
+  const at = (key) => {
+    const index = source.indexOf(`\n  ${key}:\n`);
+    if (index === -1) throw new Error(`no job \`${key}\` in the workflow`);
+    return index;
+  };
+  return source.slice(at(name), next ? at(next) : undefined);
+};
 
 describe('the pin sets', () => {
   it('are the sets lab-pins-upstream.mjs can bump, each on its own branch', () => {
@@ -167,7 +181,7 @@ describe('publish-lab-image.yml', () => {
   const source = workflow('publish-lab-image.yml');
   const lines = commandLines(source);
   const build = job(source, 'build', 'publish');
-  const publish = job(source, 'publish', 'publish-dockerhub');
+  const publish = job(source, 'publish', 'propose-pins');
   const propose = job(source, 'propose-pins', 'pin-pull-request');
   const pullRequest = job(source, 'pin-pull-request');
 

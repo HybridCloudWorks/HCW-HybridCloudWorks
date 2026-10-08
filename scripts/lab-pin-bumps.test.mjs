@@ -152,8 +152,16 @@ describe('reading publisher indexes', () => {
     expect(registryOf('caddy').repository).toBe('library/caddy');
     expect(registryOf('portainer/portainer-ee').hubTags).toBe('https://hub.docker.com/v2/repositories/portainer/portainer-ee/tags/');
     expect(registryOf('ghcr.io/coder/coder')).toMatchObject({ host: 'ghcr.io', repository: 'coder/coder', hubTags: null });
-    expect(parseImageRef(`ghcr.io/hybridcloudworks/hcw-lab:abc@sha256:${hex('0')}`)).toEqual({
-      name: 'ghcr.io/hybridcloudworks/hcw-lab',
+    // The lab images' own form since 2026-10-08: the host is not part of the
+    // repository name Docker Hub's API takes.
+    expect(registryOf('docker.io/hybridcloudworks/hcw-lab')).toMatchObject({
+      host: 'registry-1.docker.io',
+      repository: 'hybridcloudworks/hcw-lab',
+      tokenUrl: 'https://auth.docker.io/token?service=registry.docker.io&scope=repository:hybridcloudworks/hcw-lab:pull',
+    });
+    expect(registryOf('docker.io/alpine').repository).toBe('library/alpine');
+    expect(parseImageRef(`docker.io/hybridcloudworks/hcw-lab:abc@sha256:${hex('0')}`)).toEqual({
+      name: 'docker.io/hybridcloudworks/hcw-lab',
       tag: 'abc',
       digest: `sha256:${hex('0')}`,
     });
@@ -373,15 +381,15 @@ describe('the consumers\' digest plan', () => {
   const fullManifest = JSON.stringify({ full: 1 });
   const tag = 'f'.repeat(40);
   const routes = (fullServed = fullManifest) => ({
-    'https://ghcr.io/token?scope=repository:hybridcloudworks/hcw-lab-runner:pull': { token: 't' },
-    'https://ghcr.io/token?scope=repository:hybridcloudworks/hcw-lab:pull': { token: 't' },
-    [`https://ghcr.io/v2/hybridcloudworks/hcw-lab-runner/manifests/${tag}`]: runnerManifest,
-    [`https://ghcr.io/v2/hybridcloudworks/hcw-lab/manifests/${tag}`]: fullServed,
+    'https://auth.docker.io/token?service=registry.docker.io&scope=repository:hybridcloudworks/hcw-lab-runner:pull': { token: 't' },
+    'https://auth.docker.io/token?service=registry.docker.io&scope=repository:hybridcloudworks/hcw-lab:pull': { token: 't' },
+    [`https://registry-1.docker.io/v2/hybridcloudworks/hcw-lab-runner/manifests/${tag}`]: runnerManifest,
+    [`https://registry-1.docker.io/v2/hybridcloudworks/hcw-lab/manifests/${tag}`]: fullServed,
   });
-  const runner = `ghcr.io/hybridcloudworks/hcw-lab-runner:${tag}@${sha(runnerManifest)}`;
-  const full = `ghcr.io/hybridcloudworks/hcw-lab:${tag}@${sha(fullManifest)}`;
+  const runner = `docker.io/hybridcloudworks/hcw-lab-runner:${tag}@${sha(runnerManifest)}`;
+  const full = `docker.io/hybridcloudworks/hcw-lab:${tag}@${sha(fullManifest)}`;
 
-  it('pins both consumers to the digests GHCR serves for the published tag', async () => {
+  it('pins both consumers to the digests Docker Hub serves for the published tag', async () => {
     const plan = await planImageDigests({ files, http: makeHttp(fakeFetch(routes())), runner, full });
     expect(plan.notes).toEqual([]);
     expect(plan.files[CAPABILITIES_PATH]).toContain(`'${runner}'`);

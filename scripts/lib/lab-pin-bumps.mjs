@@ -43,7 +43,7 @@ import { createHash } from 'node:crypto';
 import { coreVersion, compareVersions } from '../lab-pins-upstream.mjs';
 
 export const USER_AGENT =
-  'HCW-HybridCloudWorks lab-pins-upstream (+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks)';
+  'HCW-HybridCloudWorks lab-pins-upstream (+https://github.com/saulpatinojr/HCW-HybridCloudWorks)';
 
 export const GROUP_VARS_PATH = 'lab-host/ansible/group_vars/all.yml';
 export const VERSIONS_ENV_PATH = 'lab-image/versions.env';
@@ -52,8 +52,11 @@ export const SANDBOX_DOCKERFILE_PATH = 'lab-image/sandbox-template/Dockerfile';
 export const CAPABILITIES_PATH = 'vps-agent/lib/capabilities.js';
 export const CODER_TEMPLATE_PATH = 'lab-host/coder/templates/hcw-lab/main.tf';
 
-export const RUNNER_IMAGE = 'ghcr.io/hybridcloudworks/hcw-lab-runner';
-export const FULL_IMAGE = 'ghcr.io/hybridcloudworks/hcw-lab';
+// Docker Hub only since 2026-10-08. GHCR was the first stop until the
+// repository left the HybridCloudWorks organisation, whose package namespace
+// its token can no longer write.
+export const RUNNER_IMAGE = 'docker.io/hybridcloudworks/hcw-lab-runner';
+export const FULL_IMAGE = 'docker.io/hybridcloudworks/hcw-lab';
 
 const sha256Hex = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const escapeRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -99,7 +102,11 @@ export const MANIFEST_TYPES = [
   'application/vnd.docker.distribution.manifest.v2+json',
 ].join(', ');
 
-/** Where an image lives: GHCR for ghcr.io/…, Docker Hub otherwise (`library/` for an official image). */
+/**
+ * Where an image lives: GHCR for ghcr.io/…, Docker Hub otherwise (`library/` for
+ * an official image). An explicit `docker.io/` is Docker Hub too, and is not
+ * part of the repository name the registry API takes.
+ */
 export function registryOf(image) {
   if (image.startsWith('ghcr.io/')) {
     const repository = image.slice('ghcr.io/'.length);
@@ -110,7 +117,8 @@ export function registryOf(image) {
       hubTags: null,
     };
   }
-  const repository = image.includes('/') ? image : `library/${image}`;
+  const name = image.startsWith('docker.io/') ? image.slice('docker.io/'.length) : image;
+  const repository = name.includes('/') ? name : `library/${name}`;
   return {
     host: 'registry-1.docker.io',
     repository,
@@ -657,13 +665,13 @@ export async function planImageBase({ files, http }) {
 
 // ── The consumers' digests (capabilities.js, the Coder template) ───────────
 
-const RUNNER_PIN = /'(ghcr\.io\/hybridcloudworks\/hcw-lab-runner:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64})'/;
+const RUNNER_PIN = /'(docker\.io\/hybridcloudworks\/hcw-lab-runner:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64})'/;
 const TEMPLATE_TAG = /^[ \t]*image_tag[ \t]*=[ \t]*"([^"]+)"/m;
 const TEMPLATE_DIGEST = /^[ \t]*image_digest[ \t]*=[ \t]*"(sha256:[0-9a-f]{64})"/m;
 
 /**
  * Pin the two images a publish from main just pushed. The digests arrive from
- * the publish job (read back from GHCR there with imagetools); they are read
+ * the publish job (read back from Docker Hub there with imagetools); they are read
  * again here from the registry, by tag, and must agree, so a digest that was
  * mistyped or replaced in between never reaches a consumer.
  */
@@ -689,7 +697,7 @@ export async function planImageDigests({ files, http, runner, full }) {
     if (current === ref.digest) continue;
     try {
       const read = await readManifest(http, ref.name, ref.tag);
-      if (read.digest !== ref.digest) throw new Error(`${ref.name}:${ref.tag} is ${read.digest} on GHCR, not the ${ref.digest} the publish job reported`);
+      if (read.digest !== ref.digest) throw new Error(`${ref.name}:${ref.tag} is ${read.digest} on Docker Hub, not the ${ref.digest} the publish job reported`);
       const pinned = `${ref.name}:${ref.tag}@${ref.digest}`;
       const edits =
         ref === runnerRef

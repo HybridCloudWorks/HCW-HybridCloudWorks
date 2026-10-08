@@ -114,9 +114,10 @@ export const JOB_IMAGES_FILE = 'vps-agent/lib/capabilities.js';
  * Images this repository builds, each with the Dockerfile it is built from.
  * Such an image has no release line of its own: what it runs on is that
  * Dockerfile's FROM lines, which readDockerfile judges like any other.
+ * Keyed by splitImage's name, which drops Docker Hub's `docker.io/`.
  */
 export const BUILT_HERE = {
-  'ghcr.io/hybridcloudworks/hcw-lab-runner': 'lab-image/Dockerfile',
+  'hybridcloudworks/hcw-lab-runner': 'lab-image/Dockerfile',
 };
 
 /** Each `key: 'ref'` of `export const IMAGES = { ... };`, with the line its reference is on, or null with no map. */

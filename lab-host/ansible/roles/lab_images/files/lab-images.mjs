@@ -24,6 +24,7 @@
  *
  * Removals are every reference Docker lists for an image in one of the lab's
  * own repositories (the repositories the pins name, and anything under
+ * hybridcloudworks/hcw-lab* on Docker Hub or the former
  * ghcr.io/hybridcloudworks/hcw-lab*) when none of the image's references is
  * a pin. An image that a container, running or stopped, still uses is kept
  * and reported instead, and a reference in any other repository is never
@@ -60,8 +61,13 @@ export const WORKSPACE_TEMPLATE_FILE = 'lab-host/coder/templates/hcw-lab/main.tf
  * The lab's own repositories beyond the ones the pins name: the images
  * lab-image/ builds and publish-lab-image.yml pushes. A stale image here is
  * removed even when no current pin names its repository.
+ *
+ * Matched against the familiar form, so Docker Hub's appears without its
+ * host. The GHCR alternative stays after the move to Docker Hub only
+ * (2026-10-08): the host still holds images pulled from there, and this is
+ * what lets the first run after the move remove them once no pin names them.
  */
-export const LAB_REPOSITORY_PATTERN = /^ghcr\.io\/hybridcloudworks\/hcw-lab[a-z0-9._-]*$/;
+export const LAB_REPOSITORY_PATTERN = /^(?:ghcr\.io\/)?hybridcloudworks\/hcw-lab[a-z0-9._-]*$/;
 
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const PATH_COMPONENT = '[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*';

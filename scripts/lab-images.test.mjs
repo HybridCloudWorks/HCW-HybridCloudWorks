@@ -39,8 +39,12 @@ const helper = path.join(repoRoot, 'lab-host', 'ansible', 'roles', 'lab_images',
 const templateText = readFileSync(path.join(repoRoot, WORKSPACE_TEMPLATE_FILE), 'utf8');
 
 const hex = (c) => c.repeat(64);
-const RUNNER = 'ghcr.io/hybridcloudworks/hcw-lab-runner';
-const WORKSPACE = 'ghcr.io/hybridcloudworks/hcw-lab';
+// The familiar form, as Docker lists Docker Hub images in RepoTags and
+// RepoDigests; the pins name docker.io/… and compare equal to these.
+const RUNNER = 'hybridcloudworks/hcw-lab-runner';
+const WORKSPACE = 'hybridcloudworks/hcw-lab';
+// Where both images lived until 2026-10-08.
+const FORMER = 'ghcr.io/hybridcloudworks/hcw-lab';
 
 const scratch = mkdtempSync(path.join(os.tmpdir(), 'lab-images-test-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -228,13 +232,35 @@ describe('the plan', () => {
     expect(plan.remove).toEqual([`${WORKSPACE}@sha256:${hex('8')}`]);
   });
 
-  it('removes a stale tag under ghcr.io/hybridcloudworks/hcw-lab* before its digest', async () => {
+  it('removes a stale tag under hybridcloudworks/hcw-lab* before its digest', async () => {
     const pins = await readPins(current());
     const plan = planImages({
       checkouts: [pins],
       images: [image(hex('7'), [`${WORKSPACE}:latest`, `${WORKSPACE}@sha256:${hex('7')}`])],
     });
     expect(plan.remove).toEqual([`${WORKSPACE}:latest`, `${WORKSPACE}@sha256:${hex('7')}`]);
+  });
+
+  it('removes an image pulled from the former GHCR repositories once no pin names it', async () => {
+    const pins = await readPins(current());
+    const plan = planImages({
+      checkouts: [pins],
+      images: [image(hex('b'), [`${FORMER}-runner@sha256:${hex('b')}`, `${FORMER}@sha256:${hex('c')}`])],
+    });
+    expect(plan.remove).toEqual([`${FORMER}-runner@sha256:${hex('b')}`, `${FORMER}@sha256:${hex('c')}`]);
+  });
+
+  it('keeps an image whose Docker Hub reference is the pin, GHCR reference and all', async () => {
+    // The same bytes under both names, as on the host after the first pull
+    // from Docker Hub: one reference is a pin, so the image stays whole.
+    const pins = await readPins(current());
+    const pinned = pins.workspace;
+    expect(pinned.repository).toBe(WORKSPACE);
+    const plan = planImages({
+      checkouts: [pins],
+      images: [image(pinned.digest.slice('sha256:'.length), [`${FORMER}@${pinned.digest}`, `${WORKSPACE}@${pinned.digest}`])],
+    });
+    expect(plan.remove).toEqual([]);
   });
 
   it('leaves every repository outside the lab\'s own alone', async () => {
@@ -247,6 +273,7 @@ describe('the plan', () => {
         image(hex('3'), [`ghcr.io/coder/coder@sha256:${hex('3')}`]),
         image(hex('4'), ['hcw-lab-runner:dev']),
         image(hex('5'), [`ghcr.io/hybridcloudworks/other@sha256:${hex('5')}`]),
+        image(hex('a'), [`hybridcloudworks/other@sha256:${hex('a')}`]),
         image(hex('6'), [`alpine/ansible@sha256:${hex('6')}`]),
       ],
     });

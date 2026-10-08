@@ -47,9 +47,11 @@ the host can hold them before any job asks.
    with the image as the item label.
 4. **Removes what no pin names**, in the lab's own repositories only: the
    repositories the pins name (today `alpine`,
-   `ghcr.io/hybridcloudworks/hcw-lab-runner` and
-   `ghcr.io/hybridcloudworks/hcw-lab`) and anything else under
-   `ghcr.io/hybridcloudworks/hcw-lab*`. An image is removed when none of its
+   `docker.io/hybridcloudworks/hcw-lab-runner` and
+   `docker.io/hybridcloudworks/hcw-lab`) and anything else under
+   `hybridcloudworks/hcw-lab*` on Docker Hub or the former
+   `ghcr.io/hybridcloudworks/hcw-lab*`, which is how the images pulled from
+   GHCR before 2026-10-08 leave the host. An image is removed when none of its
    references is a pin: each of its references in those repositories goes,
    tags before digests, with `docker image rm`. A reference in any other
    repository is never listed, so an image that also carries one keeps its

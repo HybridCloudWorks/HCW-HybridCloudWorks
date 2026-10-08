@@ -307,9 +307,9 @@ jobs:
         id: scan
         run: |
           set -uo pipefail
-          runner=$(grep -oE "ghcr\.io/hybridcloudworks/hcw-lab-runner:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}" vps-agent/lib/capabilities.js | head -1)
+          runner=$(grep -oE "docker\.io/hybridcloudworks/hcw-lab-runner:[A-Za-z0-9._-]+@sha256:[0-9a-f]{64}" vps-agent/lib/capabilities.js | head -1)
           full_digest=$(grep -oE 'image_digest\s*=\s*"sha256:[0-9a-f]{64}"' lab-host/coder/templates/hcw-lab/main.tf | grep -oE 'sha256:[0-9a-f]{64}')
-          full="ghcr.io/hybridcloudworks/hcw-lab@${full_digest}"
+          full="docker.io/hybridcloudworks/hcw-lab@${full_digest}"
           test -n "$runner" && test -n "$full_digest"
           echo "## Lab images against the vulnerability database" > "${RUNNER_TEMP}/scan.md"
           echo >> "${RUNNER_TEMP}/scan.md"

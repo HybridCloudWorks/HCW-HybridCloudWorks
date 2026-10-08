@@ -376,9 +376,7 @@ export default function DockerDesktopPage() {
           <Code>terraform version</Code> answers. The image is built for linux/amd64 only, so on
           Apple silicon it runs under emulation and Docker prints a platform warning first; it
           works, more slowly. If your Docker Desktop runs on the Apple Virtualization framework, the
-          setting “Use Rosetta for x86_64/amd64 emulation on Apple Silicon” speeds that up. The same
-          image is published as <Code>ghcr.io/hybridcloudworks/hcw-lab</Code> too, with the same
-          digest.
+          setting “Use Rosetta for x86_64/amd64 emulation on Apple Silicon” speeds that up.
         </p>
       </GuideSection>
 

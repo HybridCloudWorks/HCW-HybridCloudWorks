@@ -22,7 +22,7 @@ import DockerBuildingImagesPage, {
   BUILDING_IMAGES_PATH,
   CHECKED_ON as IMAGES_CHECKED_ON,
   COMMANDS as IMAGE_COMMANDS,
-  GHCR_IMAGE,
+  PUBLISHED_IMAGE,
   LOCAL_TAG,
   SOURCE_LINKS,
 } from './BuildingImagesPage';
@@ -120,7 +120,7 @@ describe('the building images guide (#772)', () => {
       'Running as a non-root user',
       'Smoke tests',
       'Provenance attestations',
-      'Publishing to GitHub Container Registry',
+      'Publishing to Docker Hub',
     ]);
   });
 
@@ -234,11 +234,14 @@ describe('the building images guide matches the files it describes', () => {
   });
 
   it('publishes and attests the way the page says', () => {
-    expect(workflow).toContain(`FULL_IMAGE: ${GHCR_IMAGE}`);
+    expect(workflow).toContain(`FULL_IMAGE: ${PUBLISHED_IMAGE}`);
     expect(workflow).toContain('actions/attest-build-provenance@');
     expect(workflow).toContain('push-to-registry: true');
     expect(workflow).toContain('provenance: false');
-    expect(workflow).toContain('packages: write');
+    // Signed in through Docker's OIDC connection, with nothing stored, and no
+    // GitHub packages permission since the move to Docker Hub only.
+    expect(workflow).toContain('DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_CONNECTION }}');
+    expect(workflow).not.toContain('packages: write');
     // The commit's SHA, or the SHA and the date for a weekly rebuild (#949).
     expect(workflow).toContain('docker push "${FULL_IMAGE}:${TAG}"');
     expect(workflow).toContain('tag="${SHA}-rebuilt-$(date -u +%Y%m%d)"; else tag="${SHA}"; fi');
@@ -249,8 +252,8 @@ describe('the building images guide matches the files it describes', () => {
       "(github.event_name == 'schedule' && needs.build.outputs.rebuild == 'true')"
     );
     expect(workflow).toContain('bash /workspace/smoke.sh full');
-    // Exactly one job may write packages: publish.
-    expect(workflow.match(/^\s+packages: write$/gm)).toHaveLength(1);
+    // Exactly one job may sign in to the registry: publish.
+    expect(workflow.match(/^\s+DOCKERHUB_OIDC_CONNECTIONID:/gm)).toHaveLength(1);
     expect(SOURCE_LINKS.workflow).toMatch(/\/\.github\/workflows\/publish-lab-image\.yml$/);
   });
 });
