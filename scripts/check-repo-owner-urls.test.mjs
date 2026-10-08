@@ -58,7 +58,7 @@ describe('what the check catches', () => {
 
   it('skips the allowed files, binary content and files it cannot read', () => {
     const files = {
-      'scripts/no-wiki-pointers.test.mjs': 'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/wiki',
+      'scripts/no-wiki-pointers.test.mjs': 'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/1',
       'frontend/src/logo.png': 'https://github.com/HybridCloudWorks/\0binary',
     };
     expect(findFormerOwnerUrls([...Object.keys(files), 'gone.js'], fromMap(files))).toEqual([]);
