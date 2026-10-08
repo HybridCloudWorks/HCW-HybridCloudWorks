@@ -39,8 +39,18 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** GitHub owner names are case-insensitive, so the check is too. */
-export const FORMER_OWNER_URL = /github\.com\/hybridcloudworks\//i;
+/** The former owner's GitHub address, lower-cased. Owner names are case-insensitive. */
+// Joined from parts so this file, which the check also reads, never contains
+// the address it looks for.
+export const FORMER_OWNER_PREFIX = ['github.com', 'hybridcloudworks', ''].join('/');
+
+/**
+ * Whether a line names the former owner's address anywhere in it. A plain
+ * substring search on purpose: this scans text for an occurrence, it does not
+ * validate a URL, so there is nothing to anchor (CodeQL
+ * js/regex/missing-regexp-anchor flagged the earlier regex form on #1018).
+ */
+export const namesFormerOwner = (text) => String(text).toLowerCase().includes(FORMER_OWNER_PREFIX);
 export const CURRENT_OWNER_URL = 'https://github.com/saulpatinojr/HCW-HybridCloudWorks';
 
 /** The tracked paths the check reads: a directory ends with `/`, a file does not. */
@@ -94,7 +104,7 @@ export function findFormerOwnerUrls(files, read) {
     const text = String(content);
     if (text.includes('\0')) continue;
     text.split(/\r?\n/).forEach((line, index) => {
-      if (FORMER_OWNER_URL.test(line)) findings.push({ file, line: index + 1, text: line.trim() });
+      if (namesFormerOwner(line)) findings.push({ file, line: index + 1, text: line.trim() });
     });
   }
   return findings;

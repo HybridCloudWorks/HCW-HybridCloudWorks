@@ -14,7 +14,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ALLOWED,
-  FORMER_OWNER_URL,
+  namesFormerOwner,
   GUARDED,
   describeFinding,
   findFormerOwnerUrls,
@@ -52,7 +52,7 @@ describe('what the check catches', () => {
       'docker.io/hybridcloudworks/hcw-lab@sha256:abc',
       'https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-host',
     ]) {
-      expect(FORMER_OWNER_URL.test(line), line).toBe(false);
+      expect(namesFormerOwner(line), line).toBe(false);
     }
   });
 
@@ -90,7 +90,7 @@ describe('the repository', () => {
     const read = readTracked(REPO);
     for (const [file, reason] of Object.entries(ALLOWED)) {
       expect(reason.length, file).toBeGreaterThan(20);
-      expect(FORMER_OWNER_URL.test(String(read(file) ?? '')), `${file} no longer needs its allowance`).toBe(true);
+      expect(namesFormerOwner(String(read(file) ?? '')), `${file} no longer needs its allowance`).toBe(true);
     }
   });
 
