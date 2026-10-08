@@ -108,6 +108,12 @@
 - name: Run the Docker socket proxy the agent reaches Docker through
   ansible.builtin.import_tasks: docker_proxy.yml
 
+# `repo:` also repoints an existing checkout: when the origin differs, the
+# module runs `git remote set-url origin` before it fetches, and check mode
+# reports it as a change (set_remote_url in ansible-core 2.21's git module,
+# read 2026-10-08). So the agent's checkout, cloned from the HybridCloudWorks
+# organisation before the repository moved on 2026-10-07, follows
+# labs_agent_repo_url on the next run with nothing else to do (#1009).
 - name: Check out the repository at labs_agent_repo_ref
   ansible.builtin.git:
     repo: "{{ labs_agent_repo_url }}"

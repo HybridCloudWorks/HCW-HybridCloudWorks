@@ -3,13 +3,13 @@
 Every variable, secret and setting the workload needs, with live status.
 
 > **Moved here from `REVIEW.md` on 2026-08-29**, when that file was retired and
-> its open work folded into [TODO.md](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/TODO.md)
+> its open work folded into [TODO.md](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/TODO.md)
 > (and from there into GitHub issues on 2026-09-05).
 > `REVIEW.md` was the root document that held the owner-gated open work and, in
 > its Part 4, this inventory; it no longer exists.
 > REVIEW.md's own header explained why this inventory sat there rather than in
 > the Wiki (now this docs site): the two procedures that write to it — a contributor recording a new
-> required input ([CONTRIBUTING](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/.github/CONTRIBUTING.md)),
+> required input ([CONTRIBUTING](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/.github/CONTRIBUTING.md)),
 > an operator moving an entry from `SET` to `VERIFIED` after an apply
 > ([Deployment-Runbook](../runbooks/deployment-runbook.md)) — are gated on owner-level access.
 >
@@ -201,7 +201,7 @@ the Copilot review identifiers and one key:
 
 | Name | Status | Consumer |
 | --- | --- | --- |
-| `COPILOT_REVIEW_CLIENT_ID`, `COPILOT_REVIEW_TENANT_ID`, `COPILOT_REVIEW_SUBSCRIPTION_ID`, `COPILOT_REVIEW_APP_ID` | **SET 2026-09-06** — owner step 2b, [issue #381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381) | Copies of the four identifiers the repository variables also hold, because Copilot's own runner resolves no `vars.*` (seen on the first review session, PR #378, 2026-09-06) and reads only this store. `copilot-setup-steps.yml` prefers these and falls back to the variables, so a manual dispatch and a Copilot session both sign in. Rotate them with the variables: a changed client id or App ID has to land in both places. Holding identifiers in a secret store is the documented exception in [Variables and secrets](variables-and-secrets.md#subscription-tenant-and-client-ids) |
+| `COPILOT_REVIEW_CLIENT_ID`, `COPILOT_REVIEW_TENANT_ID`, `COPILOT_REVIEW_SUBSCRIPTION_ID`, `COPILOT_REVIEW_APP_ID` | **SET 2026-09-06** — owner step 2b, [issue #381](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/381) | Copies of the four identifiers the repository variables also hold, because Copilot's own runner resolves no `vars.*` (seen on the first review session, PR #378, 2026-09-06) and reads only this store. `copilot-setup-steps.yml` prefers these and falls back to the variables, so a manual dispatch and a Copilot session both sign in. Rotate them with the variables: a changed client id or App ID has to land in both places. Holding identifiers in a secret store is the documented exception in [Variables and secrets](variables-and-secrets.md#subscription-tenant-and-client-ids) |
 | `COPILOT_REVIEW_APP_PRIVATE_KEY` | **MISSING** (found absent 2026-09-28: the Agents store holds only the other four `COPILOT_REVIEW_*` names, so the App-token step has been skipping; it was recorded SET on 2026-09-06). Restore with step 5 of the [Copilot code review runbook](../runbooks/copilot-code-review-mcp.md) | PEM private key of *HCW Copilot Review Reader*, the GitHub App installed on this repository only with eight **read** permissions. `copilot-setup-steps.yml` mints a one-hour installation token from it for the `github-mcp-server` entry in `.github/copilot-mcp.json`; the App's read-only permissions are the ceiling for anything the key can mint. **No personal access token, classic or fine-grained, is used anywhere in the configuration.** Not `COPILOT_MCP_`-prefixed because the setup job, not an MCP server, reads it. Justified in [Variables and secrets](variables-and-secrets.md#store-4-github-actions-secrets-with-justification); procedure in [Copilot code review MCP servers](../runbooks/copilot-code-review-mcp.md) |
 
 ## 4.4 GitHub environments

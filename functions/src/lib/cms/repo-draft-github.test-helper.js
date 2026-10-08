@@ -23,8 +23,8 @@ export const LAB_TEXT = Object.fromEntries(
 export const SHA = '2fb230c9ac7118c4f87d4cf8031e0571d47e74d8';
 
 export const RAW_PREFIX =
-  'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/';
-export const API_PREFIX = 'https://api.github.com/repos/HybridCloudWorks/HCW-HybridCloudWorks/';
+  'https://raw.githubusercontent.com/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/';
+export const API_PREFIX = 'https://api.github.com/repos/saulpatinojr/HCW-HybridCloudWorks/';
 
 export function textResponse(body, { status = 200, headers = {}, url = '' } = {}) {
   const bytes = Buffer.from(body, 'utf8');

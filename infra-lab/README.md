@@ -234,7 +234,7 @@ happens over SSH, through the `hcw-lab` alias that
 the repository onto the host as root and runs the bootstrap:
 
 ```powershell
-ssh hcw-lab "apt-get update -q && apt-get install -y -q git && git clone https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git /opt/hcw-src && /opt/hcw-src/lab-host/bootstrap.sh"
+ssh hcw-lab "apt-get update -q && apt-get install -y -q git && git clone https://github.com/saulpatinojr/HCW-HybridCloudWorks.git /opt/hcw-src && /opt/hcw-src/lab-host/bootstrap.sh"
 ```
 
 The first thing the script does on a host it has never run on, before it

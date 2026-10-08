@@ -1,7 +1,7 @@
 # {{ ansible_managed }}
 [Unit]
 Description=Nightly pg_dump of Coder's PostgreSQL ({{ coder_backup_keep_days }} days under {{ coder_backup_dir }})
-Documentation=https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-host
+Documentation=https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-host
 After=docker.service
 Requires=docker.service
 # A failed dump is one syslog line and an Azure alert, not a silent gap in

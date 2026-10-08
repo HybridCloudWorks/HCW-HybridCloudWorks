@@ -23,7 +23,7 @@
 
 .PARAMETER HostName
     What `hcw-lab` resolves to. Defaults to the LAB_SSH_HOST variable of
-    HybridCloudWorks/HCW-HybridCloudWorks when gh is installed, signed in and
+    saulpatinojr/HCW-HybridCloudWorks when gh is installed, signed in and
     the variable is set; otherwise lab.hybridcloudworks.com. That record exists
     only after the hcw-lab Terraform apply, so until then set the variable (or
     pass this) to the server's IPv4 address.
@@ -392,7 +392,7 @@ function Get-LabAuthorizeCommand {
 # -----------------------------------------------------------------------------
 
 $alias = 'hcw-lab'
-$repository = 'HybridCloudWorks/HCW-HybridCloudWorks'
+$repository = 'saulpatinojr/HCW-HybridCloudWorks'
 $variable = 'LAB_SSH_HOST'
 $remoteFolder = '/opt/hcw-src'
 $changes = [System.Collections.Generic.List[string]]::new()

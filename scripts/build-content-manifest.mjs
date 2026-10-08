@@ -115,7 +115,7 @@ export function describeFetchFailure(status, url) {
       'it is running, which is a deploy that has not happened rather than an outage. Check that ' +
       'Deploy Functions has run on a commit containing ' +
       'functions/src/functions/public-content-manifest.js: ' +
-      'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/deploy-functions.yml'
+      'https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/deploy-functions.yml'
     );
   }
   return (

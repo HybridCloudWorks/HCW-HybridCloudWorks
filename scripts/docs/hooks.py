@@ -24,7 +24,7 @@ from pathlib import Path
 from mkdocs.structure.files import File, Files
 
 ROOT = Path(__file__).resolve().parents[2]
-BLOB = "https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/"
+BLOB = "https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/"
 SOURCES = {
     "README.md": "repo/readme.md",
     "CHANGELOG.md": "repo/changelog.md",

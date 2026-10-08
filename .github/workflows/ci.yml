@@ -203,6 +203,15 @@ jobs:
         if: matrix.name == 'scripts (operations)'
         run: node check-oidc-owner.mjs
 
+      # Outside the filter for the same reason: a pull request that brings
+      # back the former organisation's GitHub address can touch any path, and
+      # that address keeps working through GitHub's redirect, so nothing else
+      # fails (#1009). Needs Node and nothing from npm ci; the why is in
+      # scripts/check-repo-owner-urls.mjs, and its test keeps this step here.
+      - name: No URL names the repository's former owner
+        if: matrix.name == 'scripts (operations)'
+        run: node check-repo-owner-urls.mjs
+
       # `npm ci` is the point of this job for packages with no tests: it fails
       # when the lockfile is out of sync with package.json, which is exactly
       # how a bad dependency bump shows up.

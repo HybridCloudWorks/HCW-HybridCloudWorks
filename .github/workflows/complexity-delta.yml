@@ -41,7 +41,7 @@
 # changed lines and as a job summary, and the check stays green. Arm it by
 # setting the `COMPLEXITY_ENFORCE` repository variable to `true`
 # (Settings → Secrets and variables → Actions → Variables), at
-# https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/variables/actions
+# https://github.com/saulpatinojr/HCW-HybridCloudWorks/settings/variables/actions
 # Raise the threshold the same way with `COMPLEXITY_THRESHOLD`.
 
 name: Complexity Delta

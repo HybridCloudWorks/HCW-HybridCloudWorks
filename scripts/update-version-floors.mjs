@@ -69,7 +69,7 @@ export * from './lib/version-floor-proposals.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FLOORS_PATH = path.join(ROOT, 'scripts', 'version-floors.json');
 const USAGE = 'Usage: node scripts/update-version-floors.mjs [--dry-run] [--summary <path>]';
-const USER_AGENT = 'HCW-HybridCloudWorks update-version-floors (+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks)';
+const USER_AGENT = 'HCW-HybridCloudWorks update-version-floors (+https://github.com/saulpatinojr/HCW-HybridCloudWorks)';
 
 export const eolUrl = (product) => `https://endoflife.date/api/v1/products/${product}/`;
 export const FLEX_URL = 'https://learn.microsoft.com/azure/azure-functions/flex-consumption-plan';

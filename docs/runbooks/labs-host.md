@@ -211,7 +211,7 @@ workload, in an Ubuntu 26.04 test container) the step-7 line printed:
 [bootstrap]   - systemd unit actions.runner.example-org-example-repo.runner-2.service (enabled): a GitHub Actions self-hosted runner
 [bootstrap]   - systemd unit k3s.service (enabled): Kubernetes
 [bootstrap]   - /etc/rancher exists: Kubernetes
-[bootstrap]   - /opt/hcw-labs-agent exists and is not a checkout of https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
+[bootstrap]   - /opt/hcw-labs-agent exists and is not a checkout of https://github.com/saulpatinojr/HCW-HybridCloudWorks.git
 [bootstrap]   - /opt/actions-runner: not created by this repository
 [bootstrap]   - /opt/containerd: not created by this repository
 [bootstrap]   - TCP listener on 127.0.0.1:8200 (python3)
@@ -255,7 +255,7 @@ ADR 0032 rebuilds the host rather than repairing it.
    old host ran self-hosted GitHub Actions runners, remove their
    registrations where they were registered, or GitHub keeps them as
    offline runners. This repository's list is
-   `https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/actions/runners`
+   `https://github.com/saulpatinojr/HCW-HybridCloudWorks/settings/actions/runners`
    and the organisation's is
    `https://github.com/organizations/HybridCloudWorks/settings/actions/runners`;
    both were empty on 2026-09-26.
@@ -577,7 +577,7 @@ gh workflow run deploy-azure-frontend.yml --repo HybridCloudWorks/HCW-HybridClou
 ```
 
 Success is both runs green at
-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions. The site
+https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions. The site
 build reads the variable from step 2, so a site deployed before it has no site
 key, and its button says the lab isn't available while the status read says
 open (the table below).
@@ -988,7 +988,7 @@ sequence, raft's cluster port opening on `127.0.0.1:8201` only after the
 unseal, and `Sealed true` again after `systemctl restart vault`. Auto-unseal
 through Azure Key Vault and the Arc machine's identity removes this step
 once the owner moves the host to it
-([#726](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/726);
+([#726](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/726);
 the next section).
 
 **The root token.** `vault login` prompts for it, hidden, and writes it to

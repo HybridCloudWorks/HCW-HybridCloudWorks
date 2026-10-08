@@ -8,7 +8,7 @@
 > current would act on every one of them. The built estate is described by the
 > [ADR register](../decisions/index.md), the
 > [deployment runbook](../runbooks/deployment-runbook.md) and
-> [`infra/`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/infra).
+> [`infra/`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/infra).
 >
 > - **"Three Functions Flex Consumption applications" (§4.2) — superseded.**
 >   One app runs everything. `infra/functionapp.tf` declares a single

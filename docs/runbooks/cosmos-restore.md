@@ -366,7 +366,7 @@ before tearing down (step 5 says when), in this shape:
 | Notes | `regional` for a regional restore; anything that went wrong |
 
 A row whose Date is `—` is a placeholder, not a drill. Every Monday,
-[`check-drill-age.yml`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/check-drill-age.yml)
+[`check-drill-age.yml`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/check-drill-age.yml)
 runs `scripts/check-drill-age.mjs` over this table and fails, opening an
 issue or commenting on the open one, when the newest dated row is more than
 100 days old or there is none: a quarter plus ten days' grace. A Date cell it

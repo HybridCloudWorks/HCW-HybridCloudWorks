@@ -36,27 +36,27 @@ describe('isPinnedUrl', () => {
   it.each([
     [
       'another host',
-      'https://evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+      'https://evil.test/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
     ],
     [
       'a look-alike suffix',
-      'https://raw.githubusercontent.com.evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+      'https://raw.githubusercontent.com.evil.test/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
     ],
     [
       'userinfo before another host',
-      'https://raw.githubusercontent.com@evil.test/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+      'https://raw.githubusercontent.com@evil.test/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
     ],
     [
       'userinfo on the right host',
-      'https://user:pw@raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+      'https://user:pw@raw.githubusercontent.com/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
     ],
     [
       'a port',
-      'https://raw.githubusercontent.com:8443/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+      'https://raw.githubusercontent.com:8443/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
     ],
     [
       'plain http',
-      'http://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
+      'http://raw.githubusercontent.com/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/blog-x.md',
     ],
     [
       'another repository',
@@ -64,16 +64,16 @@ describe('isPinnedUrl', () => {
     ],
     [
       'another branch',
-      'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/dev/docs/content/blog-x.md',
+      'https://raw.githubusercontent.com/saulpatinojr/HCW-HybridCloudWorks/dev/docs/content/blog-x.md',
     ],
     [
       'outside docs/content',
-      'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/infra/main.tf',
+      'https://raw.githubusercontent.com/saulpatinojr/HCW-HybridCloudWorks/main/infra/main.tf',
     ],
     ['another repository on the API', 'https://api.github.com/repos/someone/else/contents/docs'],
     [
       'a GitHub page',
-      'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/docs/content/blog-x.md',
+      'https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/docs/content/blog-x.md',
     ],
     ['not a URL', 'docs/content/blog-x.md'],
   ])('refuses %s', (_label, url) => {

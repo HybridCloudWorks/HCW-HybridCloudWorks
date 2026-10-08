@@ -73,7 +73,7 @@ use in step 2.**
 
 ### 2. Deploy the frontend with the old client id
 
-<https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/deploy-azure-frontend.yml>
+<https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/deploy-azure-frontend.yml>
 
 **Run workflow** → set **`entra_client_id_override`** to the client id step 1
 printed. Leave everything else alone.
@@ -94,12 +94,12 @@ Once the incident is over, one of these:
 
 - **Keeping the rollback:** set the `VITE_ENTRA_CLIENT_ID` repository variable to
   the same id step 1 printed, and reopen
-  [#522](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/522) —
+  [#522](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/522) —
   the split is then undone and ADR 0006 no longer matches the tenant, which is
   the state that whole issue existed to end.
 - **Going forward again:** fix the cause, dispatch a normal deploy with the
   input blank, and re-clear the API registration's redirect URIs (the command is
-  in [#530](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/pull/530)).
+  in [#530](https://github.com/saulpatinojr/HCW-HybridCloudWorks/pull/530)).
 
 ---
 
