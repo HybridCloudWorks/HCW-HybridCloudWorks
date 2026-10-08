@@ -17,9 +17,9 @@ it leaks, nothing in its shape says where it came from.
 Docker's **OIDC connections** (July 2026) replace that token with an exchange.
 A workflow asks GitHub for a signed statement of what it is, Docker checks
 that statement against a rule you wrote, and hands back a Docker access
-token that lasts five minutes. Nothing is stored anywhere. This article sets
-that up for one repository and one branch, copies an image to Docker Hub
-with its digest unchanged, and verifies the result from the outside.
+token that lasts minutes. Nothing is stored anywhere. This article sets
+that up for one repository and one branch, pushes an image to Docker Hub and
+reads its digest back, and verifies the result from the outside.
 
 Part 1 of this series built the image and showed the login step in passing.
 This part is the whole of that step: the claim, the rule, the exchange, and
@@ -31,32 +31,30 @@ what to read when Docker says no.
 
 - An OIDC connection in your Docker organisation that trusts exactly one
   subject: the `main` branch of one repository, in GitHub's immutable form.
-- A workflow job that signs in to Docker Hub with no password, copies an
-  image from GitHub's registry to Docker Hub **by digest**, confirms the
-  digest on Docker Hub equals the one it copied, and pushes a provenance
-  attestation beside the image.
+- A workflow job that builds and smoke-tests an image, signs in to Docker Hub
+  with no password, pushes **exactly the bytes it tested**, reads the digest
+  back from Docker Hub, and pushes a provenance attestation beside the image.
 - Two repository variables, `DOCKERHUB_CONNECTION` and `DOCKERHUB_ENABLED`,
   and no new secret.
 - Three commands that prove, from any machine, that the image on Docker Hub
   is the one the workflow built.
 
-The worked example is this site's lab image, which has published this way
-since 2026-09-29. The names in the steps are generic (`acme`,
+The worked example is this site's lab image, which has signed in to Docker
+Hub this way since 2026-09-29. The names in the steps are generic (`acme`,
 `acme/platform`, `acme/app`); the verification at the end runs against the
 real image, so you can see what success prints before you have an image of
 your own.
 
 ## What it costs
 
-Nothing per push. Docker Hub public repositories are free, the token exchange
-is free, and the copy is a registry-to-registry transfer of manifests, not a
-rebuild.
+Nothing per push. Docker Hub public repositories are free, and so is the
+token exchange.
 
 The one gate is the subscription. OIDC connections are a feature of Docker
 Team and Business organisations, and of the Docker-Sponsored Open Source
 programme. A free organisation sees an upgrade prompt where the
-**Create OIDC connection** button should be. The last section has a way to
-put images on Docker Hub without a stored token while you wait for either.
+**Create OIDC connection** button should be. Until it has one or the other,
+the job in step 4 stays skipped, and nothing is published.
 
 ## Why it is built this way
 
@@ -122,31 +120,37 @@ would also change the subject every other federated credential (Azure's, for
 instance) is waiting for. The boundary this relies on is the one you already
 have: reaching `main` takes a reviewed pull request past required checks.
 
-### Copy by digest, then read it back
+### Push what was tested, then read it back
 
-The job does not rebuild for Docker Hub. It copies the manifest GitHub's
-registry already holds, by digest, with `--prefer-index=false` so buildx keeps
-the manifest's own bytes rather than wrapping it in a new list with a new
-digest. Then it reads the digest back from Docker Hub and fails if the two
-differ. The same `sha256:` in both registries is the fact everything after
-this depends on: the smoke test ran against those bytes, and the attestation
-names them.
+A job cannot take another job's Docker state, so the publishing job builds the
+image itself (a layer cache can make that fast), runs the smoke test on what it
+built, and pushes those same bytes with `docker push`. The image that passed
+the test is the image on Docker Hub, by identity rather than by rebuilding
+something that should match. The build sets `provenance: false`, so the image
+stays one plain manifest whose digest is the one `docker pull` reports. Then
+the job reads that digest back from Docker Hub, by the tag it has just pushed,
+rather than working it out locally. That one `sha256:` is the fact everything
+after this depends on: the attestation names it, and anyone who pins the image
+pins it.
 
-### One attestation per registry
+### The attestation beside the image
 
-A copy does not carry the attestation across, and `actions/attest-build-provenance`
-with `push-to-registry: true` takes exactly one fully qualified subject. So
-the job attests the image once under its `docker.io` name and pushes that
-bundle beside the image on Docker Hub. GitHub's attestation API keys on the
-digest, so a verifier asking about either name finds both.
+`actions/attest-build-provenance` with `push-to-registry: true` takes exactly
+one fully qualified subject and stores the signed bundle in that subject's
+registry. So the job attests the image under its `docker.io` name, the form
+the action documents for Docker Hub, and the bundle lands on Docker Hub beside
+the image. GitHub's attestation API keeps a copy keyed on the digest, so a
+verifier can read either one: the bundle on Docker Hub, or the API.
 
 ---
 
 ## Prerequisites
 
-- A GitHub repository with a workflow that already pushes an image to
-  `ghcr.io` and knows its digest. Part 1 has one; the YAML below assumes the
-  publish job exposes `outputs.digest`.
+- A GitHub repository with a Dockerfile, and a workflow whose `build` job
+  builds and tests the image on every pull request with a read-only token.
+  Part 1 has one. The YAML below adds the job that publishes; it assumes the
+  Dockerfile is at the repository root and that `test/smoke.sh` tests the
+  image from inside it.
 - A Docker organisation (`acme` below) on a plan that includes OIDC
   connections, where you are an **owner or editor**. Members cannot create
   connections.
@@ -247,28 +251,33 @@ prints variables in logs, which is what makes a wrong one diagnosable.
 
 ### 4. Add the job
 
-A separate job after the one that publishes to `ghcr.io`, so the first
-registry never waits on the second and **Re-run failed jobs** repeats only
-the copy. Pinned to the commit SHAs of the two actions; the comments carry
-the version each SHA is.
+A second job, after `build`, that runs only from `main`, so nothing a pull
+request can change ever runs with a token that can publish. It builds the
+image again, because a job cannot take another job's Docker state, tests what
+it built, and pushes exactly that. Every action is pinned to a commit SHA; the
+comments carry the version each SHA is.
 
 ```yaml
-  publish-dockerhub:
+  publish:
     name: Publish to Docker Hub
-    needs: publish
-    if: vars.DOCKERHUB_ENABLED == 'true'
+    needs: build
+    if: vars.DOCKERHUB_ENABLED == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write # the Docker token exchange, and Sigstore's signing certificate
       attestations: write # store the provenance attestation
+      artifact-metadata: write # the attestation's storage record in GitHub
     env:
       DOCKERHUB_ORG: acme
-      GHCR_IMAGE: ghcr.io/acme/app
-      DOCKERHUB_IMAGE: docker.io/acme/app
-      DIGEST: ${{ needs.publish.outputs.digest }}
+      IMAGE: docker.io/acme/app
     steps:
-      - name: DOCKERHUB_CONNECTION holds a connection ID, and the digest arrived
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: DOCKERHUB_CONNECTION holds a connection ID
         env:
           CONNECTION_ID: ${{ vars.DOCKERHUB_CONNECTION }}
         run: |
@@ -278,57 +287,69 @@ the version each SHA is.
             echo "::error::DOCKERHUB_ENABLED is true, but the repository variable DOCKERHUB_CONNECTION is not an OIDC connection ID (a UUID)."
             exit 1
           fi
-          if [ -z "$DIGEST" ]; then
-            echo "::error::The publish job passed no digest, so there is nothing to copy."
-            exit 1
-          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          provenance: false
+          tags: app:ci
+
+      - name: Smoke test what was built
+        run: docker run --rm --network none -v "${GITHUB_WORKSPACE}/test:/workspace:ro" app:ci sh /workspace/smoke.sh
 
       - name: Log in to Docker Hub through the OIDC connection
         id: dockerhub-login
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         env:
           DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_CONNECTION }}
+          DOCKERHUB_OIDC_EXPIREIN: '900'
         with:
           registry: docker.io
           username: ${{ env.DOCKERHUB_ORG }}
 
-      - name: Copy to Docker Hub by digest
+      - name: Push, and read the digest back
+        id: push
         env:
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          docker buildx imagetools create --prefer-index=false \
-            --tag "${DOCKERHUB_IMAGE}:${SHA}" \
-            --tag "${DOCKERHUB_IMAGE}:latest" \
-            "${GHCR_IMAGE}@${DIGEST}"
-          got="$(docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
-          if [ "$got" != "$DIGEST" ]; then
-            echo "::error::${DOCKERHUB_IMAGE}:${SHA} is ${got} on Docker Hub, but ${DIGEST} on GHCR."
-            exit 1
-          fi
+          docker tag app:ci "${IMAGE}:${SHA}"
+          docker tag app:ci "${IMAGE}:latest"
+          docker push "${IMAGE}:${SHA}"
+          docker push "${IMAGE}:latest"
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${SHA}" --format '{{.Manifest.Digest}}')"
+          test -n "$digest"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Attest provenance on Docker Hub
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-name: ${{ env.DOCKERHUB_IMAGE }}
-          subject-digest: ${{ env.DIGEST }}
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
       - name: Published digest on Docker Hub
         env:
           SHA: ${{ github.sha }}
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
           {
             echo "## Published to Docker Hub"
             echo
             echo '```'
-            echo "${DOCKERHUB_IMAGE}:${SHA}@${DIGEST}"
+            echo "${IMAGE}:${SHA}@${DIGEST}"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 ```
 
-Four things worth noticing:
+Five things worth noticing:
 
 - **No `password`.** With `registry: docker.io`, no password and
   `DOCKERHUB_OIDC_CONNECTIONID` set, the action (v4.5.0 and later) does the
@@ -336,20 +357,29 @@ Four things worth noticing:
   that follow.
 - **`id-token: write` on this job only.** The build job needs nothing but
   `contents: read`. Grant the token where it is used.
-- **The first step checks the variable before anything else runs.** The
-  action checks it too, but its message cannot say that the fix is a
-  repository variable. A failed run that names the variable costs one read;
-  one that says `bad status code 400` costs a search.
-- **The copy and the attestation both take the digest from the publish job.**
-  Nothing in this job reads a tag it did not just write.
+- **The variable is checked before anything is built.** The action checks it
+  too, but only at the login, after the build, and its message cannot say
+  that the fix is a repository variable. A failed run that names the variable
+  costs one read; one that says `bad status code 400` costs a search.
+- **The job pushes what it tested.** The smoke test runs on `app:ci`, and the
+  pushes are tags of that same image, so the bytes on Docker Hub are the bytes
+  that passed. The digest comes back from Docker Hub, and the attestation
+  names it. Nothing in this job reads a tag it did not just write.
+- **The login waits for the test, and asks for 900 seconds.** A Docker token
+  lasts 300 seconds by default, and a push uploads every new layer from the
+  runner. Signing in only after the build and the test, with
+  `DOCKERHUB_OIDC_EXPIREIN` (300 to 3600) raised, spends the token on the
+  pushes and the attestation alone. The variable is in the action's source
+  rather than its README.
 
 Push the workflow to `main`, or dispatch it from `main`. A dispatch from
-another branch presents a different `ref` and is refused at the login step,
-which is the rule working.
+another branch skips the job, and if the condition were ever dropped, Docker
+would still refuse it at the login step, because it presents a different
+`ref`. That is the rule working on its own.
 
-**Verify:** the run shows the new job green, and its summary carries a
-`Published to Docker Hub` block whose `sha256:` equals the one in the GHCR
-job's summary.
+**Verify:** the run shows the publish job green, and its summary carries a
+`Published to Docker Hub` block naming `docker.io/acme/app`, the commit's SHA
+and a `sha256:` digest.
 
 ### 5. Verify the image and its provenance from the outside
 
@@ -357,28 +387,29 @@ Two checks that need no access to the workflow, run against this site's
 image so the output is the real thing. Substitute `acme/app` once yours has
 published.
 
-Pull from Docker Hub, anonymously, the exact digest GitHub's registry holds
-for `latest`. A pull by digest succeeds only if Docker Hub has that
-manifest. PowerShell:
+Read the digest Docker Hub serves for `latest`, then pull exactly that
+digest, anonymously. A pull by digest gets those bytes or fails; a tag could
+have moved in between, a digest cannot. PowerShell:
 
 ```powershell
-$d = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; docker pull "hybridcloudworks/hcw-lab@$d"
+$d = docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; $d; docker pull "hybridcloudworks/hcw-lab@$d"
 ```
 
 bash:
 
 ```bash
-d=$(docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'); docker pull "hybridcloudworks/hcw-lab@$d"
+d=$(docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'); echo "$d"; docker pull "hybridcloudworks/hcw-lab@$d"
 ```
 
-**Verify:** the output ends with a `Digest: sha256:…` line equal to `$d` and
-`Status: Downloaded newer image for …` or `Image is up to date`.
+**Verify:** the first line is the digest, and the output ends with a
+`Digest: sha256:…` line equal to it and `Status: Downloaded newer image for …`
+or `Image is up to date`.
 
 Then read the attestation stored on Docker Hub itself, not the copy in
 GitHub's API, and check it against the repository and the branch you expect:
 
 ```powershell
-gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks --bundle-from-oci --source-ref refs/heads/main
+gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks --bundle-from-oci --source-ref refs/heads/main
 ```
 
 **Verify:** `✓ Verification succeeded!`, then a block naming the build
@@ -404,12 +435,12 @@ next run of the workflow publishes to Docker Hub anyway.
 
 ## How to know it worked
 
-- **The run:** the Docker Hub job is green, and the `sha256:` in its summary
-  equals the one in the GHCR job's summary.
+- **The run:** the publish job is green, and its summary carries the image,
+  the commit's SHA and the `sha256:` it read back from Docker Hub.
 - **Docker Hub:** `https://hub.docker.com/r/acme/app/tags` lists `latest` and
   the commit's full SHA.
-- **The same bytes:** the pull by digest in step 5 succeeds against Docker
-  Hub.
+- **The published bytes:** a pull by the digest in the summary succeeds
+  against Docker Hub, as the pull in step 5 does for this site's image.
 - **The provenance:** `gh attestation verify … --bundle-from-oci` succeeds
   and names your workflow on `refs/heads/main`.
 - **Nothing stored:** `gh secret list --repo acme/platform` shows no Docker
@@ -435,43 +466,21 @@ an ID token the same way the action did, and writes the token's `sub`, `aud`,
 the rule the connection should hold. Add it to yours; it turns a search
 into a comparison.
 
-**A copy step fails with `unauthorized`, `insufficient_scope` or
+**A push step fails with `unauthorized`, `insufficient_scope` or
 `requested access to the resource is denied`.** The exchange succeeded and
 the token's scope does not cover what the step tried. The ruleset's resources
 do not include this repository, or its scopes stop at read. Edit the ruleset;
 no workflow change.
 
-**A copy or attest step fails as `unauthorized` minutes after the login
-succeeded.** The Docker token expired: 300 seconds by default. Re-run the
-failed job. If it keeps happening because the copy is large, set
-`DOCKERHUB_OIDC_EXPIREIN` (300 to 3600) in the login step's `env`. The
-variable is in the action's source rather than its README.
-
-**`… is sha256:X on Docker Hub, but sha256:Y on GHCR.`** Something else
-wrote the tag between the copy and the read-back. Do not re-run blindly:
-find what else pushes to that repository.
+**A push or attest step fails as `unauthorized` minutes after the login
+succeeded.** The Docker token expired: 900 seconds in the job above, 300 by
+default. Re-run the failed job. If it keeps happening because the push is
+large, raise `DOCKERHUB_OIDC_EXPIREIN` in the login step's `env`, up to 3600.
 
 **`Create OIDC connection` is missing, or the form refuses to save.** The
 organisation's plan does not include the feature, or you are a member rather
 than an owner or editor. Nothing in the repository needs changing; the job
 stays skipped while `DOCKERHUB_ENABLED` is unset.
-
-## If the organisation cannot create a connection yet
-
-To put the current image on Docker Hub once, without storing a token
-anywhere, copy it from your own machine as yourself. Sign in interactively
-(`docker login` opens a device-code prompt), then copy by the digest GitHub's
-registry holds, which keeps the digest:
-
-```powershell
-$d = docker buildx imagetools inspect ghcr.io/acme/app:latest --format '{{.Manifest.Digest}}'; docker buildx imagetools create --prefer-index=false --tag docker.io/acme/app:latest "ghcr.io/acme/app@$d"
-```
-
-**Verify:** `pushing sha256:… to docker.io/acme/app:latest`, and
-`gh attestation verify oci://docker.io/acme/app:latest --repo acme/platform`
-(without `--bundle-from-oci`) succeeds, because GitHub's API finds the GHCR
-attestation by digest. No attestation sits on Docker Hub itself until the
-workflow publishes there, which is the one thing this shortcut does not do.
 
 ---
 

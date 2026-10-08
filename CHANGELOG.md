@@ -3943,6 +3943,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The Docker and lab drafts describe the lab images as published to Docker
+  Hub only.** `blog-docker-01-building-images.md`,
+  `blog-docker-03-docker-hub-oidc.md` and `blog-lab-02-one-container.md` in
+  `docs/content` described GHCR first, with a job that copied each image to
+  Docker Hub by digest. They now describe the `publish` job's OIDC sign-in
+  (900 seconds, after the smoke tests) and its direct `docker push`, the
+  digest read back from Docker Hub, `docker.io/hybridcloudworks/…` names, and
+  the subject `repo:saulpatinojr@34853639/…`. `gh attestation verify` names
+  `saulpatinojr/HCW-HybridCloudWorks`, its output re-measured on 2026-10-08.
+  Part 3's copy-by-hand section went with the copy, and the Lab 03 draft
+  clones from `saulpatinojr/HCW-HybridCloudWorks`.
 - **undici stays on the major Node 24 bundles, and a test now proves the
   guarded fetch works with the runtime's own fetch.** Dependabot's #902
   (undici 7.30.0 → 8.11.2) was green on every check. Measured on Node

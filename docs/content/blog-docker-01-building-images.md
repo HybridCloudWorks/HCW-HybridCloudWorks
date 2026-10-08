@@ -5,7 +5,7 @@ date: 2026-09-29
 track: how-to
 part: 1 of 3
 tags: [docker, containers, supply-chain, provenance, github-actions]
-reading: 16
+reading: 17
 ---
 
 `docker pull hybridcloudworks/hcw-lab:latest` downloads 497 MB and unpacks to
@@ -14,36 +14,36 @@ repository, which workflow and which branch produced exactly those bytes, and
 fails if any of the three is not what you asked for:
 
 ```bash
-gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks --bundle-from-oci
+gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks --bundle-from-oci
 ```
 
-Trimmed to the verdict and the first attestation:
+Trimmed to the verdict and the attestation it matched:
 
 ```text
-Loaded digest sha256:ce7cc655da139fb33fb409662ee608f0a7437f1c871704d8daaa191970867699 for oci://docker.io/hybridcloudworks/hcw-lab:latest
-Loaded 2 attestations from OCI registry
+Loaded digest sha256:7cb89818525b470b5bc9269481b8d8b643e142f969287a289da03db17d4fc9d0 for oci://docker.io/hybridcloudworks/hcw-lab:latest
+Loaded 1 attestation from OCI registry
 
 ✓ Verification succeeded!
 
-The following 2 attestations matched the policy criteria
+The following 1 attestation matched the policy criteria
 
 - Attestation #1
-  - Build repo:..... HybridCloudWorks/HCW-HybridCloudWorks
+  - Build repo:..... saulpatinojr/HCW-HybridCloudWorks
   - Build workflow:. .github/workflows/publish-lab-image.yml@refs/heads/main
-  - Signer repo:.... HybridCloudWorks/HCW-HybridCloudWorks
+  - Signer repo:.... saulpatinojr/HCW-HybridCloudWorks
   - Signer workflow: .github/workflows/publish-lab-image.yml@refs/heads/main
 ```
 
-That digest was `latest` on 2026-09-29; yours will be whatever `latest` is on
+That digest was `latest` on 2026-10-08; yours will be whatever `latest` is on
 the day you run it.
 
 This part reads the Dockerfile behind that image, `lab-image/Dockerfile` in
 this site's public repository, one decision at a time: why every base image is
 pinned by digest, why one file builds two images, how the image works with the
 network switched off, why it runs as uid 65534, what the smoke test refuses to
-accept, and how the image reaches two registries under one digest with no
-Docker password stored anywhere. Then you build it, smoke-test it, and verify
-the published copy yourself.
+accept, and how the image reaches Docker Hub with no Docker password stored
+anywhere. Then you build it, smoke-test it, and verify the published copy
+yourself.
 
 ## What you'll have at the end
 
@@ -52,16 +52,16 @@ the published copy yourself.
 | A reading of the Dockerfile | What each of its five `FROM` lines is for, and what the two images you can run carry |
 | A local build | `hcw-lab:dev`, the `full` target, 2.73 GB on disk |
 | A smoke test | `smoke: passed (full)`, from inside the image, with no network and a read-only mount |
-| A verified pull | The same digest from Docker Hub and from GitHub's container registry, with provenance that names the workflow and the branch |
+| A verified pull | Exactly the digest Docker Hub serves for `latest`, with provenance that names the workflow and the branch |
 
 ## What it costs
 
 **Nothing but disk.** Measured with Docker Desktop 4.93.0 (Docker Engine
 29.8.1) on 2026-09-29, the published image is a 497 MB download and 2.73 GB on
 disk, and a local build of the same target is the same size plus whatever
-build cache the build leaves behind; `docker system df` shows how much. Both
-registries serve the image publicly, so pulling needs no sign-in. Nothing in
-this part touches a cloud account.
+build cache the build leaves behind; `docker system df` shows how much. Docker
+Hub serves the image publicly, so pulling needs no sign-in. Nothing in this
+part touches a cloud account.
 
 ---
 
@@ -316,28 +316,35 @@ and again in the publish job, on the exact image it is about to push.
 
 ### Provenance from the workflow, not from a laptop
 
-`.github/workflows/publish-lab-image.yml` has three jobs, and only the second
-and third can write anywhere:
+`.github/workflows/publish-lab-image.yml` has four jobs, and the first two keep
+building and publishing apart:
 
 - **Build and smoke** runs first on every trigger, including every pull
   request that touches the image. It builds both targets, smoke-tests them and
   holds a read-only token and nothing else, because a pull request can edit
   the workflow and run any shell step in it.
-- **Publish to GHCR** runs only on a push to `main`, or a manual run from
-  `main`. It builds again, smoke-tests what it built, pushes those exact images
-  with `docker push`, and attests them. It holds what the build job does not:
+- **Publish to Docker Hub** runs only on a push to `main`, or a manual run
+  from `main`. It builds again, smoke-tests what it built, pushes those exact
+  images to Docker Hub with `docker push`, and attests them. It holds what the
+  build job does not:
 
 ```yaml
     permissions:
       contents: read
-      packages: write
-      id-token: write
+      id-token: write # the Docker token exchange, and Sigstore's signing certificate
       attestations: write
+      artifact-metadata: write
 ```
 
-- **Publish to Docker Hub** runs after that. It is the next section.
+- **The last two** run after a publish. The site's labs run each image by its
+  digest, never by a tag, so these read the new digests back from Docker Hub
+  and open a pull request that moves the pins to them. A publish changes what
+  `latest` names at once, and what the labs run only when that pull request
+  is merged.
 
-The attestation step names the image and the digest that was just pushed:
+`artifact-metadata: write` lets the attestation step record where the image is
+stored on the repository's linked artifacts page. The attestation step names
+the image and the digest that was just pushed:
 
 ```yaml
       - name: Attest full provenance
@@ -374,9 +381,10 @@ turns that off. The pushed image stays one plain manifest whose digest is the
 one `docker pull` reports, and the provenance comes from
 `actions/attest-build-provenance` instead, signed by the workflow's identity.
 
-### One digest, two registries, no Docker token
+### Straight to Docker Hub, no Docker token
 
-The third job copies both images to Docker Hub. It signs in with no password:
+The publish job signs in to Docker Hub after the builds and the smoke tests,
+and with no password:
 
 ```yaml
       - name: Log in to Docker Hub through the OIDC connection
@@ -384,38 +392,53 @@ The third job copies both images to Docker Hub. It signs in with no password:
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         env:
           DOCKERHUB_OIDC_CONNECTIONID: ${{ vars.DOCKERHUB_CONNECTION }}
+          DOCKERHUB_OIDC_EXPIREIN: '900'
         with:
           registry: docker.io
           username: ${{ env.DOCKERHUB_ORG }}
 ```
 
 The missing `password` line is the point. The action asks GitHub for an OIDC
-token addressed to Docker, exchanges it with Docker for an access token that
-lasts 300 seconds by default, and logs in with that. On Docker's side, an OIDC
-connection trusts one subject: this repository's `main` branch, in GitHub's
-immutable form, which carries the organisation's and the repository's numeric
-IDs so that a future repository reusing the name cannot match it. The
-connection ID in `vars.DOCKERHUB_CONNECTION` is an identifier, not a secret;
-without a token from that branch it grants nothing.
+token addressed to Docker, exchanges it with Docker for an access token, and
+logs in with that. The token lasts 300 seconds by default; this job asks for
+900, because its pushes upload every new layer from the runner, and signing in
+only after the tests means that time is spent on the pushes and the
+attestations alone.
+
+On Docker's side, an OIDC connection trusts one subject, this repository's
+`main` branch in GitHub's immutable form:
+
+```text
+repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+```
+
+The numbers are the owner's and the repository's IDs, so a future repository
+reusing either name cannot match it. The connection ID in
+`vars.DOCKERHUB_CONNECTION` is an identifier, not a secret; without a token
+from that branch it grants nothing.
 
 The rejected alternative is an organisation access token in a GitHub secret.
 It would work with the same action today, and it would sit there until someone
 rotated it, tied to no repository, branch or workflow.
 
-The copy keeps the digest, and then checks that it did:
+Then the job pushes the image it smoke-tested, under the commit's SHA and
+`latest`, and reads the digest back from Docker Hub rather than working it out
+locally:
 
 ```yaml
-          docker buildx imagetools create --prefer-index=false \
-            --tag "${DOCKERHUB_FULL_IMAGE}:${SHA}" \
-            --tag "${DOCKERHUB_FULL_IMAGE}:latest" \
-            "${FULL_IMAGE}@${FULL_DIGEST}"
+          docker tag hcw-lab:ci "${FULL_IMAGE}:${TAG}"
+          docker tag hcw-lab:ci "${FULL_IMAGE}:latest"
+          docker push "${FULL_IMAGE}:${TAG}"
+          docker push "${FULL_IMAGE}:latest"
+          digest="$(docker buildx imagetools inspect "${FULL_IMAGE}:${TAG}" --format '{{.Manifest.Digest}}')"
 ```
 
-`--prefer-index=false` copies the manifest's own bytes. Without it, buildx
-wraps a single image in a new manifest list with a new digest. The next line of
-the step reads the digest back from Docker Hub and fails if it differs from
-GitHub's registry. Only then does the job attest the digest again, under its
-`docker.io` name, and push that bundle to Docker Hub beside the image.
+`FULL_IMAGE` is `docker.io/hybridcloudworks/hcw-lab`, with `docker.io` as the
+registry part because that is the form the attestation action documents for
+Docker Hub. Because the build set `provenance: false`, `docker push` writes one
+plain manifest, so the digest read back is the one `docker pull` reports. The
+attestation step takes that digest and pushes its bundle to Docker Hub beside
+the image, which is where `--bundle-from-oci` found it at the top of this page.
 
 ---
 
@@ -430,7 +453,7 @@ the repository, at <https://hybridcloudworks.com/docker/building-images>.
   Desktop.
 - git.
 - The GitHub CLI, signed in: `gh auth status` names your account. Checked with
-  gh 2.101.0 while signed in; not tried signed out.
+  gh 2.102.0 while signed in; not tried signed out.
 - Disk for two 2.73 GB images, the one you build and the one you pull, plus
   the build cache.
 - No registry login, no cloud account.
@@ -438,8 +461,9 @@ the repository, at <https://hybridcloudworks.com/docker/building-images>.
 On Windows, run the PowerShell lines. The bash lines are for macOS, Linux and
 the shell inside a WSL distribution.
 
-Every output quoted in this part was measured on 2026-09-29 on Windows 11,
-with Docker Desktop 4.93.0, from a checkout of the repository's `main` branch.
+Every output quoted in this part was measured on Windows 11, from a checkout
+of the repository's `main` branch: the provenance checks on 2026-10-08 with gh
+2.102.0, and everything else on 2026-09-29 with Docker Desktop 4.93.0.
 
 ---
 
@@ -450,7 +474,7 @@ with Docker Desktop 4.93.0, from a checkout of the repository's `main` branch.
 PowerShell or bash:
 
 ```bash
-git clone --depth 1 https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
+git clone --depth 1 https://github.com/saulpatinojr/HCW-HybridCloudWorks.git
 ```
 
 ```bash
@@ -551,25 +575,26 @@ smoke: passed (full)
 **Verify:** the last line is `smoke: passed (full)`, and the exit code is 0:
 `$LASTEXITCODE` in PowerShell, `echo $?` in bash.
 
-### 4. Pull the published image, by the digest the other registry holds
+### 4. Pull the published image, by the digest Docker Hub serves
 
-This asks GitHub's registry for the digest of `latest`, then pulls exactly that
-digest from Docker Hub. The pull succeeds only if Docker Hub holds the same
-bytes.
+This asks Docker Hub for the digest of `latest`, prints it, then pulls exactly
+that digest. A tag can move between two commands; a digest cannot, so what
+you pull is the image whose digest you just read.
 
 PowerShell:
 
 ```powershell
-$d = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; docker pull "hybridcloudworks/hcw-lab@$d"
+$d = docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'; $d; docker pull "hybridcloudworks/hcw-lab@$d"
 ```
 
 bash:
 
 ```bash
-d=$(docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'); docker pull "hybridcloudworks/hcw-lab@$d"
+d=$(docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-lab:latest --format '{{.Manifest.Digest}}'); echo "$d"; docker pull "hybridcloudworks/hcw-lab@$d"
 ```
 
-**Verify:** the output ends with a `Digest:` line holding the same value, and
+**Verify:** the first line is a `sha256:` digest, and the output ends with a
+`Digest:` line holding the same value and
 `Status: Downloaded newer image for hybridcloudworks/hcw-lab@sha256:…` or, if
 you already had it, `Status: Image is up to date for …`.
 
@@ -578,20 +603,20 @@ you already had it, `Status: Image is up to date for …`.
 PowerShell or bash:
 
 ```bash
-gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks --bundle-from-oci
+gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks --bundle-from-oci
 ```
 
-`--bundle-from-oci` reads the attestations stored beside the image on Docker
-Hub, rather than asking GitHub's API for them. On 2026-09-29 it loaded two, one
-naming each registry, both for the same digest and from the same workflow run,
-and printed the policy it enforced before the verdict:
+`--bundle-from-oci` reads the attestation stored beside the image on Docker
+Hub, rather than asking GitHub's API for it. On 2026-10-08 it loaded one, for
+the digest `latest` named and from the workflow run that pushed it, and printed
+the policy it enforced before the verdict:
 
 ```text
 The following policy criteria will be enforced:
 - Predicate type must match:................ https://slsa.dev/provenance/v1
-- Source Repository Owner URI must match:... https://github.com/HybridCloudWorks
-- Source Repository URI must match:......... https://github.com/HybridCloudWorks/HCW-HybridCloudWorks
-- Subject Alternative Name must match regex: (?i)^https://github\.com/HybridCloudWorks/HCW-HybridCloudWorks/
+- Source Repository Owner URI must match:... https://github.com/saulpatinojr
+- Source Repository URI must match:......... https://github.com/saulpatinojr/HCW-HybridCloudWorks
+- Subject Alternative Name must match regex: (?i)^https://github\.com/saulpatinojr/HCW-HybridCloudWorks/
 - OIDC Issuer must match:................... https://token.actions.githubusercontent.com
 
 ✓ Verification succeeded!
@@ -602,12 +627,12 @@ the one workflow and on `main`, which is what `gh attestation verify --help`
 recommends for the signer workflow, add two flags:
 
 ```bash
-gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks --bundle-from-oci --signer-workflow HybridCloudWorks/HCW-HybridCloudWorks/.github/workflows/publish-lab-image.yml --source-ref refs/heads/main
+gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks --bundle-from-oci --signer-workflow saulpatinojr/HCW-HybridCloudWorks/.github/workflows/publish-lab-image.yml --source-ref refs/heads/main
 ```
 
 **Verify:** `✓ Verification succeeded!`, with the policy now listing
 `Source repo ref must match:............... refs/heads/main` and a Subject
-Alternative Name ending in `publish-lab-image\.yml`.
+Alternative Name regex that names `publish-lab-image\.yml`.
 
 ---
 
@@ -618,8 +643,8 @@ Alternative Name ending in `publish-lab-image\.yml`.
 - `docker image ls hcw-lab:dev` shows 2.73GB on disk and 497MB of content.
 - `smoke.sh` ends `smoke: passed (full)` and exits 0, with the network off and
   the mount read-only.
-- The pull by digest from Docker Hub succeeds with the digest GitHub's registry
-  reported.
+- The pull by digest succeeds, and its `Digest:` line holds the digest Docker
+  Hub reported for `latest`.
 - `gh attestation verify` ends `✓ Verification succeeded!`, naming
   `.github/workflows/publish-lab-image.yml@refs/heads/main`.
 

@@ -36,8 +36,8 @@ lz=mg,policy,mgmt,hub&corp=0&online=0
 ## What it costs
 
 **Nothing but disk.** Measured with Docker 29.8.0 on 2026-09-27, the image is a
-467 MB download and 2.7 GB once unpacked. It is public on GitHub's container
-registry, so there is no sign-in, and nothing in this part reaches Azure.
+467 MB download and 2.7 GB once unpacked. It is public on Docker Hub, so
+there is no sign-in, and nothing in this part reaches Azure.
 
 ---
 
@@ -52,7 +52,7 @@ checked against, and a lab that fails on a version you did not choose is a lab
 about your package manager.
 
 The image pins every tool in one file,
-[`lab-image/versions.env`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/lab-image/versions.env),
+[`lab-image/versions.env`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/lab-image/versions.env),
 and checks every download against the SHA256 beside it before using it. A wrong
 sum fails the build, not your afternoon.
 
@@ -135,16 +135,16 @@ changed.**
 PowerShell:
 
 ```powershell
-docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
+docker pull hybridcloudworks/hcw-lab:latest
 ```
 
 bash:
 
 ```bash
-docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
+docker pull hybridcloudworks/hcw-lab:latest
 ```
 
-**Verify:** `docker image ls ghcr.io/hybridcloudworks/hcw-lab` lists `latest`
+**Verify:** `docker image ls hybridcloudworks/hcw-lab` lists `latest`
 at about 2.7 GB. For anything automated, pin the digest rather than the tag;
 the workflow that publishes the image writes each digest to its job summary.
 
@@ -155,13 +155,13 @@ Change into the `landing-zone` folder first, then:
 PowerShell:
 
 ```powershell
-docker run --rm -it --network none -v "${PWD}:/workspace:ro" ghcr.io/hybridcloudworks/hcw-lab:latest
+docker run --rm -it --network none -v "${PWD}:/workspace:ro" hybridcloudworks/hcw-lab:latest
 ```
 
 bash:
 
 ```bash
-docker run --rm -it --network none -v "$PWD:/workspace:ro" ghcr.io/hybridcloudworks/hcw-lab:latest
+docker run --rm -it --network none -v "$PWD:/workspace:ro" hybridcloudworks/hcw-lab:latest
 ```
 
 Two flags do the work. `--network none` makes the offline claim testable: an
@@ -288,13 +288,13 @@ check pass under all of it, from the same folder:
 PowerShell:
 
 ```powershell
-docker run --rm --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 65534:65534 --tmpfs "/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700" -v "${PWD}:/workspace:ro" ghcr.io/hybridcloudworks/hcw-lab:latest hcw-terraform-validate
+docker run --rm --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 65534:65534 --tmpfs "/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700" -v "${PWD}:/workspace:ro" hybridcloudworks/hcw-lab:latest hcw-terraform-validate
 ```
 
 bash:
 
 ```bash
-docker run --rm --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 65534:65534 --tmpfs "/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700" -v "$PWD:/workspace:ro" ghcr.io/hybridcloudworks/hcw-lab:latest hcw-terraform-validate
+docker run --rm --network none --read-only --security-opt no-new-privileges --cap-drop ALL --user 65534:65534 --tmpfs "/tmp/run:rw,size=64m,uid=65534,gid=65534,mode=0700" -v "$PWD:/workspace:ro" hybridcloudworks/hcw-lab:latest hcw-terraform-validate
 ```
 
 The tmpfs option is quoted so it reaches Docker as one argument in either
