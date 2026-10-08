@@ -30,10 +30,10 @@ afterEach(() => {
 const visit = (path) => window.history.replaceState({}, '', path);
 const linkedRows = (container) => [...container.querySelectorAll('[data-linked="true"]')];
 
-function Row({ id }) {
-  const { ref, linked, linkedProps, linkedClassName } = useLinkedItem('alert', id);
+function Row({ itemId }) {
+  const { ref, linked, linkedProps, linkedClassName } = useLinkedItem('alert', itemId);
   return (
-    <div ref={ref} {...linkedProps} className={linkedClassName} data-testid={id}>
+    <div ref={ref} {...linkedProps} className={linkedClassName} data-testid={itemId}>
       {linked ? 'linked' : 'plain'}
     </div>
   );
@@ -44,8 +44,8 @@ describe('useLinkedItem', () => {
     visit('/admin/health?tab=alerts&alert=a2');
     render(
       <>
-        <Row id="a1" />
-        <Row id="a2" />
+        <Row itemId="a1" />
+        <Row itemId="a2" />
       </>
     );
     const linked = screen.getByTestId('a2');
@@ -60,10 +60,10 @@ describe('useLinkedItem', () => {
 
   it('marks nothing without the parameter, or for a row with no id', () => {
     visit('/admin/health?tab=alerts');
-    render(<Row id="a1" />);
+    render(<Row itemId="a1" />);
     expect(screen.getByTestId('a1')).toHaveTextContent('plain');
     visit('/admin/health?alert=');
-    render(<Row id="" />);
+    render(<Row itemId="" />);
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
