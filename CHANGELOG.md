@@ -3943,6 +3943,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The lab host's bootstrap no longer stops at `'ansible_managed' is
+  undefined`.** Since ansible-core 2.19, `ansible_managed` exists only for
+  the template module. Three copy tasks that LAB-5 added (#987) named it in
+  their `content`: the systemd delegation drop-in and the tmpfiles entries
+  for the sandbox and agent proxy sockets. The first run after the merge
+  failed at the first of them, after the docker role had moved Docker to
+  its remapped data root and before the coder role had recreated Coder
+  there. Each now writes the literal `# Ansible managed`, the text the
+  templates render, so a host that ran the one-off
+  `-e 'ansible_managed="Ansible managed"'` sees no change on its next run.
+  `scripts/lab-host-ansible-managed.test.mjs` fails on the variable in any
+  task, handler or vars file; ansible-lint does not render task arguments,
+  so nothing in CI had seen it.
 - **The Health Hub keeps its results, has a pulse, and shows every status in
   one place, in one model (#1010, #1011).** Until now the hub forgot every
   verdict on sign-out or in a new tab (live results lived in one tab's
