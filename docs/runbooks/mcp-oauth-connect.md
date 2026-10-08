@@ -74,9 +74,10 @@ browser to the apex address, which is the one registered with them.
 3. **Complete** (`POST /api/cms/mcp/oauth/complete`). The API finds the
    server by the state's hash, refuses another administrator's, an expired
    or a spent state, spends it, refuses a redirect whose `iss` (RFC 9207)
-   names another issuer and a server that moved meanwhile, exchanges the
-   code at the token endpoint
-   discovered in step 1, stores the access and refresh tokens write-only,
+   is not the issuer verbatim and a server that moved meanwhile, exchanges
+   the code at the token endpoint discovered in step 1, stores the access
+   and refresh tokens write-only (under the ETag the spend left, so a server
+   moved during the exchange answers SERVER_CHANGED and keeps no token),
    clears the card's last error, runs the same tool sync as **Sync Tools**,
    and writes an `admin_audit_logs` row (`mcp_oauth_connected`).
 4. **Use.** Before any call, a token with under two minutes left is
@@ -114,10 +115,11 @@ that signs in with Connect:
 | --- | --- |
 | Connect, Reconnect, Disconnect | super_admin |
 | Switch the server on or off, change its sign-in method (`authType`) | super_admin |
+| Delete the server | super_admin |
 | Call its tools (Playground, `mcpProxy`) | super_admin |
 | Sync Tools (reads the tool list) | editor |
 
-Every other server keeps the editor gate it had. Neither Connect server has
+No configuration write can set a Connect server's tokens; only Connect does. Every other server keeps the editor gate it had. Neither Connect server has
 an `allowedTools` list yet, so a super_admin can call any of its tools; keep
 Hostinger switched off except while you are using it, and give it a list
 once its tool names are known (as #995 did for Publer).

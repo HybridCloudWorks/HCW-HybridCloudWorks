@@ -747,7 +747,7 @@ export async function callMcpTool({
     return toolCallOutcome(rpcResult);
   } catch (error) {
     if (error instanceof McpOAuthNotConnectedError) {
-      log.warn?.(`[mcp] not connected: server=${serverId} tool=${tool}`);
+      log.warn?.('[mcp] tools/call refused: the server signs in with Connect and is not connected');
       return { ok: false, error: error.message, code: 'UNAUTHENTICATED', httpStatus: 200 };
     }
     // Content-free on purpose: a McpUpstreamError carries `responseBody`,

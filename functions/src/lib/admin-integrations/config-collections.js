@@ -185,7 +185,9 @@ function mcpWriteError(fields, existing = null) {
 
 /** The write checks for this container: the error sentence, or null. */
 const writeError = (container, fields, existing = null) =>
-  container === 'mcp_servers' ? mcpWriteError(fields, existing) : null;
+  container === 'mcp_servers'
+    ? mcpWriteError(fields, existing) ?? connectTokenWriteError(fields, existing)
+    : null;
 
 /**
  * Whether a write on `mcp_servers` moves where a credential is sent (AP-B1):
@@ -231,6 +233,47 @@ function changesToolReach(container, fields, existing) {
 const needsSuperAdmin = (container, fields, existing) =>
   movesCredentialRouting(container, fields, existing) ||
   changesToolReach(container, fields, existing);
+
+/** The fields whose omission from a PUT changes the stored server. */
+const PUT_JUDGED_FIELDS = Object.freeze([...CONNECTION_FIELDS, 'enabled']);
+
+/**
+ * A PUT body as the change it makes to the stored server (review of #1019).
+ * PUT is a full replacement, so a field the body leaves out is gone
+ * afterwards unless carryForwardTokens keeps it; the checks above read the
+ * fields a body names, so each such omission is named here as a change to
+ * null. Without it an editor's PUT that left out `enabled` switched an OAuth
+ * Connect server off, and one that left out `url`, unseen by the super_admin
+ * rule and by connectionChangeEffects.
+ */
+function putChangeOf(incoming, doc, existing) {
+  if (!existing) return incoming;
+  const judged = { ...incoming };
+  for (const key of PUT_JUDGED_FIELDS) {
+    // A stored false or empty value left out changes nothing.
+    const held = existing[key] !== undefined && existing[key] !== null && existing[key] !== false && existing[key] !== '';
+    const dropped = doc[key] === undefined && held;
+    if (!Object.prototype.hasOwnProperty.call(judged, key) && dropped) judged[key] = null;
+  }
+  return judged;
+}
+
+/**
+ * The OAuth Connect credentials on a config write: refused (review of
+ * #1019). They are written by Connect and refreshed by the timer, for the
+ * account a super_admin signed in with; a config write that set them would
+ * leave the card reading Connected while every call acted on whatever
+ * account the editor's token belonged to. Plaud's pasted token keeps its
+ * path: it is not an OAuth Connect server (usesOAuthConnect).
+ */
+function connectTokenWriteError(fields, existing) {
+  const named = ['oauthToken', 'oauthRefreshToken'].filter((key) =>
+    Object.prototype.hasOwnProperty.call(fields, key)
+  );
+  if (named.length === 0) return null;
+  if (!usesOAuthConnect(existing ?? {}) && !usesOAuthConnect({ ...existing, ...fields })) return null;
+  return `${named.join(' and ')} on a server that signs in with Connect is set by Connect, not by a configuration write. Use Connect or Disconnect on its card.`;
+}
 
 /** The `admin_audit_logs.action` every ai_providers / mcp_servers write records. */
 export const CONFIG_AUDIT_ACTION = 'ai_config_updated';
@@ -284,7 +327,12 @@ function carryForwardTokens(doc, incoming, existing) {
   // keeps the stored one. Only a write that names it, at super_admin,
   // changes it. The OAuth Connect fields (2026-10-08) are never in a PUT
   // body at all (SERVER_MANAGED_OAUTH_FIELDS), so they always carry.
-  for (const key of ['oauthToken', 'oauthRefreshToken', 'allowedTools', ...SERVER_MANAGED_OAUTH_FIELDS]) {
+  // `authType` for the same reason as the list (review of #1019): a PUT that
+  // left it out turned an OAuth Connect server into a plain one, past the
+  // super_admin rule that reads only the fields a body names, with its
+  // tokens carried forward. Changing the sign-in method is a write that
+  // names it.
+  for (const key of ['oauthToken', 'oauthRefreshToken', 'allowedTools', 'authType', ...SERVER_MANAGED_OAUTH_FIELDS]) {
     if (!Object.prototype.hasOwnProperty.call(incoming, key) && existing?.[key] !== undefined) {
       doc[key] = existing[key];
     }
@@ -396,11 +444,6 @@ async function putConfig(ctx, request, context) {
     if (prepared.error) return prepared.error;
     const { id, existing, incoming } = prepared;
 
-    if (needsSuperAdmin(container, incoming, existing)) {
-      const elevated = await ctx.guard.requireRole(request, 'super_admin');
-      if (elevated.error) return elevated.error;
-    }
-
     const nowIso = ctx.now().toISOString();
     const doc = {
       ...incoming,
@@ -408,10 +451,18 @@ async function putConfig(ctx, request, context) {
       createdAt: existing?.createdAt || nowIso,
       updatedAt: nowIso,
     };
+    // Judged on the document the PUT stores, omissions included (putChangeOf).
+    let change = incoming;
     if (container === 'mcp_servers') {
       carryForwardTokens(doc, incoming, existing);
-      Object.assign(doc, connectionChangeEffects(container, incoming, existing));
+      change = putChangeOf(incoming, doc, existing);
     }
+
+    if (needsSuperAdmin(container, change, existing)) {
+      const elevated = await ctx.guard.requireRole(request, 'super_admin');
+      if (elevated.error) return elevated.error;
+    }
+    if (container === 'mcp_servers') Object.assign(doc, connectionChangeEffects(container, change, existing));
     await ctx.store.upsertDoc(container, doc);
     if (container === 'ai_providers') ctx.aiConfigChanged();
     await auditConfigWrite(ctx, context, {
@@ -472,7 +523,14 @@ async function deleteConfig(ctx, request, context) {
   try {
     const id = String(request.params.id || '').trim();
     if (!id) return json(400, { error: 'id required' });
-    const existing = await ctx.store.readDoc(container, id, id).catch(() => null);
+    // Read before the decision, and a failed read fails the delete: deleting
+    // an OAuth Connect server removes its tokens, which is Disconnect by
+    // another name, and Disconnect is super_admin (review of #1019).
+    const existing = await ctx.store.readDoc(container, id, id);
+    if (container === 'mcp_servers' && usesOAuthConnect(existing ?? {})) {
+      const elevated = await ctx.guard.requireRole(request, 'super_admin');
+      if (elevated.error) return elevated.error;
+    }
     await ctx.store.deleteDoc(container, id);
     if (container === 'ai_providers') ctx.aiConfigChanged();
     await auditConfigWrite(ctx, context, {

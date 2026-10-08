@@ -36,12 +36,17 @@ const oauthServer = (id, tokenEndpoint, expiresAt, over = {}) => ({
 });
 
 function memStore(docs) {
-  const data = new Map(docs.map((doc) => [doc.id, { ...doc }]));
+  const data = new Map(docs.map((doc) => [doc.id, { _etag: 'e0', ...doc }]));
+  let version = 0;
   return {
     data,
     readDoc: vi.fn(async (_c, id) => data.get(id) ?? null),
-    patchDoc: vi.fn(async (_c, id, updates) => {
-      const next = { ...data.get(id), ...updates };
+    // ETags as Cosmos keeps them: a guarded write to a changed document is a 412.
+    patchDoc: vi.fn(async (_c, id, updates, options) => {
+      if (options?.ifMatch && options.ifMatch !== data.get(id)?._etag) {
+        throw Object.assign(new Error('changed since read'), { code: 412 });
+      }
+      const next = { ...data.get(id), ...updates, _etag: `e${(version += 1)}` };
       data.set(id, next);
       return next;
     }),

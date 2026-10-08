@@ -379,12 +379,16 @@ async function discoverAuthorizationServer({ issuerUrl, http, name }) {
     );
   }
   const { doc } = found;
-  const issuer = typeof doc.issuer === 'string' && doc.issuer.trim() ? doc.issuer.trim() : issuerUrl;
-  if (requireHttpsUrl(issuer, `${name}'s issuer`).origin !== new URL(issuerUrl).origin) {
+  // RFC 8414 §3.3: the metadata's issuer must be the identifier it was
+  // fetched for, so a missing one, or one at another path on the same origin
+  // (another tenant), is refused before any endpoint in it is used.
+  const issuer = typeof doc.issuer === 'string' ? doc.issuer : '';
+  if (!sameIssuer(issuer, issuerUrl)) {
     throw new McpOAuthError(
-      `${name}'s authorization-server metadata names the issuer ${bare(issuer)}, not ${bare(issuerUrl)}; the sign-in was not started.`
+      `${name}'s authorization-server metadata names the issuer ${issuer ? bare(issuer) : '(none)'}, not ${bare(issuerUrl)}; the sign-in was not started.`
     );
   }
+  requireHttpsUrl(issuer, `${name}'s issuer`);
   const authorizationEndpoint = requireHttpsUrl(doc.authorization_endpoint, `${name}'s authorization endpoint`).href;
   const tokenEndpoint = requireHttpsUrl(doc.token_endpoint, `${name}'s token endpoint`).href;
   if (!stringList(doc.code_challenge_methods_supported).includes('S256')) {
@@ -422,10 +426,35 @@ async function discoverAuthorizationServer({ issuerUrl, http, name }) {
   };
 }
 
-/** Whether two issuer identifiers are the same, ignoring one trailing slash. */
-export function sameIssuer(a, b) {
-  const norm = (value) => String(value ?? '').trim().replace(/\/$/, '');
-  return Boolean(norm(a)) && norm(a) === norm(b);
+/** `https://host` for an identifier that is an origin alone, with or without the root "/"; otherwise null. */
+function bareOrigin(value) {
+  try {
+    const url = new URL(value);
+    return value === url.origin || value === `${url.origin}/` ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether the metadata's `issuer` is the identifier the metadata was fetched
+ * for (RFC 8414 §3.3: identical). One spelling is allowed besides the
+ * identical one, and nothing else: an identifier that is an origin alone,
+ * written with and without the root "/", which the URL standard serialises
+ * as one URL. Replicate's resource metadata names `https://mcp.replicate.com/`
+ * and its server metadata `https://mcp.replicate.com` (measured 2026-10-08),
+ * so the identical rule alone would refuse it. Any path, a different tenant
+ * on the same origin, and a missing issuer are not the same (review of
+ * #1019). The redirect's `iss` is held to the stricter rule, verbatim
+ * (RFC 9207), in mcp-oauth-handlers.js.
+ */
+export function sameIssuer(metadataIssuer, issuerUrl) {
+  const a = typeof metadataIssuer === 'string' ? metadataIssuer : '';
+  const b = typeof issuerUrl === 'string' ? issuerUrl : '';
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const origin = bareOrigin(a);
+  return origin !== null && origin === bareOrigin(b);
 }
 
 /**
@@ -766,21 +795,110 @@ function isGrantRejection(error) {
   );
 }
 
+const isPreconditionFailure = (error) => error?.code === 412 || error?.statusCode === 412;
+
+/**
+ * Whether `latest` is still the connection `server` was refreshing: the same
+ * place, the same sign-in method, still connected, with the same refresh
+ * token. A write between the two that left all of that alone (a rename, a
+ * status line) does not make the refresh stale; anything else does.
+ */
+function sameConnection(latest, server) {
+  return (
+    Boolean(latest) &&
+    latest.url === server?.url &&
+    latest.authType === server?.authType &&
+    latest.oauth?.status === 'connected' &&
+    latest.oauth?.resource === server?.oauth?.resource &&
+    latest.oauthRefreshToken === server?.oauthRefreshToken
+  );
+}
+
+/**
+ * Whether `latest` holds a newer connection to the same resource than the
+ * one `server` was refreshing: another instance refreshed (the refresh token
+ * rotated) or the owner pressed Connect again. Its tokens are as good as a
+ * refresh's, so they are used instead of clearing or overwriting them.
+ */
+function newerConnection(latest, server) {
+  return (
+    Boolean(latest) &&
+    latest.url === server?.url &&
+    latest.authType === server?.authType &&
+    latest.oauth?.status === 'connected' &&
+    latest.oauth?.resource === server?.oauth?.resource &&
+    Boolean(latest.oauthToken) &&
+    Boolean(latest.oauthRefreshToken) &&
+    latest.oauthRefreshToken !== server?.oauthRefreshToken
+  );
+}
+
+const readServer = (store, serverId) => store.readDoc(MCP_CONTAINER, serverId, serverId);
+
+/**
+ * Clear a dead connection, guarded by the ETag of the document the decision
+ * was made from (review of #1019). Unguarded, an instance whose refresh was
+ * refused could clear the rotated token another instance had just stored.
+ * On a conflict the document is read again, and a newer connection there is
+ * the answer; otherwise the refusal stands and the next call decides again.
+ */
 async function markDisconnected({ store, serverId, server, now, message }) {
   const at = now().toISOString();
+  const updates = {
+    oauthToken: null,
+    oauthRefreshToken: null,
+    oauth: { ...(server.oauth || {}), status: 'disconnected', disconnectedAt: at, disconnectReason: 'refresh_failed' },
+    status: 'needs_connection',
+    lastError: message,
+    lastTested: at,
+  };
   try {
-    await store.patchDoc(MCP_CONTAINER, serverId, {
-      oauthToken: null,
-      oauthRefreshToken: null,
-      oauth: { ...(server.oauth || {}), status: 'disconnected', disconnectedAt: at, disconnectReason: 'refresh_failed' },
-      status: 'needs_connection',
-      lastError: message,
-      lastTested: at,
-    });
-  } catch {
-    // The refusal is the useful result; a failed status write must not mask it.
+    await store.patchDoc(MCP_CONTAINER, serverId, updates, server._etag ? { ifMatch: server._etag } : {});
+  } catch (error) {
+    if (isPreconditionFailure(error)) {
+      const latest = await readServer(store, serverId).catch(() => null);
+      if (newerConnection(latest, server)) return { ok: true, server: latest };
+    }
+    // Otherwise the refusal is the useful result; a failed status write must not mask it.
   }
   return { ok: false, disconnected: true, message };
+}
+
+/**
+ * Store a refreshed token, guarded by the ETag of the document the refresh
+ * started from (review of #1019). A Disconnect, a URL move or a change of
+ * sign-in method that landed while the refresh was in flight is not undone:
+ * the conflict is read, and the refresh's tokens are kept only while the
+ * document is still the same connection (a rename, say, retries the write);
+ * a newer connection is used as it stands; anything else discards them, so
+ * a token issued for the old resource is never sent to a new URL.
+ */
+async function storeRefreshed({ store, serverId, server, updates, name }) {
+  let current = server._etag ? server : await readServer(store, serverId);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (!sameConnection(current, server)) break;
+    // A document without an ETag cannot be written safely, so it is not;
+    // the stored token is used until the next try. Cosmos always sends one.
+    if (!current._etag) {
+      return { ok: false, transient: true, message: `${name}'s renewed sign-in could not be stored safely; the next call tries again.` };
+    }
+    try {
+      const written = await store.patchDoc(MCP_CONTAINER, serverId, updates, { ifMatch: current._etag });
+      return { ok: true, server: { ...current, ...updates, ...(written?._etag ? { _etag: written._etag } : {}) } };
+    } catch (error) {
+      if (!isPreconditionFailure(error)) throw error;
+      current = await readServer(store, serverId);
+    }
+  }
+  if (newerConnection(current, server)) return { ok: true, server: current };
+  // `disconnected` as well: to a caller, the connection it was using is gone
+  // and the call must not go ahead on the old token.
+  return {
+    ok: false,
+    disconnected: true,
+    changed: true,
+    message: `${name} changed while its sign-in was being renewed, so the renewal was not kept. ${notConnectedMessage(current, serverId)}`,
+  };
 }
 
 async function performRefresh({ store, serverId, server, http, now, log }) {
@@ -803,22 +921,22 @@ async function performRefresh({ store, serverId, server, http, now, log }) {
     tokens = parseTokenResponse(res, { name, grant: 'token refresh', now });
   } catch (error) {
     if (!isGrantRejection(error)) {
-      log?.warn?.(`[mcp-oauth] refresh for ${serverId} did not complete: ${error?.message || error}`);
+      log?.warn?.(`[mcp-oauth] a token refresh did not complete: ${error?.message || error}`);
       return { ok: false, transient: true, message: error?.message || String(error) };
     }
     // Refresh tokens rotate: another instance may have spent this one a
-    // moment ago and stored the next. Its result is as good as ours.
-    const latest = await store.readDoc(MCP_CONTAINER, serverId, serverId).catch(() => null);
-    if (
-      latest?.oauth?.status === 'connected' &&
-      latest.oauthToken &&
-      latest.oauthRefreshToken &&
-      latest.oauthRefreshToken !== refreshToken
-    ) {
-      return { ok: true, server: latest };
+    // moment ago and stored the next. Its result is as good as ours. The
+    // disconnect below is guarded by the ETag of this read, so a rotation
+    // stored after it is not cleared either (review of #1019).
+    const latest = await readServer(store, serverId).catch(() => null);
+    if (newerConnection(latest, server)) return { ok: true, server: latest };
+    // Moved, switched or disconnected meanwhile: nothing of this connection
+    // is left to clear, and writing would put a stale status on the new one.
+    if (latest && !sameConnection(latest, server)) {
+      return { ok: false, disconnected: true, message: notConnectedMessage(latest, serverId) };
     }
-    log?.warn?.(`[mcp-oauth] refresh for ${serverId} was refused; marking it disconnected`);
-    return markDisconnected({ store, serverId, server, now, message: expiredMessage });
+    log?.warn?.('[mcp-oauth] a token refresh was refused; marking the server disconnected');
+    return markDisconnected({ store, serverId, server: latest || server, now, message: expiredMessage });
   }
 
   const updates = {
@@ -833,8 +951,7 @@ async function performRefresh({ store, serverId, server, http, now, log }) {
       refreshedAt: now().toISOString(),
     },
   };
-  await store.patchDoc(MCP_CONTAINER, serverId, updates);
-  return { ok: true, server: { ...server, ...updates } };
+  return storeRefreshed({ store, serverId, server, updates, name });
 }
 
 /** In-flight refreshes per server, so concurrent calls in one process spend a rotating refresh token once. */

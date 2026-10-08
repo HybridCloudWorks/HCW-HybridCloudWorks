@@ -68,7 +68,7 @@ export function createMcpTokenRefresh({
         else summary.failed += 1;
       } catch (error) {
         summary.failed += 1;
-        log.error?.(`[refreshPlaudToken] ${server.id}: ${error?.message || error}`);
+        log.error?.(`[refreshPlaudToken] an OAuth Connect refresh threw: ${error?.message || error}`);
       }
     }
     return summary;

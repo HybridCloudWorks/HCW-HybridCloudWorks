@@ -49,6 +49,7 @@ function hostinger({ token = reply(200, { access_token: 'at-1', refresh_token: '
       scopes_supported: ['mcp:use'],
     }),
     'GET https://auth.hostinger.com/.well-known/oauth-authorization-server': reply(200, {
+      issuer: 'https://auth.hostinger.com',
       authorization_endpoint: `${HOSTINGER_OAUTH}/authorize`,
       token_endpoint: `${HOSTINGER_OAUTH}/token`,
       registration_endpoint: `${HOSTINGER_OAUTH}/register`,
@@ -402,15 +403,19 @@ describe('complete: the checks added after the security review (2026-10-08)', ()
     expect(net.calls.some((c) => c.url.endsWith('/token'))).toBe(false);
   });
 
-  it('accepts a matching iss, with or without a trailing slash', async () => {
-    const store = memStore([hostingerDoc()]);
-    const net = hostinger();
-    const { state } = await started({ store, net });
-    const res = await handlersFor({ store, net }).completeMcpOAuth(
-      bodyRequest({ state, code: 'c', iss: 'https://auth.hostinger.com/' }),
-      context
-    );
-    expect(res.status).toBe(200);
+  it('accepts the issuer verbatim and no other spelling of it (RFC 9207, review of #1019)', async () => {
+    for (const [iss, status] of [
+      ['https://auth.hostinger.com', 200],
+      ['https://auth.hostinger.com/', 400],
+      [' https://auth.hostinger.com', 400],
+    ]) {
+      const store = memStore([hostingerDoc()]);
+      const net = hostinger();
+      const { state } = await started({ store, net });
+      const res = await handlersFor({ store, net }).completeMcpOAuth(bodyRequest({ state, code: 'c', iss }), context);
+      expect(res.status, iss).toBe(status);
+      if (status === 400) expect(parse(res).code).toBe('ISSUER_MISMATCH');
+    }
   });
 
   it('refuses a missing iss only where the server promised to send it', async () => {
@@ -434,6 +439,25 @@ describe('complete: the checks added after the security review (2026-10-08)', ()
       expect(res.status).toBe(409);
       expect(parse(res).code).toBe('SERVER_CHANGED');
       expect(net.calls.some((c) => c.url.endsWith('/token'))).toBe(false);
+    }
+  });
+
+  it('does not give the token to a server moved after the state was spent (review of #1019)', async () => {
+    for (const change of [{ url: 'https://mcp.elsewhere.example' }, { authType: undefined }]) {
+      const store = memStore([hostingerDoc()]);
+      // The change lands while the code is being exchanged: after the spend, before the store.
+      const token = async () => {
+        const doc = store.data.get('hostinger-mcp');
+        store.data.set('hostinger-mcp', { ...doc, ...change, _etag: 'changed-meanwhile' });
+        return reply(200, { access_token: 'at-1', refresh_token: 'rt-1', token_type: 'Bearer', expires_in: 3600 });
+      };
+      const net = hostinger({ token });
+      const { state } = await started({ store, net });
+      const res = await handlersFor({ store, net }).completeMcpOAuth(bodyRequest({ state, code: 'c' }), context);
+      expect(res.status).toBe(409);
+      expect(parse(res).code).toBe('SERVER_CHANGED');
+      expect(store.data.get('hostinger-mcp').oauthToken).toBeUndefined();
+      expect(store.audit.some((row) => row.action === 'mcp_oauth_connected')).toBe(false);
     }
   });
 

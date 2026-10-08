@@ -74,6 +74,8 @@ const REPLICATE_PRM = {
   authorization_servers: ['https://mcp.replicate.com/'],
 };
 const REPLICATE_AS = {
+  // Without the trailing slash its resource metadata gives (measured 2026-10-08).
+  issuer: 'https://mcp.replicate.com',
   authorization_endpoint: 'https://mcp.replicate.com/authorize',
   token_endpoint: 'https://mcp.replicate.com/token',
   registration_endpoint: 'https://mcp.replicate.com/register',
@@ -106,6 +108,7 @@ const HOSTINGER_PRM = {
 };
 const HOSTINGER_OAUTH = 'https://auth.hostinger.com/api/external/v1/oauth-server';
 const HOSTINGER_AS = {
+  issuer: 'https://auth.hostinger.com',
   authorization_endpoint: `${HOSTINGER_OAUTH}/authorize`,
   token_endpoint: `${HOSTINGER_OAUTH}/token`,
   registration_endpoint: `${HOSTINGER_OAUTH}/register`,
@@ -182,7 +185,7 @@ describe('discovery (RFC 9728 → RFC 8414)', () => {
     const net = network(replicateRoutes());
     const found = await discoverOAuth({ serverUrl: REPLICATE_URL, http: net.http, name: 'Replicate MCP' });
     expect(found).toMatchObject({
-      issuer: 'https://mcp.replicate.com/',
+      issuer: 'https://mcp.replicate.com',
       authorizationEndpoint: 'https://mcp.replicate.com/authorize',
       tokenEndpoint: 'https://mcp.replicate.com/token',
       registrationEndpoint: 'https://mcp.replicate.com/register',
@@ -348,6 +351,32 @@ describe('discovery refuses what this flow cannot use, and says which', () => {
     expect(sameIssuer('', '')).toBe(false);
   });
 
+  it('holds the metadata issuer to the identifier it was fetched for (RFC 8414 §3.3, review of #1019)', () => {
+    // Identical, and an origin alone with and without the root "/" (one URL).
+    expect(sameIssuer('https://login.example/tenant-a', 'https://login.example/tenant-a')).toBe(true);
+    expect(sameIssuer('https://mcp.replicate.com', 'https://mcp.replicate.com/')).toBe(true);
+    // Another tenant on the same origin, a path's trailing slash, a missing issuer: not the same.
+    expect(sameIssuer('https://login.example/tenant-b', 'https://login.example/tenant-a')).toBe(false);
+    expect(sameIssuer('https://login.example/tenant-a/', 'https://login.example/tenant-a')).toBe(false);
+    expect(sameIssuer('https://login.example', 'https://login.example/tenant-a')).toBe(false);
+    expect(sameIssuer(undefined, 'https://login.example')).toBe(false);
+    expect(sameIssuer(' https://login.example', 'https://login.example')).toBe(false);
+  });
+
+  it('refuses metadata with no issuer, or one on another path of the same origin', async () => {
+    const { issuer: _dropped, ...withoutIssuer } = HOSTINGER_AS;
+    for (const metadata of [withoutIssuer, { ...HOSTINGER_AS, issuer: 'https://auth.hostinger.com/tenant-b' }]) {
+      const net = network(
+        hostingerRoutes({ 'GET https://auth.hostinger.com/.well-known/oauth-authorization-server': reply(200, metadata) })
+      );
+      await expect(
+        discoverOAuth({ serverUrl: HOSTINGER_URL, challenge: HOSTINGER_CHALLENGE, http: net.http, name: 'Hostinger MCP' })
+      ).rejects.toThrow(/names the issuer .*not https:\/\/auth\.hostinger\.com/);
+      // No endpoint the refused metadata named was used.
+      expect(net.calls.some((c) => c.url.includes('/oauth-server/'))).toBe(false);
+    }
+  });
+
   it('never follows a metadata redirect down to http', async () => {
     const down = reply(302, '', { location: 'http://mcp.replicate.com/insecure' });
     const net = network(
@@ -397,7 +426,7 @@ describe('dynamic client registration (RFC 7591)', () => {
       token_endpoint_auth_method: 'none',
     });
     expect(updates.oauthClient).toEqual({
-      issuer: 'https://mcp.replicate.com/',
+      issuer: 'https://mcp.replicate.com',
       redirectUri: MCP_OAUTH_REDIRECT_URI,
       clientId: 'rep-client-1',
       tokenEndpointAuthMethod: 'none',
@@ -445,7 +474,7 @@ describe('dynamic client registration (RFC 7591)', () => {
 
   it('reuses a registration for the same issuer and redirect URI, and re-registers when either changes', async () => {
     const stored = {
-      issuer: 'https://mcp.replicate.com/',
+      issuer: 'https://mcp.replicate.com',
       redirectUri: MCP_OAUTH_REDIRECT_URI,
       clientId: 'rep-client-0',
       tokenEndpointAuthMethod: 'none',
@@ -708,10 +737,26 @@ describe('refresh', () => {
       },
       ...over,
     });
-  const storeFor = (doc) => ({
-    readDoc: vi.fn(async () => doc),
-    patchDoc: vi.fn(async (_c, _id, updates) => ({ ...doc, ...updates })),
-  });
+  /** One document with ETags, as Cosmos keeps it: a guarded write to a changed document is a 412. */
+  const storeFor = (doc) => {
+    let version = 0;
+    const store = {
+      current: { _etag: 'e0', ...doc },
+      readDoc: vi.fn(async () => store.current),
+      patchDoc: vi.fn(async (_c, _id, updates, options) => {
+        if (options?.ifMatch && options.ifMatch !== store.current._etag) {
+          throw Object.assign(new Error('changed since read'), { code: 412 });
+        }
+        store.current = { ...store.current, ...updates, _etag: `e${(version += 1)}` };
+        return store.current;
+      }),
+      /** Another writer: an unguarded change, as a Disconnect or a config write lands. */
+      meanwhile(change) {
+        store.current = { ...store.current, ...change, _etag: `e${(version += 1)}` };
+      },
+    };
+    return store;
+  };
 
   it('knows a connection from an expired one, and an expiring token', () => {
     expect(oauthConnectionState(connected())).toBe('connected');
@@ -814,6 +859,65 @@ describe('refresh', () => {
     const result = await refreshOAuthToken({ store, serverId: 'h4', server: doc, http: net.http, now });
     expect(result).toEqual({ ok: true, server: latest });
     expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  describe('a write that lands while a refresh is in flight (review of #1019)', () => {
+    /** A token endpoint that lets `during` change the document before it answers. */
+    const tokenEndpoint = (during, answer = reply(200, { access_token: 'at-new', refresh_token: 'rt-new' })) =>
+      network({
+        [`POST ${HOSTINGER_OAUTH}/token`]: async () => {
+          during();
+          return answer;
+        },
+      });
+
+    it('does not undo a Disconnect', async () => {
+      const store = storeFor(connected());
+      const net = tokenEndpoint(() =>
+        store.meanwhile({ oauthToken: null, oauthRefreshToken: null, oauth: { status: 'disconnected' } })
+      );
+      const result = await refreshOAuthToken({ store, serverId: 'r1', server: store.current, http: net.http, now });
+      expect(result).toMatchObject({ ok: false, disconnected: true, changed: true });
+      expect(store.current.oauthToken).toBeNull();
+      expect(store.current.oauth.status).toBe('disconnected');
+    });
+
+    it('does not take a token for the old resource to a moved server', async () => {
+      const store = storeFor(connected());
+      const net = tokenEndpoint(() =>
+        store.meanwhile({ url: 'https://mcp.elsewhere.example', oauthToken: null, oauthRefreshToken: null, oauth: null })
+      );
+      const result = await refreshOAuthToken({ store, serverId: 'r2', server: store.current, http: net.http, now });
+      expect(result).toMatchObject({ ok: false, disconnected: true });
+      expect(store.current.url).toBe('https://mcp.elsewhere.example');
+      expect(store.current.oauthToken).toBeNull();
+    });
+
+    it('keeps the refresh through an unrelated write, such as a rename', async () => {
+      const store = storeFor(connected());
+      const net = tokenEndpoint(() => store.meanwhile({ name: 'Hostinger (VPS)' }));
+      const result = await refreshOAuthToken({ store, serverId: 'r3', server: store.current, http: net.http, now });
+      expect(result.ok).toBe(true);
+      expect(store.current).toMatchObject({ name: 'Hostinger (VPS)', oauthToken: 'at-new', oauthRefreshToken: 'rt-new' });
+    });
+
+    it('a refused refresh does not clear a rotation another instance stored after its read', async () => {
+      const store = storeFor(connected());
+      const net = network({ [`POST ${HOSTINGER_OAUTH}/token`]: reply(400, { error: 'invalid_grant' }) });
+      const read = store.readDoc;
+      let reads = 0;
+      store.readDoc = vi.fn(async (...args) => {
+        const doc = await read(...args);
+        // Just after this instance's read, the other instance stores its rotation.
+        if ((reads += 1) === 1) store.meanwhile({ oauthToken: 'at-other', oauthRefreshToken: 'rt-other' });
+        return doc;
+      });
+      const result = await refreshOAuthToken({ store, serverId: 'r4', server: store.current, http: net.http, now });
+      expect(result.ok).toBe(true);
+      expect(result.server.oauthToken).toBe('at-other');
+      expect(store.current).toMatchObject({ oauthToken: 'at-other', oauthRefreshToken: 'rt-other' });
+      expect(store.current.oauth.status).toBe('connected');
+    });
   });
 
   it('spends a rotating refresh token once for concurrent callers in one process', async () => {

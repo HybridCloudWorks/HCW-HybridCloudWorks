@@ -1618,10 +1618,18 @@ describe('MCP OAuth Connect fields on the config routes (2026-10-08)', () => {
 
   it('a PUT round trip keeps the stored connection and registration', async () => {
     const store = merging(connected());
+    // What a form holds: the read, which never carries the write-only fields.
+    const {
+      oauthToken: _token,
+      oauthRefreshToken: _refresh,
+      oauthClientSecret: _secret,
+      oauthPending: _pending,
+      ...readable
+    } = connected();
     const res = await handlers(store).putConfig(
       makeRequest({
         params: { collection: 'mcp-servers', id: 'hostinger-mcp' },
-        body: { ...connected(), oauth: { tokenEndpoint: 'https://attacker.example/' }, hasOauthToken: true },
+        body: { ...readable, oauth: { tokenEndpoint: 'https://attacker.example/' }, hasOauthToken: true },
       }),
       context
     );
@@ -1840,5 +1848,77 @@ describe('config writes after the OAuth Connect security review (2026-10-08)', (
     );
     await patchAs(superAdmin, store, { url: 'https://mcp2.hostinger.com' });
     expect(store.patchDoc.mock.calls[0][2]).toMatchObject({ oauthPending: null, oauth: null });
+  });
+
+  const putAs = (guard, store, body) =>
+    createAdminIntegrationHandlers({ guard, store, ...fixed }).putConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'hostinger-mcp' }, body }),
+      context
+    );
+  /** What a form PUTs back: the read, which never carries the write-only fields. */
+  const readable = ({ oauthToken: _t, oauthRefreshToken: _r, oauthClientSecret: _s, oauthPending: _p, ...rest }) =>
+    rest;
+  const stored = (store) => store.upsertDoc.mock.calls.find(([c]) => c === 'mcp_servers')?.[1];
+
+  it('judges a PUT on what it stores: an omitted authType is kept, an omitted enabled or url is a change (review of #1019)', async () => {
+    // authType left out: carried, so the server still signs in with Connect and keeps its tokens.
+    const { authType: _a, enabled: _e0, ...noAuthType } = readable(hostinger());
+    const kept = storeWith(hostinger());
+    expect((await putAs(editorOnly, kept, noAuthType)).status).toBe(200);
+    expect(stored(kept)).toMatchObject({ authType: 'oauth', oauthToken: 'at', oauthRefreshToken: 'rt' });
+
+    // enabled left out of an enabled Connect server switches it off: super_admin.
+    const on = hostinger({ enabled: true });
+    const { enabled: _e1, ...noEnabled } = readable(on);
+    expect((await putAs(editorOnly, storeWith(on), noEnabled)).status).toBe(403);
+    expect((await putAs(superAdmin, storeWith(on), noEnabled)).status).toBe(200);
+
+    // url left out moves the server: super_admin, and the connection goes with it.
+    const { url: _u, enabled: _e2, ...noUrl } = readable(hostinger());
+    const refused = storeWith(hostinger());
+    expect((await putAs(editorOnly, refused, noUrl)).status).toBe(403);
+    expect(refused.upsertDoc).not.toHaveBeenCalled();
+    const moved = storeWith(hostinger());
+    expect((await putAs(superAdmin, moved, noUrl)).status).toBe(200);
+    expect(stored(moved)).toMatchObject({ oauthToken: null, oauthRefreshToken: null, oauth: null });
+  });
+
+  it('refuses the Connect tokens on a config write, and keeps Plaud’s pasted token (review of #1019)', async () => {
+    for (const body of [{ oauthToken: 'another-account' }, { oauthRefreshToken: 'another-account' }, { oauthToken: '' }]) {
+      const store = storeWith(hostinger());
+      const res = await patchAs(superAdmin, store, body);
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toMatch(/set by Connect/);
+      expect(store.patchDoc).not.toHaveBeenCalled();
+    }
+    const put = storeWith(hostinger());
+    expect((await putAs(superAdmin, put, { ...readable(hostinger()), oauthToken: 'another-account' })).status).toBe(400);
+    expect(put.upsertDoc).not.toHaveBeenCalled();
+    const plaud = await patchAs(
+      editorOnly,
+      storeWith({ id: 'plaud', url: 'https://mcp.plaud.ai/mcp', authType: 'oauth' }),
+      { oauthToken: 'pasted' },
+      { id: 'plaud' }
+    );
+    expect(plaud.status).toBe(200);
+  });
+
+  it('deleting an OAuth Connect server needs super_admin, as Disconnect does (review of #1019)', async () => {
+    const del = (guard, store, id = 'hostinger-mcp') =>
+      createAdminIntegrationHandlers({ guard, store, ...fixed }).deleteConfig(
+        makeRequest({ params: { collection: 'mcp-servers', id } }),
+        context
+      );
+    const store = storeWith(hostinger());
+    expect((await del(editorOnly, store)).status).toBe(403);
+    expect(store.deleteDoc).not.toHaveBeenCalled();
+    expect((await del(superAdmin, storeWith(hostinger()))).status).toBe(200);
+    const keyless = storeWith({ id: 'context7', url: 'https://mcp.context7.com/mcp' });
+    expect((await del(editorOnly, keyless, 'context7')).status).toBe(200);
+    // A read that fails fails the delete, rather than skipping the check.
+    const broken = storeWith(hostinger());
+    broken.readDoc.mockRejectedValueOnce(new Error('cosmos down'));
+    expect((await del(editorOnly, broken)).status).toBe(500);
+    expect(broken.deleteDoc).not.toHaveBeenCalled();
   });
 });

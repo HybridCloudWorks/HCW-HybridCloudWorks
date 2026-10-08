@@ -3994,9 +3994,22 @@ This project has not cut a tagged release; entries are grouped under
     field, so an editor could have pointed `oauth.tokenEndpoint` — and with
     it the refresh token — at their own host, and `allowedTools.0` had
     slipped past #995's super_admin rule since that change. The callback's
-    `iss` (RFC 9207) is checked against the issuer the sign-in started with,
-    and an SSE stream naming a message endpoint on another host does not
-    get the token.
+    `iss` (RFC 9207) is checked verbatim against the issuer the sign-in
+    started with, and an SSE stream naming a message endpoint on another
+    host does not get the token.
+  - The pull request's review closed the rest of the ways round those
+    rules. A PUT is judged on the document it stores, so leaving out
+    `enabled` or `url` is a change like naming it, and an omitted `authType`
+    is kept rather than dropped. A config write cannot set a Connect
+    server's tokens, and deleting one needs super_admin, as Disconnect does.
+    The metadata `issuer` must be the identifier it was fetched for (RFC
+    8414): Replicate's origin written with and without the root `/` is
+    one URL, and any other spelling, path or tenant is refused. The final
+    token write of a sign-in, a refreshed token and a refused refresh's
+    disconnect are each written under the ETag of the document they were
+    decided from, so a Disconnect, a URL move or another instance's newer
+    token that lands meanwhile is never undone. Log lines name no server
+    document.
   - The owner presses Connect on each card and signs in at the vendor:
     [MCP servers — OAuth Connect](docs/runbooks/mcp-oauth-connect.md).
 - **The Hybrid Lab's health signals say what is true, and the repository

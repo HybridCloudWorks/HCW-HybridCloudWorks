@@ -35,7 +35,6 @@ import {
   createOAuthHttp,
   exchangeAuthorizationCode,
   hashState,
-  sameIssuer,
   startOAuthConnect,
 } from './mcp-oauth.js';
 
@@ -82,7 +81,7 @@ async function auditConnection(ctx, context, { action, serverId, user, details }
       details: { collection: MCP_CONTAINER, documentId: serverId, ...details },
     });
   } catch (error) {
-    context.warn?.(`${action} ${serverId} saved but the audit row failed: ${error?.message || error}`);
+    context.warn?.(`${action} saved but the audit row failed: ${error?.message || error}`);
   }
 }
 
@@ -126,7 +125,7 @@ async function startMcpOAuth(ctx, request, context) {
     return json(200, { ok: true, authorizationUrl });
   } catch (error) {
     if (error instanceof McpOAuthError) {
-      context.warn?.(`[startMcpOAuth] ${serverId}: ${error.message}`);
+      context.warn?.(`[startMcpOAuth] the sign-in was not started: ${error.message}`);
       return fail(error.status, error.message, error.code);
     }
     context.error?.('[startMcpOAuth] failed:', error?.message || error);
@@ -178,7 +177,8 @@ async function completeMcpOAuth(ctx, request, context) {
   const body = await request.json().catch(() => null);
   const state = typeof body?.state === 'string' ? body.state.trim() : '';
   const code = typeof body?.code === 'string' ? body.code.trim() : '';
-  const iss = typeof body?.iss === 'string' ? body.iss.trim().slice(0, 512) : '';
+  // Verbatim, not trimmed: RFC 9207 compares `iss` as a simple string.
+  const iss = typeof body?.iss === 'string' ? body.iss.slice(0, 512) : '';
   if (!state || !code || state.length > MAX_STATE_LENGTH || code.length > MAX_CODE_LENGTH) {
     return fail(
       400,
@@ -199,11 +199,15 @@ async function completeMcpOAuth(ctx, request, context) {
   // other answers "already used" without reaching the token endpoint. A
   // document read without an ETag cannot be spent safely, so it is not.
   if (!server._etag) {
-    context.error?.(`[completeMcpOAuth] ${serverId} was read without an ETag; refusing`);
+    context.error?.('[completeMcpOAuth] the server document was read without an ETag; refusing');
     return fail(500, 'The sign-in could not be verified. Press Connect on the server card to start again.');
   }
+  // The document as the spend left it: its ETag guards the token write at
+  // the end, so a server moved or switched to another sign-in method after
+  // this point is not given a token for the old resource (review of #1019).
+  let spent;
   try {
-    await ctx.store.patchDoc(MCP_CONTAINER, serverId, { oauthPending: null }, { ifMatch: server._etag });
+    spent = await ctx.store.patchDoc(MCP_CONTAINER, serverId, { oauthPending: null }, { ifMatch: server._etag });
   } catch (error) {
     if (isPreconditionFailure(error)) {
       return fail(409, 'This sign-in has already been used. Press Connect on the server card to start again.', 'STATE_USED');
@@ -224,7 +228,7 @@ async function completeMcpOAuth(ctx, request, context) {
   // it must be the one this sign-in started with; absent, it is refused only
   // where the server said it always sends it. This is the mix-up defence: a
   // code another authorization server issued is not exchanged here.
-  if (iss ? !sameIssuer(iss, pending.issuer) : pending.issParameterSupported === true) {
+  if (iss ? iss !== pending.issuer : pending.issParameterSupported === true) {
     return fail(
       400,
       `The sign-in came back from ${iss || 'an unnamed issuer'}, not from ${name}'s sign-in server ${pending.issuer}, so it was not accepted. Press Connect on its card to start again.`,
@@ -257,14 +261,25 @@ async function completeMcpOAuth(ctx, request, context) {
       error instanceof McpOAuthError
         ? `${error.message} Press Connect on the ${name} card to try again.`
         : `The sign-in for ${name} could not be completed. Press Connect on its card to try again.`;
-    context.warn?.(`[completeMcpOAuth] ${serverId}: ${error?.message || error}`);
+    context.warn?.(`[completeMcpOAuth] the code exchange failed: ${error?.message || error}`);
     return fail(502, message, 'EXCHANGE_FAILED');
   }
 
   const updates = connectedUpdates({ pending, tokens, now: ctx.now });
+  if (!spent?._etag) {
+    context.error?.('[completeMcpOAuth] the spent document came back without an ETag; refusing to store the token');
+    return fail(500, `${name} signed in, but the connection could not be saved. Press Connect again.`);
+  }
   try {
-    await ctx.store.patchDoc(MCP_CONTAINER, serverId, updates);
+    await ctx.store.patchDoc(MCP_CONTAINER, serverId, updates, { ifMatch: spent._etag });
   } catch (error) {
+    if (isPreconditionFailure(error)) {
+      return fail(
+        409,
+        `${name} changed while the sign-in was in progress, so it was not accepted. Press Connect on its card to start again.`,
+        'SERVER_CHANGED'
+      );
+    }
     context.error?.('[completeMcpOAuth] could not store the connection:', error?.message || error);
     return fail(500, `${name} signed in, but the connection could not be saved. Press Connect again.`);
   }
