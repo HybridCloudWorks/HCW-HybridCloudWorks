@@ -89,7 +89,7 @@ resource "azurerm_user_assigned_identity" "github_deploy" {
 #
 # GitHub now composes the subject with numeric org and repository IDs embedded:
 #
-#   repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+#   repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
 #
 # rather than the documented repo:<org>/<repo>:ref:<ref>. Confirmed on
 # 2026-08-20 from a real token — the first dispatch of deploy-functions.yml
@@ -111,11 +111,27 @@ resource "azurerm_user_assigned_identity" "github_deploy" {
 # The IDs are hardcoded deliberately. They are immutable by definition: that is
 # the entire point of GitHub embedding them, and a variable would invite
 # someone to "fix" them to something readable.
+#
+# Immutable is not the same as permanent, though. The owner ID belongs to the
+# ACCOUNT, not the repository, so a transfer replaces it. On 2026-10-07 the
+# repository moved from the HybridCloudWorks organisation (312844660) to the
+# personal account saulpatinojr (34853639). The repository ID, 1268997852,
+# survived the move; both owner halves of both forms did not, and every
+# azure/login failed with AADSTS700213 naming
+#   repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+# The old-owner credentials were replaced rather than kept beside the new
+# ones: the organisation no longer owns the repository, so nothing can present
+# them, and a trust nothing presents is the standing relationship T-524 and
+# SEC-2 removed. scripts/oidc-subjects.test.mjs compares this prefix with the
+# GITHUB_REPOSITORY_OWNER_ID and GITHUB_REPOSITORY_ID of the repository CI runs
+# in, so a future transfer fails a pull request, not the first deploy after it.
 # ---------------------------------------------------------------------------
 locals {
-  # repo:<org>@<org-id>/<repo>@<repo-id> — verified against the GitHub API,
-  # not copied out of the error message.
-  github_immutable_prefix = "repo:${var.github_org}@312844660/${var.github_repo}@1268997852"
+  # repo:<owner>@<owner-id>/<repo>@<repo-id> — verified against the GitHub API
+  # (`GET /repos/saulpatinojr/HCW-HybridCloudWorks/actions/oidc/customization/sub`
+  # returned this `sub_claim_prefix` on 2026-10-08), not copied out of the
+  # error message.
+  github_immutable_prefix = "repo:${var.github_org}@34853639/${var.github_repo}@1268997852"
 }
 
 # The immutable half of the deploy identity's ref pair stood here until

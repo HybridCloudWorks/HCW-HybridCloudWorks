@@ -868,10 +868,17 @@ variable "entra_api_audience" {
 #
 # Both were stale until now: the repository moved to the HybridCloudWorks org,
 # and nothing consumed these variables, so nothing surfaced the drift.
+#
+# Stale again on 2026-10-07: the owner transferred the repository from the
+# HybridCloudWorks organisation to the personal account saulpatinojr, and every
+# azure/login failed with AADSTS700213 from the next scheduled run. The owner
+# and its numeric ID in oidc.tf's `github_immutable_prefix` move together;
+# scripts/oidc-subjects.test.mjs now compares both with the repository CI runs
+# in, so the next transfer fails a pull request instead of a deploy.
 variable "github_org" {
-  description = "GitHub organisation owning the repository — must match the OIDC token issuer claim"
+  description = "GitHub account (organisation or user) that owns the repository — must match the owner in the OIDC token subject claim"
   type        = string
-  default     = "HybridCloudWorks"
+  default     = "saulpatinojr"
 }
 
 variable "github_repo" {

@@ -42,6 +42,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { identityMismatches, mainSubject, onActions, readOidcIdentity } from './check-oidc-owner.mjs';
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const WORKFLOWS = join(REPO, '.github', 'workflows');
@@ -251,5 +252,54 @@ describe('OIDC federated credentials cover every Azure login', () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+});
+
+/**
+ * The owner and the two numeric IDs every subject above is built from, checked
+ * against the repository CI is actually running in. The reasoning, and the
+ * 2026-10-07 transfer that prompted it, are in scripts/check-oidc-owner.mjs,
+ * which ci.yml also runs on its own on every pull request.
+ */
+describe('OIDC subjects name the repository CI runs in', () => {
+  const identity = readOidcIdentity();
+  const run = (owner, ownerId) => ({
+    GITHUB_REPOSITORY: `${owner}/HCW-HybridCloudWorks`,
+    GITHUB_REPOSITORY_OWNER_ID: ownerId,
+    GITHUB_REPOSITORY_ID: '1268997852',
+  });
+
+  it('infra/ and the Docker rule in publish-lab-image.yml agree with each other', () => {
+    expect(identityMismatches(identity)).toEqual([]);
+  });
+
+  it('would have failed on the first run after the 2026-10-07 transfer', () => {
+    // The files as they stood before this fix, in the repository as it is now.
+    const before = { ...identity, owner: 'HybridCloudWorks', ownerId: '312844660' };
+    before.expectedRule = mainSubject(before);
+    const problems = identityMismatches(before, run('saulpatinojr', '34853639'));
+    expect(problems.join('\n')).toMatch(/github_org default.*HybridCloudWorks.*saulpatinojr/);
+    expect(problems.join('\n')).toMatch(/owner ID.*312844660.*34853639/);
+  });
+
+  it('passes for the repository the files name', () => {
+    expect(identityMismatches(identity, run(identity.owner, identity.ownerId))).toEqual([]);
+  });
+
+  it.skipIf(!onActions())('matches the owner, owner ID and repository ID GitHub reports for this run', () => {
+    expect(identityMismatches(identity, process.env)).toEqual([]);
+  });
+
+  it('ci.yml runs the check on every pull request, outside the path filter', () => {
+    // The point of the separate file. Gated on the filter, the check would
+    // skip the docs-only pull request after a transfer, which is the one that
+    // has to fail.
+    const ci = readFileSync(join(WORKFLOWS, 'ci.yml'), 'utf8');
+    const at = ci.indexOf('run: node check-oidc-owner.mjs');
+    expect(at, 'no ci.yml step runs `node check-oidc-owner.mjs`').toBeGreaterThan(-1);
+    // From the step's own `- name:` to its `run:`, so only its condition is read.
+    const step = ci.slice(ci.lastIndexOf('- name:', at), at);
+    expect(step).toMatch(/if: matrix\.name == 'scripts \(operations\)'/);
+    expect(step).not.toMatch(/steps\.changes\.outputs\.relevant/);
   });
 });

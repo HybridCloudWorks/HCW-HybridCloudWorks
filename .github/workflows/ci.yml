@@ -186,12 +186,22 @@ jobs:
       # A row's own node-version wins; a row without one gets the newest
       # line, so a new row cannot fall back to whatever the runner ships.
       - name: Set up Node.js
-        if: steps.changes.outputs.relevant == 'true'
+        if: steps.changes.outputs.relevant == 'true' || matrix.name == 'scripts (operations)'
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: ${{ matrix.node-version || '26' }}
           cache: npm
           cache-dependency-path: ${{ matrix.dir }}/package-lock.json
+
+      # On every pull request, whatever it touches, so outside the filter. A
+      # repository transfer changes no file, so the pull request that has to
+      # catch one is as likely to be docs-only as anything (Copilot review on
+      # #1001). It needs Node and nothing from npm ci. The why is in
+      # scripts/check-oidc-owner.mjs; oidc-subjects.test.mjs keeps this step
+      # outside the filter.
+      - name: OIDC subjects name this repository
+        if: matrix.name == 'scripts (operations)'
+        run: node check-oidc-owner.mjs
 
       # `npm ci` is the point of this job for packages with no tests: it fails
       # when the lockfile is out of sync with package.json, which is exactly

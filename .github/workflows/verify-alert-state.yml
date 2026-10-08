@@ -40,6 +40,8 @@
 # AADSTS700213 — the failure mode documented at length in infra/oidc.tf.
 # Confirmed working on the first run: the presented subject was
 # `repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main`.
+# Since the 2026-10-07 transfer to the personal account it is
+# `repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main`.
 
 name: Verify Alert Rule State
 
