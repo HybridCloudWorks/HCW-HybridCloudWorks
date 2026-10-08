@@ -26,7 +26,7 @@ export default function GitHubToolsPage() {
         </section>
         <section className="px-6 py-12 max-w-7xl mx-auto">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="text-xl font-bold text-white flex items-center gap-2">
+            <h3 className="text-xl font-bold flex items-center gap-2">
               <span className="material-symbols-outlined text-gh-blue">dashboard_customize</span>
               Available Tools
             </h3>
@@ -50,7 +50,7 @@ export default function GitHubToolsPage() {
                     <span className="material-symbols-outlined">rule</span>
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-white group-hover:text-blue-400 transition-colors">
+                    <h3 className="text-lg font-bold group-hover:text-blue-400 transition-colors">
                       Workflow Linter
                     </h3>
                     <p className="text-xs text-gh-text-gray">
@@ -105,7 +105,7 @@ export default function GitHubToolsPage() {
                     <span className="material-symbols-outlined">security</span>
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-white group-hover:text-red-400 transition-colors">
+                    <h3 className="text-lg font-bold group-hover:text-red-400 transition-colors">
                       Secret Scanner
                     </h3>
                     <p className="text-xs text-gh-text-gray">Repo Leak Simulation</p>
@@ -150,7 +150,7 @@ export default function GitHubToolsPage() {
                     <span className="material-symbols-outlined">timer</span>
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-white group-hover:text-purple-400 transition-colors">
+                    <h3 className="text-lg font-bold group-hover:text-purple-400 transition-colors">
                       Action Runner Estimator
                     </h3>
                     <p className="text-xs text-gh-text-gray">Cost &amp; Time Prediction</p>
@@ -193,7 +193,7 @@ export default function GitHubToolsPage() {
                     <span className="material-symbols-outlined">hub</span>
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-white group-hover:text-orange-400 transition-colors">
+                    <h3 className="text-lg font-bold group-hover:text-orange-400 transition-colors">
                       Dependency Graph
                     </h3>
                     <p className="text-xs text-gh-text-gray">Interactive Node Visualizer</p>

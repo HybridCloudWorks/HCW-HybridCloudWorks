@@ -395,7 +395,7 @@ export default function GCPEducationPage() {
                 </div>
               </div>
 
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">
+              <h3 className="text-sm font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-3">
                 Modules
               </h3>
               <div className="space-y-2">

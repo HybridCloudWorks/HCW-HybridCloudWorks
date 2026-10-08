@@ -59,7 +59,7 @@ export default function FeaturedArchitecture({
             )}
             {eyebrowText}
           </div>
-          <h2 className="text-3xl font-bold text-white mb-4 leading-tight">{design.title}</h2>
+          <h2 className="text-3xl font-bold mb-4 leading-tight">{design.title}</h2>
           <p className="text-slate-300 text-sm leading-relaxed mb-6">{design.description}</p>
 
           {badges.length > 0 && (

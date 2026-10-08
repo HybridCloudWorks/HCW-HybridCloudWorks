@@ -67,7 +67,7 @@ export const FOCUS_AREAS = [
 /** The counterpart of `ComingSoon` for an area whose page exists. */
 function AvailableNow() {
   return (
-    <p className="!mb-0 inline-flex w-fit items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary dark:text-(--slate-blue)">
+    <p className="mb-0 inline-flex w-fit items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary dark:text-(--slate-blue)">
       <span className="material-symbols-outlined text-sm" aria-hidden="true">
         check_circle
       </span>

@@ -29,7 +29,7 @@ export default function GitHubWorkflowsPage() {
             <div className="hidden lg:flex flex-col gap-4 col-span-1">
               <div className="bento-card h-full !p-0 overflow-hidden">
                 <div className="p-4 border-b border-gh-border bg-gh-dark">
-                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                  <h3 className="font-bold text-sm flex items-center gap-2">
                     <span className="material-symbols-outlined text-gh-blue text-[18px]">
                       category
                     </span>{' '}
@@ -77,7 +77,7 @@ export default function GitHubWorkflowsPage() {
                       <span className="material-symbols-outlined text-[20px]">build</span>
                     </span>
                     <div>
-                      <h3 className="text-lg font-bold text-white">Node.js CI Matrix</h3>
+                      <h3 className="text-lg font-bold ">Node.js CI Matrix</h3>
                       <span className="text-xs text-gh-text-gray">CI • Testing</span>
                     </div>
                   </div>
@@ -141,7 +141,7 @@ export default function GitHubWorkflowsPage() {
               </div>
               <div className="bento-card col-span-1 row-span-1">
                 <div className="flex items-center justify-between mb-4 border-b border-gh-border pb-2">
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <h3 className="text-sm font-bold flex items-center gap-2">
                     <span className="material-symbols-outlined text-gh-blue text-[18px]">
                       rss_feed
                     </span>{' '}
@@ -157,7 +157,7 @@ export default function GitHubWorkflowsPage() {
                 <ul className="space-y-3">
                   <li className="group/item">
                     <div className="flex justify-between items-start">
-                      <h4 className="text-xs font-medium text-white group-hover/item:text-gh-blue transition-colors cursor-pointer">
+                      <h4 className="text-xs font-medium group-hover/item:text-gh-blue transition-colors cursor-pointer">
                         actions/checkout v4.1.2
                       </h4>
                       <span className="text-[10px] text-gh-text-gray">2h ago</span>
@@ -168,7 +168,7 @@ export default function GitHubWorkflowsPage() {
                   </li>
                   <li className="group/item">
                     <div className="flex justify-between items-start">
-                      <h4 className="text-xs font-medium text-white group-hover/item:text-gh-blue transition-colors cursor-pointer">
+                      <h4 className="text-xs font-medium group-hover/item:text-gh-blue transition-colors cursor-pointer">
                         docker/build-push v5.3
                       </h4>
                       <span className="text-[10px] text-gh-text-gray">1d ago</span>
@@ -179,7 +179,7 @@ export default function GitHubWorkflowsPage() {
                   </li>
                   <li className="group/item">
                     <div className="flex justify-between items-start">
-                      <h4 className="text-xs font-medium text-white group-hover/item:text-gh-blue transition-colors cursor-pointer">
+                      <h4 className="text-xs font-medium group-hover/item:text-gh-blue transition-colors cursor-pointer">
                         aws-actions/configure v4
                       </h4>
                       <span className="text-[10px] text-gh-text-gray">2d ago</span>

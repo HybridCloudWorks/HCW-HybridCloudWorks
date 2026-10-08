@@ -215,9 +215,7 @@ export default function EpisodePlayer({ episode, meta, onPlayingChange }) {
         <div className="flex gap-6 items-start mb-6">
           <EpisodeArtwork image={image} episode={episode} meta={meta} />
           <div className="flex-1 min-w-0">
-            <h2 className="text-xl sm:text-2xl font-bold text-white mb-2 leading-tight">
-              {episode.title}
-            </h2>
+            <h2 className="text-xl sm:text-2xl font-bold mb-2 leading-tight">{episode.title}</h2>
             <p className="text-sm text-foreground line-clamp-3">
               {stripHtml(episode.longDescription || episode.description)}
             </p>
