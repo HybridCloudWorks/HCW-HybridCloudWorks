@@ -62,6 +62,8 @@ describe('what the check catches', () => {
   it('is about the owner, not the words: the organisation, its images and the new owner are not stale', () => {
     for (const line of [
       'https://github.com/orgs/HybridCloudWorks/projects/1',
+      'https://github.com/HybridCloudWorks',
+      'https://github.com/HybridCloudWorks/.github',
       'docker.io/hybridcloudworks/hcw-lab@sha256:abc',
       'hybridcloudworks/hcw-lab-runner:2026.10.08',
       'https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-host',

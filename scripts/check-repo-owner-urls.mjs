@@ -12,12 +12,12 @@
  * name next. The review of 2026-10-08 (#1009) found them, and this keeps
  * them from coming back.
  *
- * WHAT COUNTS. The repository's web and git address under the old owner
- * (`github.com/<old>/`, `github.com:<old>/`), and its owner/name, which is the
- * form raw.githubusercontent.com, the REST API's /repos/ path and
- * `gh --repo` all use. Not the organisation itself: it still exists, by the
- * owner's decision of 2026-10-08, so its project boards and the image
- * namespace `<old>/hcw-lab*` are not stale (review of #1018).
+ * WHAT COUNTS. The repository's owner/name under the old owner, which every
+ * address of it contains: the web and git URLs, raw.githubusercontent.com,
+ * the REST API's /repos/ path and `gh --repo`. Not the organisation itself:
+ * it still exists, by the owner's decision of 2026-10-08, so its profile, its
+ * project boards and the image namespace `<old>/hcw-lab*` are not stale
+ * (review of #1018).
  *
  * WHAT IS SCANNED. Every tracked text file — code, workflows, runbooks, the
  * session instructions, infra-lab — except the dated records in HISTORICAL,
@@ -52,32 +52,31 @@ const OLD_OWNER = ['hybrid', 'cloud', 'works'].join('');
 const REPO_NAME = 'hcw-hybridcloudworks';
 
 /**
- * The forms of the former owner's repository, lower-cased: owner names are
- * case-insensitive, and so is the search.
+ * The former owner's repository as owner/name, lower-cased: owner names are
+ * case-insensitive, and so is the search. Every address of the repository
+ * contains it — the web and git URLs, raw.githubusercontent.com, the REST
+ * API's /repos/ path, `gh --repo` — so it is the one form searched for. An
+ * address under the organisation that names no repository (its profile, its
+ * boards, another of its repositories) is not this repository's old home.
  */
-export const FORMER_OWNER_FORMS = Object.freeze([
-  `github.com/${OLD_OWNER}/`,
-  `github.com:${OLD_OWNER}/`,
-  `${OLD_OWNER}/${REPO_NAME}`,
-]);
+export const FORMER_OWNER_REPOSITORY = `${OLD_OWNER}/${REPO_NAME}`;
 
 const NAME_CHAR = /[a-z0-9-]/;
 
 /**
- * Whether a line names one of FORMER_OWNER_FORMS. A substring search on
+ * Whether a line names FORMER_OWNER_REPOSITORY. A substring search on
  * purpose: this scans text for an occurrence, it does not validate a URL, so
  * there is nothing to anchor (CodeQL js/regex/missing-regexp-anchor flagged
- * the earlier regex form on #1018). The owner/name form must start a name,
- * so `<someone>-<old>/…` is not the old owner.
+ * the earlier regex form on #1018). The match must start a name, so
+ * `<someone>-<old>/…` is not the old owner.
  */
 export function namesFormerOwner(text) {
   const line = String(text).toLowerCase();
-  return FORMER_OWNER_FORMS.some((form) => {
-    for (let at = line.indexOf(form); at !== -1; at = line.indexOf(form, at + 1)) {
-      if (form.startsWith('github.com') || at === 0 || !NAME_CHAR.test(line[at - 1])) return true;
-    }
-    return false;
-  });
+  const form = FORMER_OWNER_REPOSITORY;
+  for (let at = line.indexOf(form); at !== -1; at = line.indexOf(form, at + 1)) {
+    if (at === 0 || !NAME_CHAR.test(line[at - 1])) return true;
+  }
+  return false;
 }
 
 export const CURRENT_OWNER_URL = 'https://github.com/saulpatinojr/HCW-HybridCloudWorks';
