@@ -3943,6 +3943,17 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Two frontend tests that failed under load now wait for what they
+  assert (#997).** Each turned a run on `main` red on 2026-10-08 and passed
+  on the next run of the same workflow.
+  - `LabPanePage` › full screen queried "Exit full screen" synchronously,
+    though the pane reads full screen through `useSyncExternalStore`, so
+    the relabelling render could land after the query. It now awaits
+    `findByRole`.
+  - `ForgeStudioPage` › Send to review waits up to 5 s three times, but
+    kept vitest's default 5 s limit for the whole test, so under load it
+    was killed before it could use its own waits (`Test timed out in
+    5000ms`, CI on `acbbd716`). It now has a 20 s limit.
 - **The Docker and lab drafts describe the lab images as published to Docker
   Hub only.** `blog-docker-01-building-images.md`,
   `blog-docker-03-docker-hub-oidc.md` and `blog-lab-02-one-container.md` in
