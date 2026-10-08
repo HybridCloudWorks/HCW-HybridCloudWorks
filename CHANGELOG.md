@@ -3953,9 +3953,12 @@ This project has not cut a tagged release; entries are grouped under
   talked to each other. Deleting the two stale bridges brought it back at
   once.
   - The docker role now runs `hcw-docker-stale-bridges` on every bootstrap,
-    once the daemon is up. It deletes each Docker-named bridge that no live
-    network owns and that has nothing attached, and names any it leaves.
-    A test runs it against stand-ins for `docker` and `ip`.
+    once the daemon is up. It deletes a bridge only when its network is
+    recorded in another Docker data root on the host, the running daemon
+    does not list it, and nothing is attached, so another program's bridge
+    named like Docker's, or a network the daemon has just created, is never
+    touched. A test runs it against stand-ins for `docker` and `ip` and a
+    scratch data root.
   - `coder-postgres-data` is `external: true` in the Compose file, and the
     coder role creates it before `up`. Compose had warned on every run after
     the carry that the volume "was not created by Docker Compose". It used

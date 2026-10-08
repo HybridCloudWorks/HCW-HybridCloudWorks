@@ -479,9 +479,10 @@ jobs:
       # /usr/local/libexec/hcw-docker-stale-bridges deletes the bridges a
       # data-root switch leaves in the kernel, whose routes shadowed the live
       # Coder networks' on 2026-10-08. It deletes interfaces, so it is run as
-      # it ships against stand-ins for docker and ip that answer like that
-      # host did: the stale bridges go, live ones, docker0, other programs'
-      # bridges and one with a port attached stay. No root needed.
+      # it ships against stand-ins for docker and ip and a scratch data root
+      # shaped like that host: the bridges the old root recorded go; live
+      # ones, a just-created network, docker0, another program's bridge
+      # named like Docker's and one with a port attached stay. No root needed.
       - name: hcw-docker-stale-bridges test
         if: steps.changes.outputs.relevant == 'true'
         run: bash roles/docker/tests/hcw-docker-stale-bridges.test.sh

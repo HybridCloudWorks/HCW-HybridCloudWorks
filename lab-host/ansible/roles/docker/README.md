@@ -110,11 +110,16 @@ traffic to Coder, Docker's port proxy on `127.0.0.1:7080` included, went into
 an empty bridge and Caddy answered 503. So every run, once the daemon is up
 and before any later role creates a network,
 `/usr/local/libexec/hcw-docker-stale-bridges`
-(`files/hcw-docker-stale-bridges.py`) deletes each Docker-named bridge
-(`br-` and twelve hex digits) that no network on the running daemon owns and
-that has nothing attached. One with an interface still attached is left, and
-the run names it. `tests/hcw-docker-stale-bridges.test.sh` runs it against
-stand-ins for `docker` and `ip` (CI, `ansible-lint (lab-host)`).
+(`files/hcw-docker-stale-bridges.py`) deletes a bridge only by provenance,
+not by name: its network must be recorded in another Docker data root on this
+host (that root's `network/files/local-kv.db`), the running daemon must not
+list it when checked again just before the delete, and nothing may be
+attached. Another program's bridge named like Docker's is in no Docker
+database, and a network the running daemon creates is recorded in its own
+root, so neither can be deleted. One with an interface still attached is
+left, and the run names it. `tests/hcw-docker-stale-bridges.test.sh` runs it
+against stand-ins for `docker` and `ip` and a scratch data root (CI,
+`ansible-lint (lab-host)`).
 
 ## Variables
 
