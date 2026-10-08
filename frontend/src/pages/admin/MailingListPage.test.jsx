@@ -222,6 +222,36 @@ describe('The newsletter tab', () => {
     expect(tabs.map((b) => b.textContent)).toEqual(labels);
   });
 
+  it('opens the issue `?issue=` names on the Newsletter tab, not only on Published (#1014)', async () => {
+    searchParams = 'tab=newsletter&issue=issue-2026-09-08';
+    postJSON.mockResolvedValue(envelope(true, 200, domains([])));
+    getJSON.mockImplementation(async (route) => {
+      if (route === 'cms/newsletters') {
+        return {
+          ok: true,
+          issues: [
+            { id: 'issue-2026-09-01', status: 'draft', etag: 'a' },
+            { id: 'issue-2026-09-08', status: 'draft', etag: 'b' },
+          ],
+        };
+      }
+      const id = route.split('/').pop();
+      return {
+        ok: true,
+        issue: { id, status: 'draft', subject: 'Weekly', sections: [], etag: 'b' },
+        preview: { subject: 'Weekly', html: '<p>body</p>', text: 'body' },
+        readyToSend: true,
+        sendingEnabled: true,
+        missingSettings: [],
+        sendPlan: { sendNow: false, scheduledAt: '2026-09-15T14:00:00.000Z' },
+      };
+    });
+    render(<MailingListPage />);
+    const linked = await screen.findByRole('button', { name: '2026-09-08 Draft' });
+    await waitFor(() => expect(linked).toHaveAttribute('aria-pressed', 'true'));
+    expect(getJSON).toHaveBeenCalledWith('cms/newsletters/issue-2026-09-08');
+  });
+
   it('opens Drafts without a build button or settings', async () => {
     searchParams = 'tab=drafts';
     postJSON.mockResolvedValue(envelope(true, 200, domains([])));

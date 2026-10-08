@@ -12,10 +12,13 @@ import { INITIAL_STATE, issuesReducer, rowsInView } from './issuesModel';
 
 /**
  * @param {'review'|'drafts'} view
+ * @param {string|null} [linkedIssueId] the issue a `?issue=` link names: it
+ *   opens first when it is in this view (the dashboard's Decision Center
+ *   links an issue to the tab it waits on), else the first issue does
  * @returns the state (`rows`, `selectedId`, `detail`, `busy`, `notice`,
  *   `testReadyAt`), `select(id)`, and one function per action.
  */
-export default function useNewsletterIssues(view) {
+export default function useNewsletterIssues(view, linkedIssueId = null) {
   const [state, dispatch] = useReducer(issuesReducer, INITIAL_STATE);
   const { issues, selectedId, detail, busy } = state;
 
@@ -44,13 +47,15 @@ export default function useNewsletterIssues(view) {
   }, [loadList, fail]);
 
   // Keep the selection inside this view: after a keep, an approval or a delete
-  // the open issue leaves it, and the next one (if any) opens instead.
+  // the open issue leaves it, and the next one (if any) opens instead — the
+  // linked issue first, while it is still here.
   useEffect(() => {
     if (busy) return;
     const ids = rowsInView(issues, view).map((row) => row.id);
     if (selectedId && ids.includes(selectedId)) return;
-    queueMicrotask(() => dispatch({ type: 'reselect', id: ids[0] ?? null }));
-  }, [issues, view, selectedId, busy]);
+    const next = linkedIssueId && ids.includes(linkedIssueId) ? linkedIssueId : ids[0];
+    queueMicrotask(() => dispatch({ type: 'reselect', id: next ?? null }));
+  }, [issues, view, selectedId, busy, linkedIssueId]);
 
   useEffect(() => {
     if (!selectedId) return;

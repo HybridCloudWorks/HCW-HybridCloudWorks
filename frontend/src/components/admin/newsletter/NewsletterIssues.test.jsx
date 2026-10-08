@@ -116,6 +116,25 @@ describe('which issues each tab shows', () => {
     expect(screen.queryByRole('button', { name: /2026-09-1[4]/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Scheduled|Sent/ })).not.toBeInTheDocument();
   });
+
+  it('opens the issue a `?issue=` link names when this tab lists it (the Decision Center)', async () => {
+    withIssue({ rows });
+    render(<NewsletterIssues view="review" linkedIssueId="issue-2026-09-01" />);
+    const linked = await screen.findByRole('button', { name: '2026-09-01 Rejected' });
+    await waitFor(() => expect(linked).toHaveAttribute('aria-pressed', 'true'));
+    expect(getJSON).toHaveBeenCalledWith('cms/newsletters/issue-2026-09-01');
+    expect(screen.getByRole('button', { name: '2026-09-14 Draft' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
+  });
+
+  it('opens the first issue as before when the linked one is on another tab', async () => {
+    withIssue({ rows });
+    render(<NewsletterIssues view="drafts" linkedIssueId="issue-2026-09-01" />);
+    const first = await screen.findByRole('button', { name: '2026-09-02 Draft' });
+    await waitFor(() => expect(first).toHaveAttribute('aria-pressed', 'true'));
+  });
 });
 
 describe('the Newsletter (review) tab', () => {

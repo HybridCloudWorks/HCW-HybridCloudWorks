@@ -9,9 +9,9 @@
  * call `refresh()` after a write that moves content.
  *
  * The buckets come from functions/src/lib/triggers/dashboard-stats.js:
- *   needsReview  draft / ingested / inspected        → Review Queue badge
- *   inProgress   everything else not live            → Editor badge
- *   published    Live === true                        → live pages
+ *   needsReview  draft / ingested / inspected / in_review  → Review Queue badge
+ *   inProgress   everything else not live                  → Editor badge
+ *   published    Live === true                              → live pages
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';

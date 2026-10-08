@@ -68,10 +68,14 @@ jobs:
           # LabPanePage.test.jsx holds its states to the launcher's. The rss
           # path is the news feed list the server reads: providerFeeds.test.js
           # holds the frontend's copy to it, and HomePage.hubs.test.jsx holds
-          # each home page hub's feed count to it.
+          # each home page hub's feed count to it. The decision-center and
+          # content-status paths are the Decision Center's links and the review
+          # statuses: itemLinks.test.js holds lib/itemLinks.js, every deep link
+          # and the Frameworks hub's review set to them, and
+          # decisionCenterModel.test.js holds the tabs to the API's categories.
           - name: frontend
             dir: frontend
-            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$|functions/src/lib/(labs/(visitor-report\.js|fixtures/[^/]+\.log)|rss/feeds\.js)$|lab-host/(coder/launcher/launcher\.js|ansible/roles/coder/templates/10-coder\.caddy\.j2)$)'
+            filter: '^(frontend/|\.azure/api-surface\.json|lab-image/(versions\.env|Dockerfile)$|vps-agent/lib/docker-runner\.js$|functions/src/lib/(labs/(visitor-report\.js|fixtures/[^/]+\.log)|rss/feeds\.js|decision-center/(links|items)\.js|cms/content-status\.js)$|lab-host/(coder/launcher/launcher\.js|ansible/roles/coder/templates/10-coder\.caddy\.j2)$)'
             lint: npm run lint
             format: npm run format:check
             build: npm run build
@@ -94,11 +98,13 @@ jobs:
           # last three are the admin provider list and the provider registry
           # it is built from, which docker-cms.test.js holds to
           # normalizeProviderName, and the submission pages, whose provider
-          # lists submissions.test.js holds the API's contract to.
+          # lists submissions.test.js holds the API's contract to. The
+          # dashboard's decisionCenterModel.js is where each Decision Center
+          # source's list lives: decision-center.test.js holds every source to it.
           - name: functions (azure)
             dir: functions
             node-version: '24'
-            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-[a-z0-9-]+\.md$|frontend/src/pages/tools/landingZone/labValidateRules\.js$|frontend/src/pages/tools/explain/ExplainControl\.jsx$|frontend/src/lib/turnstile\.js$|frontend/src/components/admin/platform-settings/settingShared\.jsx$|frontend/src/pages/admin/ImagePromptsPage\.jsx$|frontend/src/lib/api\.js$|frontend/src/config/admin\.js$|frontend/src/lib/providers\.js$|frontend/src/pages/submissions/[A-Za-z]+SubmissionPage\.jsx$)'
+            filter: '^(functions/|\.azure/api-surface\.json|infra/|docs/content/blog-[a-z0-9-]+\.md$|frontend/src/pages/tools/landingZone/labValidateRules\.js$|frontend/src/pages/tools/explain/ExplainControl\.jsx$|frontend/src/lib/turnstile\.js$|frontend/src/components/admin/platform-settings/settingShared\.jsx$|frontend/src/pages/admin/ImagePromptsPage\.jsx$|frontend/src/lib/api\.js$|frontend/src/config/admin\.js$|frontend/src/lib/providers\.js$|frontend/src/pages/submissions/[A-Za-z]+SubmissionPage\.jsx$|frontend/src/components/admin/dashboard/decisionCenterModel\.js$)'
             lint: npm run lint
             test: npm test
           # The out-of-tree entries after infra/ are what

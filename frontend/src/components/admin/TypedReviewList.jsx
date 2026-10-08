@@ -9,9 +9,10 @@
  * own words (`title`, `help`, `nouns`).
  *
  * Statuses are the canonical ones. "Needs review" is draft + ingested +
- * inspected, the same set the queue and the dashboard count, so a draft no
- * longer hides from these hubs; "Ready / Published" is approved, forge_ready
- * and published — the statuses that are actually stored.
+ * inspected + in_review, the same set the queue and the dashboard count
+ * (content-status.js REVIEW_DECISION_STATUSES), so neither a draft nor an
+ * item sent to review hides from these hubs; "Ready / Published" is approved,
+ * forge_ready and published — the statuses that are actually stored.
  */
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -43,7 +44,7 @@ export const TYPED_STATUS_FILTERS = Object.freeze(
 
 /** The `status=` the list route gets for a chip. */
 export function statusParamFor(statusFilter) {
-  return statusFilter === 'needs_review' ? 'draft,ingested,inspected' : statusFilter;
+  return statusFilter === 'needs_review' ? 'draft,ingested,inspected,in_review' : statusFilter;
 }
 
 /** May a row in this filter be approved? Rejected and live rows cannot. */

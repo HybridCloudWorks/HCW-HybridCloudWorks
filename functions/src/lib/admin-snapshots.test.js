@@ -12,6 +12,7 @@ import {
   matchesTaxonomyFilter,
   summarizeDashboardItems,
   queueFilterFor,
+  reviewWaitingSince,
   DASHBOARD_STATS_DOC_ID,
 } from "./admin-snapshots.js";
 
@@ -42,9 +43,15 @@ const makeRequest = (body) => ({
 /** Store fake routing COUNT queries vs projected fetches. */
 function makeStore({ count = 0, rows = [], doc = null } = {}) {
   return {
-    queryDocs: vi.fn(async (_c, query) =>
-      query.includes("VALUE COUNT") ? [count] : rows,
-    ),
+    queryDocs: vi.fn(async (_c, query) => {
+      if (query.includes("VALUE COUNT")) return [count];
+      // The two windows of a view read in its own order are disjoint in
+      // Cosmos: the rows with the sort field, and the rows without it.
+      const window = query.match(/(NOT )?IS_DEFINED\(c\.(\w+)\)/);
+      if (!window) return rows;
+      const [, without, field] = window;
+      return rows.filter((row) => (row[field] !== undefined) === !without);
+    }),
     readDoc: vi.fn(async () => doc),
     upsertDoc: vi.fn(async (_c, d) => d),
   };
@@ -129,11 +136,47 @@ describe("classification helpers", () => {
     expect(stats.news.total).toBe(0);
   });
 
+  it("counts in_review as a decision waiting, not as the Editor's work (#1014)", () => {
+    const stats = summarizeDashboardItems([
+      { type: "blog", contentStatus: "in_review" },
+      { type: "blog", contentStatus: "approved" },
+    ]);
+    expect(stats.blog).toMatchObject({ needsReview: 1, inProgress: 1 });
+    expect(matchesQueueStatus({ contentStatus: "in_review" }, "needs_review")).toBe(true);
+    expect(matchesQueueStatus({ contentStatus: "in_review" }, "in_progress")).toBe(false);
+  });
+
+  it("orders review items by when each started waiting: sent to review, else arrived", () => {
+    expect(
+      reviewWaitingSince({
+        contentStatus: "in_review",
+        sentToReviewAt: "2026-08-06T00:00:00.000Z",
+        "Created At": "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe("2026-08-06T00:00:00.000Z");
+    // A Drafts article has no fetchedAt; it falls back rather than sorting last.
+    expect(
+      reviewWaitingSince({ contentStatus: "draft", "Created At": "2026-02-02T00:00:00.000Z" }),
+    ).toBe("2026-02-02T00:00:00.000Z");
+    // sentToReviewAt only speaks for an item still in review.
+    expect(
+      reviewWaitingSince({
+        contentStatus: "ingested",
+        sentToReviewAt: "2026-08-06T00:00:00.000Z",
+        fetchedAt: "2026-03-03T00:00:00.000Z",
+      }),
+    ).toBe("2026-03-03T00:00:00.000Z");
+    expect(reviewWaitingSince({})).toBeNull();
+  });
+
   it("queueFilterFor maps each filter to the source query shape", () => {
     expect(queueFilterFor("needs_review")).toMatchObject({
       sortField: "fetchedAt",
       params: [
-        { name: "@statuses", value: ["draft", "ingested", "inspected"] },
+        {
+          name: "@statuses",
+          value: ["draft", "ingested", "inspected", "in_review"],
+        },
       ],
     });
     expect(queueFilterFor("published_live")).toMatchObject({
@@ -168,13 +211,7 @@ describe("classification helpers", () => {
       params: [
         {
           name: "@statuses",
-          value: [
-            "approved",
-            "in_review",
-            "editing",
-            "forge_ready",
-            "needs_rework",
-          ],
+          value: ["approved", "editing", "forge_ready", "needs_rework"],
         },
       ],
       sortField: "updatedAt",
@@ -193,6 +230,7 @@ describe("classification helpers", () => {
       "draft",
       "ingested",
       "inspected",
+      "in_review",
     ]);
   });
 });
@@ -270,6 +308,62 @@ describe("getQueueSnapshot", () => {
     expect(fetchCall[1]).toContain(
       "ARRAY_CONTAINS(@statuses, c.contentStatus)",
     );
+    // The window is the newest written, not an arbitrary TOP n (#1013).
+    expect(fetchCall[1]).toMatch(/ ORDER BY c\._ts DESC$/);
+  });
+
+  it("reads every other view in its own sort field's order, with the rows that lack it after (review of #1021)", async () => {
+    const rows = [
+      // Rewritten lately for another reason: newest written, but published long ago.
+      { id: "rewritten", Live: true, publishedAt: "2026-01-01T00:00:00Z", _ts: 1_790_000_000 },
+      { id: "just-published", Live: true, publishedAt: "2026-08-06T00:00:00Z", _ts: 1_780_000_000 },
+      { id: "no-date", Live: true, _ts: 1_785_000_000 },
+    ];
+    const store = makeStore({ count: 3, rows });
+    const h = createAdminSnapshotHandlers({ guard: allowGuard(), store, ...fixed });
+    const body = JSON.parse(
+      (await h.getQueueSnapshot(makeRequest({ statusFilter: "published_live", itemLimit: 10 }), context)).body,
+    );
+    expect(body.items.map((i) => i.id)).toEqual(["just-published", "rewritten", "no-date"]);
+    const windows = store.queryDocs.mock.calls.map(([, q]) => q).filter((q) => !q.includes("VALUE COUNT"));
+    expect(windows).toHaveLength(2);
+    expect(windows[0]).toMatch(/AND IS_DEFINED\(c\.publishedAt\) ORDER BY c\.publishedAt DESC$/);
+    expect(windows[1]).toMatch(/AND NOT IS_DEFINED\(c\.publishedAt\) ORDER BY c\._ts DESC$/);
+    for (const window of windows) expect(window).toMatch(/^SELECT TOP 10 /);
+  });
+
+  it("puts an article sent from Drafts where its wait says, not at the bottom", async () => {
+    const rows = [
+      {
+        id: "feed-old",
+        contentStatus: "ingested",
+        fetchedAt: "2026-08-01T00:00:00Z",
+      },
+      {
+        id: "sent-from-drafts",
+        contentStatus: "in_review",
+        "Created At": "2026-07-01T00:00:00Z",
+        sentToReviewAt: "2026-08-06T00:00:00Z",
+      },
+      {
+        id: "feed-new",
+        contentStatus: "inspected",
+        fetchedAt: "2026-08-05T00:00:00Z",
+      },
+    ];
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard(),
+      store: makeStore({ count: 3, rows }),
+      ...fixed,
+    });
+    const body = JSON.parse(
+      (await h.getQueueSnapshot(makeRequest({}), context)).body,
+    );
+    expect(body.items.map((i) => i.id)).toEqual([
+      "sent-from-drafts",
+      "feed-new",
+      "feed-old",
+    ]);
   });
 
   it("filters by kind and idea origin on the resolved value, with a wider fetch window (ADR 0033 §4)", async () => {
@@ -439,14 +533,57 @@ describe("getAdminDashboardSnapshot", () => {
     expect(seeded.blog.needsReview).toBe(1);
     expect(body.recentNeedsReview.map((i) => i.id)).toEqual(["a"]);
   });
+
+  it("reads the newest review items from an ordered window, in_review included (#1013)", async () => {
+    const store = makeStore({
+      doc: { id: DASHBOARD_STATS_DOC_ID },
+      rows: [
+        { id: "old", contentStatus: "ingested", fetchedAt: "2026-01-01T00:00:00Z" },
+        {
+          id: "sent",
+          contentStatus: "in_review",
+          sentToReviewAt: "2026-08-01T00:00:00Z",
+        },
+      ],
+    });
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard(),
+      store,
+      ...fixed,
+    });
+    const body = JSON.parse(
+      (await h.getAdminDashboardSnapshot(makeRequest({}), context)).body,
+    );
+    expect(body.recentNeedsReview.map((i) => i.id)).toEqual(["sent", "old"]);
+    const [, query, params] = store.queryDocs.mock.calls[0];
+    expect(query).toMatch(/^SELECT TOP 30 .* ORDER BY c\._ts DESC$/);
+    expect(params[0].value).toContain("in_review");
+  });
 });
 
 describe("recalculateDashboardStats", () => {
+  /** The scan answers `content`; the marker read answers its own container. */
+  function recountStore({ rows, markers = [] }) {
+    return {
+      queryDocs: vi.fn(async (container) =>
+        container === "content_stats_markers" ? markers : rows,
+      ),
+      readDoc: vi.fn(async () => null),
+      upsertDoc: vi.fn(async (_c, d) => d),
+      createDoc: vi.fn(async (_c, d) => d),
+      replaceDocIfMatch: vi.fn(async (_c, d) => d),
+    };
+  }
+
   it("requires editor, scans, and fully overwrites the stats doc", async () => {
-    const store = makeStore({
+    const store = recountStore({
       rows: [
         { id: "a", contentStatus: "published", Live: true, type: "framework" },
         { id: "b", contentStatus: "rejected", type: "blog" },
+      ],
+      markers: [
+        { id: "a", bucket: "published", type: "framework", _etag: "1" },
+        { id: "b", bucket: "rejected", type: "blog", _etag: "2" },
       ],
     });
     const h = createAdminSnapshotHandlers({
@@ -459,14 +596,120 @@ describe("recalculateDashboardStats", () => {
     expect(body.totalDocs).toBe(2);
     expect(body.stats.framework.published).toBe(1);
     expect(body.stats.rejected).toBe(1);
+    expect(body.markers).toEqual({
+      checked: 2,
+      created: 0,
+      rewritten: 0,
+      skipped: 0,
+    });
 
-    const doc = store.upsertDoc.mock.calls[0][1];
+    // No counters document yet: created, so one made meanwhile is a conflict, not overwritten.
+    const doc = store.createDoc.mock.calls.find(([c]) => c === "system")[1];
     expect(doc).toMatchObject({
       id: DASHBOARD_STATS_DOC_ID,
       totalDocs: 2,
       recalculatedAt: "2026-08-07T03:00:00.000Z",
       recalculatedBy: "admin@hcw.dev",
     });
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(body.attempts).toBe(1);
+  });
+
+  describe("a run the change feed overtakes starts again (review of #1021)", () => {
+    const stale = () => Object.assign(new Error("changed since read"), { code: 412 });
+    const counters = { id: DASHBOARD_STATS_DOC_ID, _etag: "v1", rejected: 0 };
+    const rows = [{ id: "a", contentStatus: "ingested", type: "blog" }];
+    const markers = [{ id: "a", bucket: "needsReview", type: "blog", _etag: "m1" }];
+    const handlersOver = (store) =>
+      createAdminSnapshotHandlers({ guard: allowGuard("editor"), store, ...fixed });
+
+    it("writes the counters only under the ETag they had before the scan", async () => {
+      const store = recountStore({ rows, markers });
+      store.readDoc.mockResolvedValue(counters);
+      const res = await handlersOver(store).recalculateDashboardStats(makeRequest({}), context);
+      expect(res.status).toBe(200);
+      expect(store.replaceDocIfMatch).toHaveBeenCalledWith(
+        "system",
+        expect.objectContaining({ id: DASHBOARD_STATS_DOC_ID, _etag: "v1", totalDocs: 1 }),
+      );
+    });
+
+    it("scans again when the feed wrote the counters during the run", async () => {
+      const store = recountStore({ rows, markers });
+      store.readDoc.mockResolvedValue(counters);
+      store.replaceDocIfMatch.mockRejectedValueOnce(stale());
+      const res = await handlersOver(store).recalculateDashboardStats(makeRequest({}), context);
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body).attempts).toBe(2);
+      const scans = store.queryDocs.mock.calls.filter(([c]) => c === "content");
+      expect(scans).toHaveLength(2);
+    });
+
+    it("scans again when the feed moved a marker after the scan read it, and writes nothing from that run", async () => {
+      const moved = [{ id: "a", bucket: "inProgress", type: "blog", _etag: "m1" }];
+      const store = recountStore({ rows, markers: moved });
+      store.readDoc.mockResolvedValue(counters);
+      // The marker rewrite loses to the feed once; the counters write is never reached on that run.
+      store.replaceDocIfMatch.mockRejectedValueOnce(stale());
+      const res = await handlersOver(store).recalculateDashboardStats(makeRequest({}), context);
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body).attempts).toBe(2);
+      const systemWrites = store.replaceDocIfMatch.mock.calls.filter(([c]) => c === "system");
+      expect(systemWrites).toHaveLength(1);
+    });
+
+    it("gives up after three overtaken runs, says so, and leaves the counters as they were", async () => {
+      const store = recountStore({ rows, markers });
+      store.readDoc.mockResolvedValue(counters);
+      store.replaceDocIfMatch.mockImplementation(async (container, doc) => {
+        if (container === "system") throw stale();
+        return doc;
+      });
+      const res = await handlersOver(store).recalculateDashboardStats(makeRequest({}), context);
+      expect(res.status).toBe(409);
+      expect(JSON.parse(res.body).message).toMatch(/Press Recount again/);
+      expect(store.queryDocs.mock.calls.filter(([c]) => c === "content")).toHaveLength(3);
+    });
+  });
+
+  it("re-derives the markers too, so in_review moves out of inProgress for good (#1014)", async () => {
+    const store = recountStore({
+      rows: [{ id: "sent", contentStatus: "in_review", type: "blog" }],
+      markers: [{ id: "sent", bucket: "inProgress", type: "blog", _etag: "1" }],
+    });
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard("editor"),
+      store,
+      ...fixed,
+    });
+    const body = JSON.parse(
+      (await h.recalculateDashboardStats(makeRequest({}), context)).body,
+    );
+    expect(body.stats.blog).toMatchObject({ needsReview: 1, inProgress: 0 });
+    expect(body.markers.rewritten).toBe(1);
+    expect(store.replaceDocIfMatch).toHaveBeenCalledWith(
+      "content_stats_markers",
+      expect.objectContaining({ id: "sent", bucket: "needsReview", _etag: "1" }),
+    );
+  });
+
+  it("leaves the counters as they were when a marker write fails, so Recount can be pressed again", async () => {
+    const store = recountStore({
+      rows: [{ id: "x", contentStatus: "ingested", type: "blog" }],
+    });
+    store.createDoc.mockRejectedValueOnce(
+      Object.assign(new Error("throttled"), { code: 429 }),
+    );
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard("editor"),
+      store,
+      ...fixed,
+    });
+    const res = await h.recalculateDashboardStats(makeRequest({}), context);
+    expect(res.status).toBe(500);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.createDoc.mock.calls.some(([c]) => c === "system")).toBe(false);
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
   });
 
   it("denies non-editors without scanning", async () => {

@@ -40,6 +40,20 @@ import { normalizeCurrentStatusForBlogOnly } from './content-update-validation.j
 export const DRAFTS_STAGE_STATUS = 'drafting';
 export const DRAFTS_ONLY_STATUSES = Object.freeze([DRAFTS_STAGE_STATUS]);
 
+/**
+ * The statuses that wait on a reviewer's decision: the Review Queue's default
+ * view, the dashboard's `needsReview` counter, and the Decision Center's
+ * review queue (#1013, #1014) all read this one list.
+ *
+ * `in_review` joined it on 2026-10-08. Drafts' Send to In Review and the
+ * repository import both write it, and until then it was counted on the
+ * Editor badge while the Editor list (editing, approved, forge_ready,
+ * needs_rework) could not show it and the Review Queue's default view did
+ * not list it: an article sent for review appeared on no "decide this"
+ * surface at all.
+ */
+export const REVIEW_DECISION_STATUSES = Object.freeze(['draft', 'ingested', 'inspected', 'in_review']);
+
 export const VALID_TRANSITIONS = {
   drafting: ['in_review'],
   draft: ['ingested', 'in_review', 'approved', 'published', 'rejected'],
