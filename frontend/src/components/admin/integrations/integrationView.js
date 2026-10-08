@@ -11,7 +11,7 @@
  *   sortByStatus          broken and not-configured first
  */
 
-import { SYSTEM_STATUS } from '@/lib/status';
+import { SYSTEM_STATUS, classifyFailure } from '@/lib/status';
 import { SERVICES, SERVICE_GROUPS } from './serviceRegistry';
 
 // ── Joining the two halves ────────────────────────────────────────────────────
@@ -168,12 +168,16 @@ export function buildKeyGroups({
 export const SERVICE_STATUS = Object.freeze({
   // `badge` is what StatusBadge renders: the shared vocabulary of
   // lib/status.js (ADR 0033 §2), so this page's words are the Health page's.
-  broken: { rank: 0, label: 'Unavailable', tone: 'failing', badge: SYSTEM_STATUS.unavailable },
+  // A refused key or a failing test answered and said no: critical. A test
+  // that could not reach the service at all: offline (lib/status.js
+  // classifyFailure). Both rank first; a missing key is next.
+  broken: { rank: 0, label: 'Critical', tone: 'failing', badge: SYSTEM_STATUS.critical },
+  offline: { rank: 0, label: 'Offline', tone: 'failing', badge: SYSTEM_STATUS.offline },
   'not-configured': {
     rank: 1,
-    label: 'Misconfigured',
+    label: 'Critical',
     tone: 'never',
-    badge: SYSTEM_STATUS.misconfigured,
+    badge: SYSTEM_STATUS.critical,
   },
   pending: { rank: 2, label: 'Degraded', tone: 'pending', badge: SYSTEM_STATUS.degraded },
   untested: { rank: 3, label: 'Unknown', tone: null, badge: SYSTEM_STATUS.unknown },
@@ -192,16 +196,15 @@ export const SERVICE_STATUS = Object.freeze({
 });
 
 /**
- * The shared status for one test result (`{ ok, message }`): a refusal that
- * says the service is not configured is misconfigured, any other failure is
- * unavailable, a pass is healthy, nothing yet is unknown.
+ * The shared status for one test result (`{ ok, message }`): a pass is
+ * healthy, nothing yet is unknown, and a failure is critical or offline by
+ * the one rule in lib/status.js — a missing setting or a refusal is
+ * critical, a service that could not be reached is offline.
  */
 export function resultStatus(result) {
   if (!result) return SYSTEM_STATUS.unknown;
   if (result.ok) return SYSTEM_STATUS.healthy;
-  return /not configured|is not set/i.test(String(result.message ?? ''))
-    ? SYSTEM_STATUS.misconfigured
-    : SYSTEM_STATUS.unavailable;
+  return SYSTEM_STATUS[classifyFailure(result.message)];
 }
 
 /**
@@ -215,7 +218,9 @@ export function resultStatus(result) {
  */
 export function serviceStatus(card, result) {
   const states = (card.items ?? []).map((item) => item.state);
-  if (result?.ok === false) return 'broken';
+  if (result?.ok === false) {
+    return classifyFailure(result.message) === 'offline' ? 'offline' : 'broken';
+  }
   if (states.includes('failing')) return 'broken';
   if (states.includes('never')) return 'not-configured';
   if (states.includes('pending')) return 'pending';

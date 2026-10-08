@@ -3943,6 +3943,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The Health Hub keeps its results, has a pulse, and shows every status in
+  one place, in one model (#1010, #1011).** Until now the hub forgot every
+  verdict on sign-out or in a new tab (live results lived in one tab's
+  sessionStorage, the rest in React state), nothing checked anything unless
+  someone pressed a button, and the status badge wrapped under the
+  description on every probe card but "Publishing failures".
+  - One model, written once in `lib/status.js`: Healthy, Degraded, Critical
+    (it answered but said no: a missing setting, a refused key, a failing
+    check), Offline (it could not be reached, or missed three heartbeats) and
+    Unknown (never checked, or past its freshness window). `misconfigured`
+    and `unavailable` are read as Critical and Offline, so stored results
+    and older callers keep working. Offline has its own dark badge with an
+    unplugged icon. The freshness windows are 15 minutes for the pulse and
+    the snapshot, a day for live and session checks, 90 minutes for the
+    session token. The server keeps a copy for the pulse;
+    `statusParity.test.js` fails if the two disagree on any id, window,
+    classification or verdict.
+  - Every probe result is stored server-side, one `admin_config` document per
+    probe (`GET`/`PUT cms/health/probe-results`, viewer to read, the probe's
+    own role to write, ETag-guarded with status transitions). The page reads
+    it on load and every minute while visible, shows each card's age and who
+    checked it, and shows a stale result as Unknown beside its last value.
+  - `healthPulse`, a new timer every five minutes, records what the server
+    can check alone (Cosmos, runtime configuration, Key Vault references,
+    storage, scheduled publishing, publishing failures, queue age, orphaned
+    images, links, the forge, Telegram notices, lab agent heartbeats, the AI
+    providers' and MCP servers' last recorded tests) and its own heartbeat.
+    The pulse line above the tabs says when it last beat. While it is late
+    the hub is Offline; until it first beats, Unknown. It is off until
+    `HEALTH_PULSE` is added to the `enabled_timers` workspace variable.
+  - Every Health card has the same header, body and footer, with the status
+    top-right in a slot that cannot wrap or shrink, including the Overview
+    and Alerts cards. Cards in a row are the same height.
+  - `digest.publishingOps` had three readers and no writer. The scheduled
+    publisher now records every run there, so the Overview, the Telegram
+    `/digest` and the Scheduled publishing probe see real runs, and three
+    missed 15-minute runs read as Offline. `mergeDigest` is ETag-guarded,
+    so timers merging the same day's digest in the same second no longer
+    erase each other's blocks.
 - **The admin dashboard's pipeline fits its card with six stages of one
   size, the Publish stage shows its count, and every number on the page
   opens what it counts.**

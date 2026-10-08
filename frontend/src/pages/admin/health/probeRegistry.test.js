@@ -36,6 +36,8 @@ import {
   resolveProbe,
   runAiProviders,
   runLabAgents,
+  runMcpServers,
+  mcpServersVerdict,
   runNewsletterBuild,
   runUnresolvedSecrets,
   safeProbes,
@@ -98,11 +100,13 @@ describe('the registry', () => {
 });
 
 describe('classifyFailure', () => {
-  it('calls a missing key misconfigured and anything else unavailable', () => {
-    expect(classifyFailure('Resend is not configured: RESEND_API_KEY is not set')).toBe(
-      'misconfigured'
+  it('calls a missing key or a refusal critical, and a service that did not answer offline', () => {
+    expect(classifyFailure('Resend is not configured: RESEND_API_KEY is not set')).toBe('critical');
+    expect(classifyFailure('Publer answered 403 - Forbidden')).toBe('critical');
+    expect(classifyFailure('Failed to fetch')).toBe('offline');
+    expect(classifyFailure(Object.assign(new Error('Bad gateway'), { status: 502 }))).toBe(
+      'offline'
     );
-    expect(classifyFailure('Publer answered 403 - Forbidden')).toBe('unavailable');
   });
 });
 
@@ -159,7 +163,7 @@ describe('snapshot evaluators', () => {
         },
       })
     ).toMatchObject({
-      status: 'misconfigured',
+      status: 'critical',
       summary: expect.stringContaining('PUBLER_API_KEY'),
     });
     expect(
@@ -167,11 +171,13 @@ describe('snapshot evaluators', () => {
         ...ctx,
         snapshot: { readiness: { ...snapshot.readiness, configGeneration: 'unset' } },
       })
-    ).toMatchObject({ status: 'unavailable' });
+    ).toMatchObject({ status: 'critical' });
   });
 
-  it('judges the scheduler by its status and the watchdog’s overdue count', () => {
-    expect(evaluateScheduledPublishing(ctx).status).toBe('healthy');
+  it('judges the scheduler by its heartbeat, its status and the watchdog’s overdue count', () => {
+    // Ten minutes after the last run: inside the three missed 15-minute runs.
+    const now = Date.parse('2026-10-03T11:10:00.000Z');
+    expect(evaluateScheduledPublishing(ctx, now).status).toBe('healthy');
     const degraded = {
       ...snapshot,
       digest: {
@@ -179,14 +185,30 @@ describe('snapshot evaluators', () => {
         publishingOps: { ...snapshot.digest.publishingOps, status: 'degraded' },
       },
     };
-    expect(evaluateScheduledPublishing({ ...ctx, snapshot: degraded }).status).toBe('degraded');
+    expect(evaluateScheduledPublishing({ ...ctx, snapshot: degraded }, now).status).toBe(
+      'degraded'
+    );
+    const failed = {
+      ...snapshot,
+      digest: {
+        ...snapshot.digest,
+        publishingOps: { ...snapshot.digest.publishingOps, status: 'failed' },
+      },
+    };
+    expect(evaluateScheduledPublishing({ ...ctx, snapshot: failed }, now).status).toBe('critical');
+    // Every run is recorded (#1010), so three missed runs mean it stopped.
+    const late = Date.parse('2026-10-03T11:46:00.000Z');
+    expect(evaluateScheduledPublishing(ctx, late)).toMatchObject({
+      status: 'offline',
+      summary: expect.stringContaining('missed its 15-minute runs'),
+    });
     const idle = { ...snapshot, digest: { publishingWatchdog: { overdueScheduledCount: 0 } } };
-    expect(evaluateScheduledPublishing({ ...ctx, snapshot: idle })).toMatchObject({
+    expect(evaluateScheduledPublishing({ ...ctx, snapshot: idle }, now)).toMatchObject({
       status: 'unknown',
-      summary: expect.stringContaining('Idle'),
+      summary: expect.stringContaining('No scheduler run is recorded'),
     });
     const overdue = { ...snapshot, digest: { publishingWatchdog: { overdueScheduledCount: 3 } } };
-    expect(evaluateScheduledPublishing({ ...ctx, snapshot: overdue }).status).toBe('degraded');
+    expect(evaluateScheduledPublishing({ ...ctx, snapshot: overdue }, now).status).toBe('degraded');
   });
 
   it('shows the two blocks that were returned and never rendered: link rot and Telegram notices', () => {
@@ -208,17 +230,26 @@ describe('snapshot evaluators', () => {
     ).toBe('unknown');
   });
 
-  it('calls Cosmos unavailable when the snapshot read failed, and unknown while it loads', () => {
+  it('calls Cosmos offline when the snapshot did not answer, and has no result while it loads', () => {
     expect(evaluateCosmos(ctx).status).toBe('healthy');
     expect(
-      evaluateCosmos({ snapshot: null, ops: { loaded: false, error: 'HTTP 503' } })
+      evaluateCosmos({
+        snapshot: null,
+        ops: { loaded: false, error: 'Snapshot refused: HTTP 503' },
+      })
     ).toMatchObject({
-      status: 'unavailable',
+      status: 'offline',
       summary: expect.stringContaining('HTTP 503'),
     });
-    expect(evaluateCosmos({ snapshot: null, ops: { loaded: false, error: '' } }).status).toBe(
-      'unknown'
-    );
+    expect(
+      evaluateCosmos({ snapshot: null, ops: { loaded: false, error: 'Admin access required' } })
+        .status
+    ).toBe('critical');
+    // Still loading is not evidence: no time, so a stored result shows instead.
+    expect(evaluateCosmos({ snapshot: null, ops: { loaded: false, error: '' } })).toMatchObject({
+      status: 'unknown',
+      checkedAt: null,
+    });
   });
 });
 
@@ -255,9 +286,9 @@ describe('live runners', () => {
     expect(postJSON).not.toHaveBeenCalledWith('testAiProvider', { providerId: 'nvidia' });
   });
 
-  it('calls no enabled provider misconfigured and all answering healthy', async () => {
+  it('calls no enabled provider critical and all answering healthy', async () => {
     getJSON.mockResolvedValueOnce({ items: [{ id: 'gemini', enabled: false }] });
-    expect((await runAiProviders()).status).toBe('misconfigured');
+    expect((await runAiProviders()).status).toBe('critical');
     getJSON.mockResolvedValueOnce({ items: [{ id: 'gemini', enabled: true }] });
     postJSON.mockResolvedValue({ status: 'connected', latencyMs: 500 });
     expect((await runAiProviders()).status).toBe('healthy');
@@ -310,7 +341,7 @@ describe('live runners', () => {
         snapshot: { readiness: { unresolvedSecrets: ['A_KEY', 'B_KEY'] } },
       })
     ).toMatchObject({
-      status: 'misconfigured',
+      status: 'critical',
       summary: '2 Key Vault references did not resolve: A_KEY, B_KEY.',
     });
     expect(getJSON).toHaveBeenCalledWith('health');
@@ -325,9 +356,143 @@ describe('the report section', () => {
         : { status: 'unknown', summary: 'Not tested yet.', checkedAt: null }
     );
     expect(lines[0]).toBe('### Probe registry');
+    expect(lines[2]).toBe('- Pulse: Unknown — it has never reported.');
     expect(lines).toContain('#### Amplify');
-    expect(lines).toContain('- Publer: Healthy (2026-10-03T12:00:00.000Z) — Connected.');
+    expect(lines).toContain(
+      '- Publer: Healthy (2026-10-03T12:00:00.000Z, by this session) — Connected.'
+    );
     expect(lines).toContain(`- Cosmos DB: ${SYSTEM_STATUS.unknown.label} — Not tested yet.`);
     expect(lines.join('\n')).not.toMatch(/PASS|FAIL|UNKNOWN/);
+  });
+});
+
+describe('stored results and staleness (#1011)', () => {
+  const NOW = Date.parse('2026-10-08T12:00:00.000Z');
+  const minutesAgo = (n) => new Date(NOW - n * 60 * 1000).toISOString();
+
+  it('shows the newer of this tab’s result and the stored one, and never lets "not run" hide a result', () => {
+    const stored = {
+      publer: { status: 'critical', summary: 'Refused.', checkedAt: minutesAgo(30), stored: true },
+    };
+    // Nothing run here: the stored result shows, with its time.
+    expect(resolveProbe(byId('publer'), {}, {}, stored, NOW)).toMatchObject({
+      status: 'critical',
+      summary: 'Refused.',
+      checkedAt: minutesAgo(30),
+    });
+    // A newer run here wins.
+    const live = { publer: { status: 'healthy', summary: 'Connected.', checkedAt: minutesAgo(1) } };
+    expect(resolveProbe(byId('publer'), {}, live, stored, NOW).status).toBe('healthy');
+    // A smoke test not run in this session says so with no time: the stored run shows.
+    const smokeStored = {
+      'rss-fetch': { status: 'healthy', summary: 'RSS fetch complete.', checkedAt: minutesAgo(60) },
+    };
+    expect(resolveProbe(byId('rss-fetch'), { smoke: {} }, {}, smokeStored, NOW)).toMatchObject({
+      status: 'healthy',
+      summary: 'RSS fetch complete.',
+    });
+  });
+
+  it('shows a result past its window as Unknown, with its last value and time', () => {
+    const stored = {
+      cosmos: {
+        status: 'healthy',
+        summary: 'Cosmos DB answered the ten-query ops snapshot.',
+        checkedAt: minutesAgo(40),
+        checkedBy: 'pulse',
+        stored: true,
+      },
+    };
+    const loading = { snapshot: null, ops: { loaded: false, error: '' } };
+    expect(resolveProbe(byId('cosmos'), loading, {}, stored, NOW)).toMatchObject({
+      status: 'unknown',
+      stale: true,
+      lastStatus: 'healthy',
+      checkedAt: minutesAgo(40),
+      checkedBy: 'pulse',
+    });
+    // A live result keeps a day.
+    const publer = { publer: { status: 'healthy', summary: 'ok', checkedAt: minutesAgo(23 * 60) } };
+    expect(resolveProbe(byId('publer'), {}, {}, publer, NOW).stale).toBe(false);
+    const older = { publer: { status: 'healthy', summary: 'ok', checkedAt: minutesAgo(25 * 60) } };
+    expect(resolveProbe(byId('publer'), {}, {}, older, NOW).status).toBe('unknown');
+  });
+
+  it('gives the session-token checks the life of a token, not a day', () => {
+    const stored = {
+      'identity-token': {
+        status: 'healthy',
+        summary: 'every comparison holds',
+        checkedAt: minutesAgo(100),
+      },
+    };
+    expect(resolveProbe(byId('identity-token'), {}, {}, stored, NOW)).toMatchObject({
+      status: 'unknown',
+      stale: true,
+    });
+  });
+
+  it('says in the report that a result is stale, who checked it, and how the pulse is', () => {
+    const lines = probeReportLines(
+      PROBES,
+      (probe) =>
+        probe.id === 'cosmos'
+          ? {
+              status: 'unknown',
+              stale: true,
+              lastStatus: 'healthy',
+              windowMs: 15 * 60 * 1000,
+              summary: 'Cosmos DB answered.',
+              checkedAt: minutesAgo(40),
+              checkedBy: 'pulse',
+            }
+          : { status: 'unknown', summary: 'Not tested yet.', checkedAt: null },
+      { pulse: { lastBeatAt: minutesAgo(3), intervalMs: 300000 }, now: NOW }
+    );
+    expect(lines[2]).toBe(
+      `- Pulse: Healthy — every 5 min, last beat ${minutesAgo(3)} (3 min ago).`
+    );
+    expect(lines).toContain(
+      `- Cosmos DB: Unknown (stale: last Healthy, older than its 15 min window) (${minutesAgo(40)}, by the pulse) — Cosmos DB answered.`
+    );
+  });
+});
+
+describe('the heartbeat and sync runners', () => {
+  beforeEach(() => {
+    getJSON.mockReset();
+    postJSON.mockReset();
+  });
+
+  it('calls the lab offline when no agent has beaten within its window', async () => {
+    postJSON.mockResolvedValueOnce({
+      agents: [{ agentId: 'a', online: false, lastSeenAt: '2026-10-01T00:00:00.000Z' }],
+    });
+    expect(await runLabAgents()).toMatchObject({
+      status: 'offline',
+      summary: expect.stringContaining('All 1 agents are offline'),
+    });
+  });
+
+  it('reads the MCP servers’ last syncs, counting only those switched on', async () => {
+    getJSON.mockResolvedValueOnce({
+      items: [
+        { id: 'plaud', enabled: true, status: 'connected', lastTested: '2026-10-08T11:00:00.000Z' },
+        { id: 'docs', enabled: true, status: 'error', lastError: 'MCP server returned HTTP 401' },
+        { id: 'old', enabled: false, status: 'error' },
+      ],
+    });
+    const r = await runMcpServers();
+    expect(r).toMatchObject({
+      status: 'degraded',
+      summary: expect.stringContaining('1 of 2 enabled MCP servers answered'),
+    });
+    expect(r.detail).toBe('plaud: connected\ndocs: MCP server returned HTTP 401');
+    expect(getJSON).toHaveBeenCalledWith('cms/config/mcp-servers');
+    expect(
+      mcpServersVerdict([{ id: 'docs', enabled: true, status: 'error', lastError: 'timed out' }])
+        .status
+    ).toBe('offline');
+    expect(mcpServersVerdict([]).status).toBe('unknown');
   });
 });

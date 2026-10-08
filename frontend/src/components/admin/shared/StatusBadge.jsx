@@ -7,7 +7,14 @@
  * item (`contentStatusInfo`), or any `{ label, tone, help }`.
  */
 import React from 'react';
-import { AlertTriangle, CheckCircle2, CircleDashed, CircleOff, XCircle } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleDashed,
+  CircleOff,
+  Unplug,
+  XCircle,
+} from 'lucide-react';
 import { contentStatusInfo, toSystemStatus } from '@/lib/status';
 
 const TONES = {
@@ -25,6 +32,14 @@ const TONES = {
     className:
       'border-rose-300 bg-rose-50 text-rose-800 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300',
     Icon: XCircle,
+  },
+  // Offline: a solid dark chip with an unplugged icon, so it reads apart from
+  // Critical's rose at a glance and without colour. Critical answered and
+  // said no; offline did not answer at all, and the fix is a different one.
+  down: {
+    className:
+      'border-zinc-600 bg-zinc-700 text-zinc-50 dark:border-zinc-300 dark:bg-zinc-200 dark:text-zinc-900',
+    Icon: Unplug,
   },
   off: {
     className: 'border-border bg-muted text-muted-foreground',
@@ -56,7 +71,7 @@ export default function StatusBadge({
   const sizing = size === 'xs' ? 'px-1.5 py-0 text-[10px] gap-1' : 'px-2 py-0.5 text-xs gap-1.5';
   return (
     <span
-      className={`inline-flex items-center rounded-full border font-medium whitespace-nowrap ${sizing} ${tone.className} ${className}`}
+      className={`inline-flex items-center rounded-full border font-medium whitespace-nowrap transition-colors duration-300 motion-reduce:transition-none ${sizing} ${tone.className} ${className}`}
       title={info.help || undefined}
       data-status={info.id}
     >

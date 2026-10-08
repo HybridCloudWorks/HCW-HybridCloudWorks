@@ -159,7 +159,7 @@ describe('the concept statuses (ADR 0033)', () => {
   it('reads the fleet in the shared vocabulary', () => {
     expect(fleetStatusWord(fleetState([online('a1')], NOW))).toBe('healthy');
     expect(fleetStatusWord(fleetState([stale('a1')], NOW))).toBe('degraded');
-    expect(fleetStatusWord(fleetState([], NOW))).toBe('unavailable');
+    expect(fleetStatusWord(fleetState([], NOW))).toBe('offline');
   });
 
   it('says an available lab is listed and a held one since when, and why', () => {

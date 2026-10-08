@@ -207,7 +207,7 @@ function ConnectionCard({ onStatusChange }) {
 function connectionStatus(connected) {
   if (connected === 'checking') return { system: 'unknown', text: 'Checking Resend…' };
   if (connected) return { system: 'healthy', text: 'Resend connected' };
-  return { system: 'unavailable', text: 'Resend not reachable — test it on Settings' };
+  return { system: 'offline', text: 'Resend not reachable — test it on Settings' };
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────

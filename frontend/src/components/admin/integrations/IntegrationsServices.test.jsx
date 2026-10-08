@@ -153,7 +153,7 @@ describe('the Cloud pricing cache card (#613)', () => {
     await waitFor(() =>
       expect(within(card).getByText(/Stale: last refreshed 26 hours ago/)).toBeTruthy()
     );
-    expect(within(card).getByText('Unavailable')).toBeTruthy();
+    expect(within(card).getByText('Critical')).toBeTruthy();
   });
 });
 
@@ -211,7 +211,7 @@ describe('the service cards', () => {
 
     await waitFor(() => expect(screen.getByText(/restricted to only send emails/)).toBeTruthy());
     expect(screen.queryByText(/sending domain\(s\)/)).toBeNull();
-    expect(within(cardFor('Resend')).getByText('Unavailable')).toBeTruthy();
+    expect(within(cardFor('Resend')).getByText('Critical')).toBeTruthy();
     // And the failure is recorded with the provider's sentence (ADR 0033).
     await waitFor(() =>
       expect(sendJSON).toHaveBeenCalledWith(
@@ -364,7 +364,7 @@ describe('what a card says about itself (ADR 0033)', () => {
       /Last worked .* Last failed .* restricted_api_key/
     );
     // The most recent verdict is the badge, with nothing tested this session.
-    expect(within(card).getByText('Unavailable')).toBeTruthy();
+    expect(within(card).getByText('Critical')).toBeTruthy();
     expect(within(card).getByText('Used in')).toBeTruthy();
     expect(within(card).getByText('Newsletter Hub')).toBeTruthy();
     expect(within(card).getByText(/cannot delete from it/)).toBeTruthy();

@@ -326,14 +326,15 @@ export function evaluateUnauthenticatedProbe(result) {
 }
 
 /**
- * A verdict in the shared vocabulary (ADR 0033 §2): a comparison that holds
- * is healthy, one that fails is unavailable, one that could not be made is
- * unknown. The same three words the badges, the Overview and the
- * Integrations page use, so the report reads like the screen it describes.
+ * A verdict in the shared vocabulary (ADR 0033 §2, lib/status.js): a
+ * comparison that holds is healthy, one that fails is critical — the check
+ * ran and said no — and one that could not be made is unknown. The same words
+ * the badges, the Overview and the Integrations page use, so the report reads
+ * like the screen it describes.
  */
 export const verdictStatus = (value) => {
   if (value === true) return 'healthy';
-  if (value === false) return 'unavailable';
+  if (value === false) return 'critical';
   return 'unknown';
 };
 

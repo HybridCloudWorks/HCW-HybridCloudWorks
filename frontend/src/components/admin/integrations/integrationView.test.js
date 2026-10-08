@@ -7,8 +7,10 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  SERVICE_STATUS,
   buildIntegrationView,
   buildKeyGroups,
+  resultStatus,
   serviceStatus,
   sortByStatus,
 } from './integrationView';
@@ -264,6 +266,17 @@ describe('the Overview status (#570)', () => {
 
   it('calls a failed test broken even when every key is green', () => {
     expect(serviceStatus(card({ items: [item({ state: 'live' })] }), { ok: false })).toBe('broken');
+  });
+
+  it('calls a test that could not reach the service offline, not broken (#1010)', () => {
+    const failed = { ok: false, message: 'Failed to fetch' };
+    expect(serviceStatus(card(), failed)).toBe('offline');
+    expect(SERVICE_STATUS.offline.badge.id).toBe('offline');
+    expect(SERVICE_STATUS.broken.badge.id).toBe('critical');
+    expect(SERVICE_STATUS['not-configured'].badge.id).toBe('critical');
+    expect(resultStatus(failed).id).toBe('offline');
+    expect(resultStatus({ ok: false, message: 'Unauthorized' }).id).toBe('critical');
+    expect(resultStatus({ ok: false, message: 'RESEND_API_KEY is not set' }).id).toBe('critical');
   });
 
   it('calls a rejected key broken, and a passing test does not hide it', () => {

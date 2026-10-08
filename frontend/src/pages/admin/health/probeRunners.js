@@ -2,22 +2,28 @@
  * The live runners (ADR 0033 §1 Platform, §8): probes that make a request of
  * their own rather than reading the snapshot — the AI providers through
  * testAiProvider, the labs snapshot, the newsletter issues, /api/health, and
- * the media route behind covers. Each answers one result in lib/status.js's
- * vocabulary and never throws: a read that fails is an unavailable result.
+ * the media route behind covers, the MCP servers' last syncs. Each answers
+ * one result in lib/status.js's vocabulary and never throws: a read that
+ * fails is a result too, critical or offline by `classifyFailure`.
+ *
+ * The lab-agent and MCP verdicts have a twin in the server's health pulse
+ * (functions/src/lib/health/pulse-checks.js), which records the same probes
+ * every five minutes; statusParity.test.js holds the two to one opinion.
  */
 import { getJSON, postJSON } from '@/lib/api';
-import { ago, messageOf, plural, result } from './probeKit';
+import { ago, classifyFailure, messageOf, plural, result } from './probeKit';
 
 /**
  * A read as a probe sees it: `{ value }` when it answered, `{ failure }` — the
- * unavailable result naming what could not be read — when it threw. Runners
- * read through this so none needs a try/catch of its own.
+ * result naming what could not be read — when it threw. Judged on the error
+ * itself, not the sentence around it: "did not answer" in the prefix must not
+ * make a 401 look like an outage.
  */
 async function attempt(whatFailed, read) {
   try {
     return { value: await read() };
   } catch (error) {
-    return { failure: result('unavailable', `${whatFailed}: ${messageOf(error)}`) };
+    return { failure: result(classifyFailure(error), `${whatFailed}: ${messageOf(error)}`) };
   }
 }
 
@@ -63,7 +69,7 @@ function providersVerdict(outcomes, note) {
   }
   if (ok === 0) {
     return result(
-      'unavailable',
+      classifyFailure(outcomes.find((o) => o.error)?.error),
       `None of the ${outcomes.length} enabled providers answered.${note}`,
       extra
     );
@@ -83,7 +89,7 @@ export async function runAiProviders() {
   if (read.failure) return read.failure;
   const enabled = read.value.filter((item) => item.enabled !== false);
   if (enabled.length === 0)
-    return result('misconfigured', 'No AI provider is enabled on the AI Engine page.');
+    return result('critical', 'No AI provider is enabled on the AI Engine page.');
   const outcomes = await Promise.all(enabled.map(testProvider));
   return providersVerdict(outcomes, lastTestNote(read.value));
 }
@@ -92,20 +98,88 @@ export async function runAiProviders() {
 
 const latestOf = (values) => values.filter(Boolean).sort().at(-1);
 
+/**
+ * Lab agents by their heartbeat (`online` is the labs snapshot's: a beat in
+ * the last 90 s). None online is offline — a heartbeat missed three times —
+ * not a failing check.
+ */
+export function labAgentsVerdict(agents, now = Date.now()) {
+  if (agents.length === 0) return result('unknown', 'No lab agent has registered yet.');
+  const online = agents.filter((agent) => agent.online).length;
+  const latest = latestOf(agents.map((agent) => agent.lastSeenAt));
+  const seen = latest ? ` Last heartbeat ${ago(latest, now) ?? 'at an unknown time'}.` : '';
+  if (online === agents.length)
+    return result('healthy', `${plural(agents.length, 'agent')} online.${seen}`);
+  if (online === 0) return result('offline', `All ${agents.length} agents are offline.${seen}`);
+  return result('degraded', `${online} of ${agents.length} agents online.${seen}`);
+}
+
 export async function runLabAgents() {
   const read = await attempt('The labs snapshot could not be read', async () =>
     listOf((await postJSON('getLabsSnapshot', {}))?.agents)
   );
   if (read.failure) return read.failure;
-  const agents = read.value;
-  if (agents.length === 0) return result('unknown', 'No lab agent has registered yet.');
-  const online = agents.filter((agent) => agent.online).length;
-  const latest = latestOf(agents.map((agent) => agent.lastSeenAt));
-  const seen = latest ? ` Last heartbeat ${ago(latest) ?? 'at an unknown time'}.` : '';
-  if (online === agents.length)
-    return result('healthy', `${plural(agents.length, 'agent')} online.${seen}`);
-  if (online === 0) return result('unavailable', `All ${agents.length} agents are offline.${seen}`);
-  return result('degraded', `${online} of ${agents.length} agents online.${seen}`);
+  return labAgentsVerdict(read.value);
+}
+
+// ── MCP servers ──────────────────────────────────────────────────────────────
+
+const mcpLine = (server) => {
+  const name = server.id ?? server.name ?? 'server';
+  if (server.status === 'connected') return `${name}: connected`;
+  if (server.status === 'error') return `${name}: ${server.lastError || 'failed'}`;
+  return `${name}: not synced yet`;
+};
+
+/**
+ * MCP servers by their last tool sync, which writes `status`, `lastTested`
+ * and `lastError` onto the server's document (functions/src/lib/ai/mcp.js).
+ * Only servers switched on count: the MCP route refuses a disabled one.
+ */
+export function mcpServersVerdict(servers, now = Date.now()) {
+  const enabled = listOf(servers).filter((server) => server?.enabled === true);
+  if (enabled.length === 0)
+    return result('unknown', 'No MCP server is enabled on the AI Engine page.');
+  const ok = enabled.filter((server) => server.status === 'connected');
+  const failing = enabled.filter((server) => server.status === 'error');
+  const latest = latestOf(enabled.map((server) => server.lastTested));
+  const when = latest ? ` Newest sync ${ago(latest, now) ?? 'at an unknown time'}.` : '';
+  const extra = { detail: enabled.map(mcpLine).join('\n') };
+  if (ok.length === enabled.length) {
+    return result(
+      'healthy',
+      `${plural(ok.length, 'enabled MCP server')} answered their last tool sync.${when}`,
+      extra
+    );
+  }
+  if (ok.length === 0 && failing.length === 0) {
+    return result(
+      'unknown',
+      `${plural(enabled.length, 'enabled MCP server')}, none synced yet.`,
+      extra
+    );
+  }
+  if (ok.length === 0) {
+    return result(
+      classifyFailure(failing[0].lastError),
+      `None of the ${enabled.length} enabled MCP servers answered its last tool sync.${when}`,
+      extra
+    );
+  }
+  return result(
+    'degraded',
+    `${ok.length} of ${enabled.length} enabled MCP servers answered their last tool sync.${when}`,
+    extra
+  );
+}
+
+/** The MCP servers' stored sync results, read from the AI Engine's config. */
+export async function runMcpServers() {
+  const read = await attempt('The MCP server list could not be read', async () =>
+    listOf((await getJSON('cms/config/mcp-servers'))?.items)
+  );
+  if (read.failure) return read.failure;
+  return mcpServersVerdict(read.value);
 }
 
 // ── Newsletter build ─────────────────────────────────────────────────────────
@@ -163,7 +237,7 @@ export async function runUnresolvedSecrets(ctx) {
   if (count === 0)
     return result('healthy', 'Every Key Vault reference resolved on the answering worker.');
   return result(
-    'misconfigured',
+    'critical',
     `${plural(count, 'Key Vault reference')} did not resolve${names.length ? `: ${names.join(', ')}` : ''}.`
   );
 }
@@ -190,8 +264,10 @@ async function coverVerdict(url) {
   if (read.failure) return read.failure;
   const status = read.value;
   const answered = status >= 200 && status < 400;
+  // A 404 is the route answering that the asset is gone (critical); a 502,
+  // 503 or 504 is nothing answering behind it (offline).
   return result(
-    answered ? 'healthy' : 'unavailable',
+    answered ? 'healthy' : classifyFailure({ status, message: `HTTP ${status}` }),
     `A default cover answered HTTP ${status} through /api/public/media.`
   );
 }

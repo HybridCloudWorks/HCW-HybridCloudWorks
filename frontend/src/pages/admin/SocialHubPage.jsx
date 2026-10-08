@@ -64,8 +64,8 @@ const PANELS = {
 export const HEADER_STATUS = Object.freeze({
   loading: { system: 'unknown', text: 'Checking Publer…' },
   ready: { system: 'healthy', text: 'Publer connected' },
-  not_configured: { system: 'misconfigured', text: 'Publer not connected — see Accounts' },
-  error: { system: 'unavailable', text: 'Publer could not be reached' },
+  not_configured: { system: 'critical', text: 'Publer not connected — see Accounts' },
+  error: { system: 'offline', text: 'Publer could not be reached' },
 });
 
 const HELP = [

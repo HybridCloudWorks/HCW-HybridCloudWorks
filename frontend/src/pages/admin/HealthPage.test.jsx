@@ -20,6 +20,8 @@ import { CODE_QUALITY } from './health/codeQuality.fixture';
 const authedFetch = vi.fn();
 const getJSON = vi.fn();
 const postJSON = vi.fn();
+// The stored-results PUT (cms/health/probe-results, #1011).
+const sendJSON = vi.fn();
 const acquireApiToken = vi.fn();
 const getEndpoint = vi.fn((name) => `https://api.example.test/api/${name}`);
 const runJob = vi.fn();
@@ -32,6 +34,7 @@ vi.mock('@/lib/api', () => ({
   getJSON: (...args) => getJSON(...args),
   postJSON: (...args) => postJSON(...args),
   getEndpoint: (...args) => getEndpoint(...args),
+  sendJSON: (...args) => sendJSON(...args),
 }));
 vi.mock('@/lib/jobs', () => ({ runJob: (...args) => runJob(...args) }));
 vi.mock('@/lib/entraAuth', () => ({ acquireApiToken: (...args) => acquireApiToken(...args) }));
@@ -132,7 +135,8 @@ const SNAPSHOT = {
       published: 3,
       skipped: 1,
       failed: 1,
-      lastRunAt: { toDate: () => new Date('2026-04-12T10:00:00Z') },
+      // Every run is recorded now (#1010), so a last run is minutes old.
+      lastRunAt: { toDate: () => new Date(Date.now() - 5 * 60 * 1000) },
     },
     publishingWatchdog: {
       overdueScheduledCount: 2,
@@ -178,6 +182,12 @@ beforeEach(() => {
   setSearchParams.mockReset();
   acquireApiToken.mockReset().mockResolvedValue(TOKEN);
   getJSON.mockReset().mockResolvedValue(EXPECTATIONS);
+  // The server stamps a recorded result with its own time and answers it back.
+  sendJSON.mockReset().mockImplementation(async (_route, _method, body) => ({
+    success: true,
+    written: true,
+    result: { ...body, checkedAt: new Date().toISOString(), checkedBy: 'admin' },
+  }));
   runJob.mockReset();
   authedFetch.mockReset().mockImplementation(async (name) => {
     if (name === 'getCurrentAdminStatus') return jsonResponse(200, ADMIN_STATUS);
@@ -220,6 +230,14 @@ const reportText = () => screen.getByLabelText('Diagnostics report').textContent
 const identityLoaded = () =>
   waitFor(() => expect(screen.getByText('Caller is an admin per the registry')).toBeTruthy());
 const seen = (pattern) => expect(screen.getAllByText(pattern).length).toBeGreaterThan(0);
+/** The identity run's own read, apart from the stored-results read the page also makes. */
+const expectationReads = () =>
+  getJSON.mock.calls.filter(([name]) => name === 'getAuthExpectations');
+/** Every result the page recorded on the server, by probe id. */
+const recorded = () =>
+  sendJSON.mock.calls
+    .filter(([route, method]) => route === 'cms/health/probe-results' && method === 'PUT')
+    .map(([, , body]) => body);
 
 /**
  * The verdict badge beside a given verdict line.
@@ -383,7 +401,7 @@ describe('a snapshot that fails to load', () => {
     expect(screen.queryByText('Queue SLA Breaches')).toBeNull();
     // No default zeros standing in for counts nobody read.
     const glance = screen.getByRole('group', { name: 'Health at a glance' });
-    expect(glance.textContent).not.toContain('Misconfigured');
+    expect(glance.textContent).not.toContain('Critical');
     expect(within(glance).getAllByText('Unknown').length).toBeGreaterThanOrEqual(3);
 
     openTab('Alerts');
@@ -489,7 +507,7 @@ describe('the Checks tab', () => {
       /aud, azp, email, exp, iat, iss, name, oid, preferred_username, roles, scp, sub, tid, ver/
     );
     expect(screen.getAllByText('Healthy').length).toBeGreaterThanOrEqual(5);
-    expect(screen.queryByText('Unavailable')).toBeNull();
+    expect(screen.queryByText('Critical')).toBeNull();
     expectNoSecrets(container.textContent);
   });
 
@@ -514,11 +532,11 @@ describe('the Checks tab', () => {
     expect(init.headers).toBeUndefined();
     // The expectations call rides the same acquisition — the run is ONE token,
     // not one per call.
-    expect(getJSON).toHaveBeenCalledTimes(1);
+    expect(expectationReads()).toHaveLength(1);
     expect(getJSON).toHaveBeenCalledWith('getAuthExpectations', { token: TOKEN });
     // And the claims panel reflects that same token: Admin present.
     expect(screen.getAllByText('Healthy').length).toBeGreaterThanOrEqual(5);
-    expect(screen.queryByText('Unavailable')).toBeNull();
+    expect(screen.queryByText('Critical')).toBeNull();
   });
 
   it('names a 200 with no JSON body from the status route instead of rendering a blank', async () => {
@@ -597,7 +615,7 @@ describe('the Checks tab', () => {
 
     fireEvent.click(screen.getByText('Run authenticated probe'));
     await waitFor(() => seen(/read failed \(getLabJob timed out after 20s\) — state unknown/));
-    expect(verdictBadge(/Authenticated no-op path/).getByText('Unavailable')).toBeTruthy();
+    expect(verdictBadge(/Authenticated no-op path/).getByText('Critical')).toBeTruthy();
     expect(screen.queryByText(/still "queued"/)).toBeNull();
   });
 
@@ -658,14 +676,14 @@ describe('the Checks tab', () => {
     // Not stuck: the busy flag was cleared in finally, so the button comes back.
     expect(screen.getByText('Run unauthenticated probe').closest('button').disabled).toBe(false);
     // Surfaced as a failed probe, and the report says the same.
-    expect(verdictBadge(/Unauthenticated request refused/).getByText('Unavailable')).toBeTruthy();
+    expect(verdictBadge(/Unauthenticated request refused/).getByText('Critical')).toBeTruthy();
 
     // …and so does Copy, on the tab it moved to.
     openTab('Report');
     expect(copyButton().disabled).toBe(false);
     expect(screen.queryByText(/Checks still running/)).toBeNull();
     expect(reportText()).toContain(
-      'no Authorization header: Unavailable (VITE_AZURE_FUNCTIONS_URL is not set'
+      'no Authorization header: Critical (VITE_AZURE_FUNCTIONS_URL is not set'
     );
 
     // The button is usable again: the next run goes through.
@@ -674,7 +692,7 @@ describe('the Checks tab', () => {
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   });
 
-  it('a 200 on the unauthenticated probe is Unavailable, never a pass', async () => {
+  it('a 200 on the unauthenticated probe is Critical, never a pass', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => jsonResponse(200, { jobId: 'leak' }))
@@ -685,7 +703,7 @@ describe('the Checks tab', () => {
     await waitFor(() =>
       expect(screen.getByText(/Unauthenticated request refused — HTTP 200/)).toBeTruthy()
     );
-    expect(verdictBadge(/Unauthenticated request refused/).getByText('Unavailable')).toBeTruthy();
+    expect(verdictBadge(/Unauthenticated request refused/).getByText('Critical')).toBeTruthy();
   });
 
   it('does not start a second identity run when Re-run is clicked during the first', async () => {
@@ -704,7 +722,7 @@ describe('the Checks tab', () => {
     fireEvent.click(screen.getByText('Re-run identity checks'));
     fireEvent.click(screen.getByText('Re-run identity checks'));
     expect(acquireApiToken).toHaveBeenCalledTimes(1);
-    expect(getJSON).not.toHaveBeenCalled();
+    expect(expectationReads()).toHaveLength(0);
 
     releaseToken(TOKEN);
     await identityLoaded();
@@ -859,13 +877,21 @@ describe('the probe registry on Checks', () => {
     expect(reportText()).toMatch(/- Publer: Healthy \(.+\) — Connected — 2 social account\(s\)\./);
     openTab('Checks');
     expect(badgeOf('publer')).toBe('healthy');
-    // And it is remembered for a reload (per-viewer convenience).
-    expect(
-      JSON.parse(window.sessionStorage.getItem('contentforge.health.probes.v1')).publer.status
-    ).toBe('healthy');
+    // And it is recorded on the server, where a reload, a new tab or the next
+    // sign-in reads it back (#1011) — the browser tab no longer holds it alone.
+    await waitFor(() =>
+      expect(recorded()).toContainEqual(
+        expect.objectContaining({
+          probeId: 'publer',
+          status: 'healthy',
+          summary: 'Connected — 2 social account(s).',
+          durationMs: expect.any(Number),
+        })
+      )
+    );
   });
 
-  it('reports a refused service as unavailable and a missing key as misconfigured', async () => {
+  it('reports a refused service and a missing key as critical, and one that did not answer as offline', async () => {
     postJSON.mockImplementation(
       snapshotAware(async (name, body) => {
         if (name === 'publerProxy') return { ok: false, status: 403, error: 'Forbidden' };
@@ -876,6 +902,9 @@ describe('the probe registry on Checks', () => {
             code: 'INTEGRATION_NOT_CONFIGURED',
           };
         }
+        if (name === 'connectionProbe' && body.probe === 'telegram') {
+          throw new TypeError('Failed to fetch');
+        }
         throw new Error(`unexpected postJSON ${name}`);
       })
     );
@@ -883,9 +912,112 @@ describe('the probe registry on Checks', () => {
     await identityLoaded();
     fireEvent.click(within(probeCard('publer')).getByRole('button', { name: 'Test Publer' }));
     fireEvent.click(within(probeCard('resend')).getByRole('button', { name: 'Test Resend' }));
-    await waitFor(() => expect(badgeOf('publer')).toBe('unavailable'));
-    await waitFor(() => expect(badgeOf('resend')).toBe('misconfigured'));
+    fireEvent.click(within(probeCard('telegram')).getByRole('button', { name: 'Test Telegram' }));
+    await waitFor(() => expect(badgeOf('publer')).toBe('critical'));
+    await waitFor(() => expect(badgeOf('resend')).toBe('critical'));
+    await waitFor(() => expect(badgeOf('telegram')).toBe('offline'));
     expect(summaryOf('publer')).toMatch(/Forbidden/);
+    // Offline looks unlike Critical, not only in colour.
+    expect(within(probeCard('telegram')).getByText('Offline')).toBeTruthy();
+  });
+
+  it('shows the last recorded result on load, with its age, and a stale one as Unknown beside its last value', async () => {
+    const minutesAgo = (n) => new Date(Date.now() - n * 60 * 1000).toISOString();
+    getJSON.mockImplementation(async (name) => {
+      if (name !== 'cms/health/probe-results') return EXPECTATIONS;
+      return {
+        success: true,
+        results: {
+          publer: {
+            probeId: 'publer',
+            status: 'healthy',
+            summary: 'Connected — 3 social account(s).',
+            checkedAt: minutesAgo(12),
+            checkedBy: 'admin',
+          },
+          // Recorded by the pulse 40 minutes ago, past its 15-minute window.
+          'lab-agents': {
+            probeId: 'lab-agents',
+            status: 'healthy',
+            summary: '1 agent online.',
+            checkedAt: minutesAgo(40),
+            checkedBy: 'pulse',
+          },
+          // Stored under the word used until 2026-10-08.
+          resend: {
+            probeId: 'resend',
+            status: 'misconfigured',
+            summary: 'Resend is not configured.',
+            checkedAt: minutesAgo(5),
+            checkedBy: 'admin',
+          },
+        },
+        pulse: { lastBeatAt: minutesAgo(3), intervalMs: 300000, lateAfterMs: 900000 },
+      };
+    });
+    renderAt('checks');
+    await waitFor(() => expect(badgeOf('publer')).toBe('healthy'));
+    expect(summaryOf('publer')).toBe('Connected — 3 social account(s).');
+    expect(within(probeCard('publer')).getByTestId('probe-checked').textContent).toMatch(
+      /^12 min ago · .+ · by an admin$/
+    );
+    expect(badgeOf('resend')).toBe('critical');
+
+    expect(badgeOf('lab-agents')).toBe('unknown');
+    expect(summaryOf('lab-agents')).toBe('1 agent online.');
+    expect(within(probeCard('lab-agents')).getByTestId('probe-stale').textContent).toMatch(
+      /Stale: last Healthy, older than its 15 min window/
+    );
+    expect(within(probeCard('lab-agents')).getByTestId('probe-checked').textContent).toMatch(
+      /^40 min ago · .+ · by the pulse$/
+    );
+
+    const pulse = screen.getByRole('group', { name: 'Health pulse' });
+    expect(within(pulse).getByTestId('pulse-line').textContent).toMatch(
+      /Pulse\s*Healthy\s*every 5 min, last beat 3 min ago\./
+    );
+  });
+
+  it('turns the hub Offline when the pulse is late, and Unknown before it has ever beaten', async () => {
+    const late = new Date(Date.now() - 47 * 60 * 1000).toISOString();
+    getJSON.mockImplementation(async (name) =>
+      name === 'cms/health/probe-results'
+        ? { success: true, results: {}, pulse: { lastBeatAt: late, intervalMs: 300000 } }
+        : EXPECTATIONS
+    );
+    const { unmount } = renderAt('checks');
+    const hub = () => screen.getByTestId('hub-status').querySelector('[data-status]');
+    await waitFor(() => expect(hub().getAttribute('data-status')).toBe('offline'));
+    expect(screen.getByTestId('pulse-line').textContent).toMatch(
+      /is late: every 5 min, last beat 47 min ago/
+    );
+    unmount();
+
+    // The first render's read is in this tab's cache: the server's answer,
+    // with no pulse in it, replaces it once it lands.
+    getJSON.mockImplementation(async () => EXPECTATIONS);
+    renderAt('checks');
+    await identityLoaded();
+    await waitFor(() => expect(hub().getAttribute('data-status')).toBe('unknown'));
+    expect(screen.getByTestId('pulse-line').textContent).toMatch(/has not reported yet/);
+  });
+
+  it('records the session checks it ran — the identity read — once per run', async () => {
+    renderAt('checks');
+    await identityLoaded();
+    await waitFor(() =>
+      expect(recorded().map((body) => body.probeId)).toEqual(
+        expect.arrayContaining(['identity-token', 'admin-registry'])
+      )
+    );
+    const identityWrites = recorded().filter((body) => body.probeId === 'identity-token');
+    expect(identityWrites).toHaveLength(1);
+    expect(identityWrites[0]).toMatchObject({
+      status: 'healthy',
+      summary: 'every comparison holds',
+    });
+    // What is recorded is the summary the page shows: no claim value, no person.
+    expectNoSecrets(JSON.stringify(recorded()));
   });
 
   it('leaves the probes that write or spend out of Test all, and says so on their cards', async () => {

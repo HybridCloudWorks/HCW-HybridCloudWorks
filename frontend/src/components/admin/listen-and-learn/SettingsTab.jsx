@@ -25,7 +25,7 @@ function providerState(provider) {
     return { system: 'unknown', note: `not for Listen & Learn — ${provider.reason}` };
   }
   if (provider.configured) return { system: 'healthy', note: 'configured' };
-  return { system: 'misconfigured', note: `not configured — needs ${provider.requirement}` };
+  return { system: 'critical', note: `not configured — needs ${provider.requirement}` };
 }
 
 function ProviderRow({ provider, wouldRun }) {

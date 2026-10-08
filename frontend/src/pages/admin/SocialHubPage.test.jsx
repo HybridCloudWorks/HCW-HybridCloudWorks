@@ -152,11 +152,11 @@ describe('the header connection state', () => {
     accountsStatus = 'not_configured';
     const { unmount } = render(<SocialHubPage />);
     expect(screen.getByText(/Publer not connected/)).toBeInTheDocument();
-    expect(screen.getByText('Misconfigured')).toBeInTheDocument();
+    expect(screen.getByText('Critical')).toBeInTheDocument();
     unmount();
     accountsStatus = 'error';
     render(<SocialHubPage />);
     expect(screen.getByText('Publer could not be reached')).toBeInTheDocument();
-    expect(screen.getByText('Unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Offline')).toBeInTheDocument();
   });
 });

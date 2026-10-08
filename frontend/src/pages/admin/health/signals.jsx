@@ -10,6 +10,11 @@
  *
  * The one action here is the alert workflow — acknowledge, resolve, reopen —
  * because an alert is a live signal you answer in place, not a check you run.
+ *
+ * Every card here is built like a probe card (#1010): a header with the title
+ * and the card's status in the top-right slot (StatusSlot.jsx), a body, and a
+ * footer pinned to the bottom with when the block was read. Cards in one row
+ * are the same height.
  */
 
 import React from 'react';
@@ -21,7 +26,10 @@ import { Input } from '@/components/ui/input';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import useLinkedItem from '@/hooks/useLinkedItem';
 import { LINK_PARAMS } from '@/lib/itemLinks';
+import { describeAge, worstStatus } from '@/lib/status';
 import { AlertTriangle, CheckCircle2, Workflow } from 'lucide-react';
+import { scheduledPublishingVerdict } from './probeEvaluators';
+import StatusSlot from './StatusSlot';
 
 export const ALERT_FILTERS = [
   { value: 'open', label: 'Open' },
@@ -53,12 +61,17 @@ export function formatTimestamp(value) {
 
 /**
  * Every Overview card ends the same way (ADR 0033 §1 Platform): when the
- * block it shows was read, and where its probes, impacts and fixes live.
+ * block it shows was read — its age as well as its time (#1010) — and where
+ * its probes, impacts and fixes live. Pinned to the bottom of the card.
  */
 export function CheckedFooter({ at, probeLabel }) {
+  const age = describeAge(typeof at === 'string' ? at : null);
   return (
-    <p className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
-      <span>Checked {formatTimestamp(at)}</span>
+    <p className="mt-auto flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2 text-xs text-muted-foreground">
+      <span>
+        Checked {age ? `${age} · ` : ''}
+        {formatTimestamp(at)}
+      </span>
       <Link
         to="/admin/health?tab=checks"
         className="font-medium text-primary underline-offset-2 hover:underline"
@@ -69,16 +82,55 @@ export function CheckedFooter({ at, probeLabel }) {
   );
 }
 
-/** The one word for the runtime-configuration readiness (ADR 0033). */
+/**
+ * A signal card's header: the title, and the card's status in the slot every
+ * Health Hub card keeps in the same place (StatusSlot.jsx).
+ */
+function SignalCardHeader({ icon = null, title, status }) {
+  return (
+    <CardHeader className="flex-row items-start gap-3 space-y-0" data-slot="header">
+      <CardTitle className="flex min-w-0 flex-1 items-center gap-2 text-lg">
+        {icon}
+        {title}
+      </CardTitle>
+      <StatusSlot status={status} size="sm" />
+    </CardHeader>
+  );
+}
+
+/** The one word for the runtime-configuration readiness (ADR 0033, lib/status.js). */
 export function readinessStatus(readiness) {
   if (!readiness) return 'unknown';
   if (readiness.functionsConfigured) return 'healthy';
-  if ((readiness.unresolvedSecrets?.length ?? 0) > 0) return 'misconfigured';
-  return 'unavailable';
+  // An unresolved Key Vault reference, or a configuration stamp that never
+  // arrived: the worker answered, with the wrong settings. Critical.
+  return 'critical';
 }
 
 /** A count that is fine at zero and worth a look above it. */
 const countStatus = (count, above = 'degraded') => ((Number(count) || 0) > 0 ? above : 'healthy');
+
+/** The four tiles' words and the publish-failure count, worst first: the card's status. */
+export function signalsStatus(signals) {
+  return worstStatus([
+    countStatus(signals.queueBreachCount),
+    (signals.oldestStagedHours || 0) > 72 ? 'degraded' : 'healthy',
+    (signals.openAlertAgeHours || 0) > 24 ? 'degraded' : 'healthy',
+    countStatus(signals.orphanedGeneratedImages),
+    countStatus(signals.publishFailureCount),
+  ]);
+}
+
+/**
+ * The Workflow Alerts card's status over every alert, not the filtered few:
+ * nothing open is healthy, an open critical alert is critical, anything else
+ * open is worth a look.
+ */
+export function alertsStatus(alerts) {
+  const open = (alerts ?? []).filter((alert) => getAlertStatus(alert) !== 'resolved');
+  if (open.length === 0) return 'healthy';
+  return open.some((alert) => alert.severity === 'critical') ? 'critical' : 'degraded';
+}
 
 export function getAlertActionLabel(action) {
   if (action === 'resolve') return 'Resolved';
@@ -109,29 +161,24 @@ function renderPublishingHint(publishingOps) {
   if (publishingOps) return null;
   return (
     <p className="text-xs text-muted-foreground pb-1">
-      The scheduler runs every 15 minutes but only writes stats here when there is actual work to
-      publish. Missing values means &quot;nothing was due since the last published run&quot; — see
-      the Watchdog row below for live pipeline health.
+      The scheduler records every run here, every 15 minutes, nothing due included. No values means
+      no run is recorded in the latest digest — the scheduler is off or has not run today. The
+      Watchdog rows below still report overdue items.
     </p>
   );
 }
 
 export function PipelineReadinessCard({ readiness, digestForDisplay }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Pipeline Readiness</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm">
+    <Card className="flex h-full flex-col">
+      <SignalCardHeader title="Pipeline Readiness" status={readinessStatus(readiness)} />
+      <CardContent className="flex flex-1 flex-col gap-2 text-sm">
         <div className="flex items-center justify-between gap-3">
           <span>Runtime config</span>
-          <span className="flex items-center gap-2 text-right">
-            {readiness.configGeneration ? (
-              <span className="text-xs text-muted-foreground">
-                {readiness.configGeneration} · {readiness.configWriter}
-              </span>
-            ) : null}
-            <StatusBadge system={readinessStatus(readiness)} />
+          <span className="text-right text-xs text-muted-foreground">
+            {readiness.configGeneration
+              ? `${readiness.configGeneration} · ${readiness.configWriter}`
+              : 'Generation not reported'}
           </span>
         </div>
         <div className="flex items-center justify-between gap-3">
@@ -195,25 +242,25 @@ export function publishingMetrics(publishingOps, publishingWatchdog) {
 
 export function PublishingOpsCard({ publishingOps, publishingWatchdog, digestForDisplay }) {
   const metrics = publishingMetrics(publishingOps, publishingWatchdog);
+  // The same verdict as the Scheduled publishing probe on Checks, so the two
+  // never disagree about the scheduler.
+  const verdict = scheduledPublishingVerdict(
+    { publishingOps, publishingWatchdog },
+    digestForDisplay?.lastCheckedAt ?? null
+  );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg flex items-center gap-2">
-          <Workflow className="h-4 w-4 text-sky-500" /> Publishing Operations
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
+    <Card className="flex h-full flex-col">
+      <SignalCardHeader
+        icon={<Workflow className="h-4 w-4 text-sky-500" aria-hidden="true" />}
+        title="Publishing Operations"
+        status={verdict.status}
+      />
+      <CardContent className="flex flex-1 flex-col gap-3 text-sm">
         {renderPublishingHint(publishingOps)}
-        <div className="flex items-center justify-between gap-3">
-          <span>Scheduler Status</span>
-          <span className="flex items-center gap-2">
-            {!publishingOps ? (
-              <span className="text-xs text-muted-foreground">Idle (no due items)</span>
-            ) : null}
-            <StatusBadge system={publishingOps?.status ?? 'unknown'} />
-          </span>
-        </div>
+        <p className="text-xs text-muted-foreground" data-testid="scheduler-verdict">
+          {verdict.summary}
+        </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3 border rounded-lg">
             <p className="text-muted-foreground text-xs">Due</p>
@@ -245,8 +292,9 @@ export function PublishingOpsCard({ publishingOps, publishingWatchdog, digestFor
           </Badge>
         </div>
         <p className="text-xs text-muted-foreground">
-          {/* publishingOps.lastRunAt only writes when there's real work; fall back to
-              publishingWatchdog.lastRunAt (every 6h) as the live heartbeat. */}
+          {/* publishingOps.lastRunAt is written by every scheduler run (#1010);
+              publishingWatchdog.lastRunAt (every 6h) stands in while none is
+              recorded in this digest. */}
           Last activity:{' '}
           {formatTimestamp(publishingOps?.lastRunAt || publishingWatchdog?.lastRunAt)}
           {getDigestDocLabel(digestForDisplay?.digestDate)}
@@ -259,13 +307,13 @@ export function PublishingOpsCard({ publishingOps, publishingWatchdog, digestFor
 
 export function OperationalSignalsCard({ signals }) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-500" /> Operational Signals
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3 text-sm">
+    <Card className="flex h-full flex-col">
+      <SignalCardHeader
+        icon={<AlertTriangle className="h-4 w-4 text-amber-500" aria-hidden="true" />}
+        title="Operational Signals"
+        status={signalsStatus(signals)}
+      />
+      <CardContent className="flex flex-1 flex-col gap-3 text-sm">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3 border rounded-lg">
             <p className="text-muted-foreground text-xs">Queue SLA Breaches</p>
@@ -394,14 +442,15 @@ export function WorkflowAlertsCard({
   resolutionNotes,
   setResolutionNotes,
   handleAlertAction,
+  status = 'unknown',
 }) {
   return (
     <Card>
-      <CardHeader>
-        <CardTitle className="text-lg flex items-center gap-2">
-          <AlertTriangle className="h-4 w-4 text-amber-500" /> Workflow Alerts
-        </CardTitle>
-      </CardHeader>
+      <SignalCardHeader
+        icon={<AlertTriangle className="h-4 w-4 text-amber-500" aria-hidden="true" />}
+        title="Workflow Alerts"
+        status={status}
+      />
       <CardContent>
         <div className="mb-4 flex flex-wrap gap-2">
           {ALERT_FILTERS.map((filter) => (

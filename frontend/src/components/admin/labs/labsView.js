@@ -85,11 +85,11 @@ export function formatTime(ts) {
  * from the public workspace read, the Lab from the catalogue.
  */
 
-/** `fleetState(...)` as a system status word: online → healthy, stale → degraded, none → unavailable. */
+/** `fleetState(...)` as a system status word: online → healthy, stale → degraded, none → offline (no heartbeat inside its window). */
 export function fleetStatusWord(fleet) {
   if (fleet.state === 'online') return 'healthy';
   if (fleet.state === 'stale') return 'degraded';
-  return 'unavailable';
+  return 'offline';
 }
 
 /**
