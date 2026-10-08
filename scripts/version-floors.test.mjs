@@ -39,7 +39,18 @@ import {
 } from './version-floors.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// The live floors: what every pin in the repository is judged against.
 const floors = loadFloors(ROOT);
+/**
+ * The floors file as it stood on 2026-09-25, for the tests that state a rule
+ * with literal numbers ("1.16.1 is below the floor 1.16.2"). Those literals
+ * are the floors of that day, so they are judged against that day's file, not
+ * the live one, which the weekly updater moves. Against the live file the
+ * updater's first pull request (#999, terraform 1.16.5) failed the Terraform
+ * rule test though nothing about the rule had changed. Shared with
+ * update-version-floors.test.mjs.
+ */
+const frozenFloors = JSON.parse(readFileSync(join(ROOT, 'scripts', 'fixtures', 'version-floors-2026-09-25.json'), 'utf8'));
 
 describe('version arithmetic', () => {
   it('compares numerically, padding the shorter side', () => {
@@ -398,7 +409,7 @@ describe('reading the lab job images', () => {
 
   it('fails the map main carried until 2026-09-28: alpine:3.20 behind its floor, alpine/ansible uncovered', () => {
     // Cut to this file: the ceiling selectors match no pin in a one-file read.
-    const findings = findViolations(floors, readJobImages(JOB_IMAGES_FILE, imagesFile(MAIN_BEFORE), floors)).filter(
+    const findings = findViolations(frozenFloors, readJobImages(JOB_IMAGES_FILE, imagesFile(MAIN_BEFORE), frozenFloors)).filter(
       (f) => f.file === JOB_IMAGES_FILE
     );
     expect(findings.map((f) => [f.where, f.message])).toEqual([
@@ -437,8 +448,8 @@ describe('reading the lab job images', () => {
 
   it('reads FROM alpine in a Dockerfile by the same rule', () => {
     const dockerfile = [`FROM alpine:3.24.2@sha256:${'0'.repeat(64)}`, 'FROM alpine:3.23', `FROM alpine:3.24@sha256:${'0'.repeat(64)}`].join('\n');
-    const { pins, problems } = readDockerfile('x/Dockerfile', dockerfile, floors);
-    expect(pins.map((p) => [p.line, p.version, judge(p, floors)])).toEqual([
+    const { pins, problems } = readDockerfile('x/Dockerfile', dockerfile, frozenFloors);
+    expect(pins.map((p) => [p.line, p.version, judge(p, frozenFloors)])).toEqual([
       [1, '3.24.2', null],
       [2, '3.23', '3.23 is below the floor 3.24.0'],
       [3, '3.24', null],
@@ -494,6 +505,8 @@ describe('reading version files and Terraform', () => {
 });
 
 describe('the rules', () => {
+  // Every expectation here is a literal of 2026-09-25; see frozenFloors.
+  const floors = frozenFloors;
   const at = (extra) => ({ file: 'f', line: 1, where: 'f', raw: '', ...extra });
 
   it('holds a functions pin exactly at the Flex Consumption ceiling', () => {

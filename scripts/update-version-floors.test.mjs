@@ -16,7 +16,6 @@ import {
   renderSummary,
   serialise,
 } from './update-version-floors.mjs';
-import { loadFloors } from './version-floors.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TODAY = '2026-10-07';
@@ -72,7 +71,18 @@ function sourcesToday() {
   };
 }
 
-const current = () => loadFloors(ROOT);
+/**
+ * The floors file as it stood when sourcesToday() was written, frozen beside
+ * it. Both halves of each comparison have to be frozen together: these tests
+ * read "what the sources say" from fixtures, so reading "what the file
+ * records" from the live scripts/version-floors.json made every move of a
+ * floor a test failure. The updater's own first pull request (#999, python
+ * 3.14.8 and terraform 1.16.5 on 2026-10-07) failed tests here for exactly
+ * that reason, and so would every one after it. The live file's format is
+ * still checked against serialise() below.
+ */
+const FROZEN_FLOORS = join(ROOT, 'scripts', 'fixtures', 'version-floors-2026-09-25.json');
+const current = () => JSON.parse(readFileSync(FROZEN_FLOORS, 'utf8'));
 
 describe('proposeFloors', () => {
   it('moves nothing when the sources say what the file already records', () => {

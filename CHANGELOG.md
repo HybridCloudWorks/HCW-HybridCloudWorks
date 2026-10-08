@@ -3943,6 +3943,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The version-floor tests judge their literal numbers against a frozen
+  floors file, so the weekly updater's pull requests can pass.** The
+  updater's first pull request (#999: python 3.14.8, terraform 1.16.5,
+  2026-10-07) failed 29 tests, though no rule had changed.
+  `update-version-floors.test.mjs` compares fixture sources frozen at
+  2026-09-25 with what the file records, and it read that record from the
+  live `scripts/version-floors.json`, so any moved floor read as the source
+  going backwards. The rule tests in `version-floors.test.mjs` state floors
+  as literals ("below the floor 1.16.2"), which go stale the same way. Both
+  now read `scripts/fixtures/version-floors-2026-09-25.json`, a byte copy of
+  the file on the day those numbers were written. The live file still
+  decides every check of the repository's real pins, and its format is
+  still checked against `serialise()`. Proven by running both suites with
+  #999's floors applied: 965 passed, where 29 had failed.
 - **The lab images publish to Docker Hub only; GHCR is no longer
   published.** The first publish after the 2026-10-07 transfer failed at the
   GHCR push with `permission_denied: The requested installation does not
