@@ -258,3 +258,46 @@ describe('guardedFetch', () => {
     ).rejects.toMatchObject({ code: 'FETCH_TIMEOUT' });
   });
 });
+
+/**
+ * The real dispatcher through the runtime's own fetch, end to end.
+ *
+ * Every case above injects a fake fetch or a fake dispatcher, which is right
+ * for the logic and blind to the one integration that can break without a
+ * line of this file changing: guardedFetch hands an Agent from the npm
+ * `undici` package to `globalThis.fetch`, which is the undici Node bundles.
+ * The two must speak the same dispatcher interface. On 2026-10-08 Dependabot
+ * proposed undici 8 (#902) with every check green; on Node 24, the line the
+ * Function App runs (bundled undici 7.29.1), an undici 8 Agent makes the
+ * built-in fetch throw `fetch failed` (UND_ERR_INVALID_ARG), which would have
+ * failed every guarded fetch in production. This case sends one request
+ * through pinnedDispatcher to a local server, so it fails in CI (which runs
+ * this package on Node 24) the moment the two disagree.
+ */
+describe('pinnedDispatcher with the built-in fetch', () => {
+  it('carries a request to the pinned address through globalThis.fetch', async () => {
+    const { createServer } = await import('node:http');
+    const server = createServer((req, response) => response.end(`pinned ${req.headers.host}`));
+    await new Promise((ready) => server.listen(0, '127.0.0.1', ready));
+    const { port } = server.address();
+    // The hostname resolves nowhere; only the pinned lookup can reach the server.
+    const dispatcher = pinnedDispatcher('127.0.0.1');
+    try {
+      const response = await globalThis.fetch(`http://pinned.invalid:${port}/`, { dispatcher });
+      expect(response.status).toBe(200);
+      expect(await response.text()).toBe(`pinned pinned.invalid:${port}`);
+    } catch (error) {
+      const { createRequire } = await import('node:module');
+      const installed = createRequire(import.meta.url)('undici/package.json').version;
+      throw new Error(
+        `globalThis.fetch (Node ${process.version}, bundled undici ${process.versions.undici}) refused an Agent from the ` +
+          `npm undici ${installed}: ${error.message}${error.cause?.code ? ` (${error.cause.code})` : ''}. Keep the npm ` +
+          `undici on the bundled major (functions/package.json, .github/dependabot.yml).`,
+        { cause: error }
+      );
+    } finally {
+      await dispatcher.close();
+      server.close();
+    }
+  });
+});
