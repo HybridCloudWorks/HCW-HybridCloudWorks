@@ -689,12 +689,12 @@ describe('MCP key-to-host binding, routing privilege and config audit (AP-B1, 20
     const res = await h.putConfig(
       makeRequest({
         params: { collection: 'mcp-servers', id: 'exfil' },
-        body: { url: 'https://attacker.example/', apiKeyEnvVar: 'VPS_API_TOKEN', enabled: true },
+        body: { url: 'https://attacker.example/', apiKeyEnvVar: 'REPLICATE_API_KEY', enabled: true },
       }),
       context
     );
     expect(res.status).toBe(400);
-    expect(JSON.parse(res.body).error).toMatch(/VPS_API_TOKEN may only be sent to localhost/);
+    expect(JSON.parse(res.body).error).toMatch(/REPLICATE_API_KEY may only be sent to mcp\.replicate\.com/);
     expect(store.upsertDoc).not.toHaveBeenCalled();
     expect(allowGuard.requireRole).not.toHaveBeenCalledWith(expect.anything(), 'super_admin');
   });
@@ -1537,5 +1537,308 @@ describe('MCP server writes are checked (ADR 0033, security finding)', () => {
     expect(res.status).toBe(200);
     // One document write; the second upsert is the audit row (AP-B1).
     expect(store.upsertDoc.mock.calls.filter(([c]) => c === 'mcp_servers')).toHaveLength(1);
+  });
+});
+
+describe('MCP OAuth Connect fields on the config routes (2026-10-08)', () => {
+  const superGuard = {
+    requireRole: vi.fn(async () => ({ user: { oid: 'owner' }, role: 'super_admin', error: null })),
+  };
+  const connected = (over = {}) => ({
+    id: 'hostinger-mcp',
+    name: 'Hostinger MCP',
+    url: 'https://mcp.hostinger.com',
+    transport: 'http',
+    authType: 'oauth',
+    apiKeyEnvVar: null,
+    status: 'connected',
+    oauthToken: 'at-secret',
+    oauthRefreshToken: 'rt-secret',
+    oauthClientSecret: 'client-secret',
+    oauthPending: { stateHash: 'hash', codeVerifier: 'verifier-secret', createdBy: 'owner' },
+    oauthClient: { issuer: 'https://auth.hostinger.com', clientId: 'hst-client-1' },
+    oauth: {
+      status: 'connected',
+      tokenEndpoint: 'https://auth.hostinger.com/api/external/v1/oauth-server/token',
+      scope: 'mcp:use',
+      expiresAt: '2026-10-08T13:00:00.000Z',
+    },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  });
+  const merging = (doc) => {
+    const state = { ...doc };
+    return makeStore({
+      queryDocs: vi.fn(async () => [{ ...state }]),
+      readDoc: vi.fn(async () => ({ ...state })),
+      patchDoc: vi.fn(async (_c, _id, updates) => Object.assign(state, updates)),
+    });
+  };
+  const handlers = (store, guard = allowGuard) =>
+    createAdminIntegrationHandlers({ guard, store, ...fixed });
+  const patchServer = (store, body, guard) =>
+    handlers(store, guard).patchConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'hostinger-mcp' }, body }),
+      context
+    );
+
+  it('never returns a token, the client secret or the pending sign-in on any read', async () => {
+    const store = merging(connected());
+    const list = await handlers(store).listConfig(makeRequest({ params: { collection: 'mcp-servers' } }), context);
+    const patched = await patchServer(store, { enabled: true });
+    for (const res of [list, patched]) {
+      for (const secret of ['at-secret', 'rt-secret', 'client-secret', 'verifier-secret', '"oauthPending"']) {
+        expect(res.body).not.toContain(secret);
+      }
+    }
+    const [item] = JSON.parse(list.body).items;
+    expect(item).toMatchObject({
+      hasOauthToken: true,
+      hasOauthRefreshToken: true,
+      oauth: { status: 'connected', scope: 'mcp:use' },
+      oauthClient: { clientId: 'hst-client-1' },
+    });
+  });
+
+  it('drops the flow’s own fields from a PATCH, so no editor can point the refresh at another host', async () => {
+    const store = merging(connected());
+    await patchServer(store, {
+      enabled: true,
+      oauth: { status: 'connected', tokenEndpoint: 'https://attacker.example/token' },
+      oauthClient: { clientId: 'x' },
+      oauthClientSecret: 'x',
+      oauthPending: { stateHash: 'x' },
+    });
+    const [, , updates] = store.patchDoc.mock.calls[0];
+    expect(Object.keys(updates).sort()).toEqual(['enabled', 'updatedAt']);
+    // A body of nothing else is a body with nothing to update.
+    const only = await patchServer(merging(connected()), { oauth: { tokenEndpoint: 'https://attacker.example/' } });
+    expect(only.status).toBe(400);
+  });
+
+  it('a PUT round trip keeps the stored connection and registration', async () => {
+    const store = merging(connected());
+    const res = await handlers(store).putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'hostinger-mcp' },
+        body: { ...connected(), oauth: { tokenEndpoint: 'https://attacker.example/' }, hasOauthToken: true },
+      }),
+      context
+    );
+    expect(res.status).toBe(200);
+    const [, doc] = store.upsertDoc.mock.calls.find(([c]) => c === 'mcp_servers');
+    expect(doc.oauth.tokenEndpoint).toBe('https://auth.hostinger.com/api/external/v1/oauth-server/token');
+    expect(doc.oauthClientSecret).toBe('client-secret');
+    expect(doc.oauthToken).toBe('at-secret');
+  });
+
+  it('a configuration change clears the stale status and error', async () => {
+    const stale = connected({
+      id: 'replicate-mcp',
+      url: 'https://mcp.replicate.com/sse',
+      transport: 'sse',
+      authType: undefined,
+      apiKeyEnvVar: 'REPLICATE_API_KEY',
+      status: 'error',
+      lastError: 'SSE GET returned HTTP 401',
+      oauth: undefined,
+    });
+    const store = merging(stale);
+    await handlers(store, superGuard).patchConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'replicate-mcp' },
+        body: { apiKeyEnvVar: null, authType: 'oauth' },
+      }),
+      context
+    );
+    const [, , updates] = store.patchDoc.mock.calls[0];
+    expect(updates).toMatchObject({ apiKeyEnvVar: null, authType: 'oauth', status: 'untested', lastError: null });
+    // Flipping `enabled` is not a configuration change.
+    const toggled = merging(stale);
+    await patchServer(toggled, { enabled: true });
+    expect(toggled.patchDoc.mock.calls[0][2]).not.toHaveProperty('status');
+  });
+
+  it('moving an OAuth-connected server’s URL disconnects it: the token is not sent to the new host', async () => {
+    const store = merging(connected());
+    await patchServer(store, { url: 'https://mcp2.hostinger.com' }, superGuard);
+    const [, , updates] = store.patchDoc.mock.calls[0];
+    expect(updates).toMatchObject({
+      url: 'https://mcp2.hostinger.com',
+      oauthToken: null,
+      oauthRefreshToken: null,
+      oauth: null,
+      oauthPending: null,
+      status: 'untested',
+    });
+  });
+
+  it('accepts the seed’s migration of the stored Hostinger and Replicate documents', async () => {
+    // The exact bodies frontend/src/lib/aiEngine/seed.js mcpServerPatch
+    // produces for the documents stored before this change.
+    const hostinger = merging({
+      id: 'hostinger-mcp',
+      url: 'http://localhost:8100',
+      transport: 'http',
+      apiKeyEnvVar: 'VPS_API_TOKEN',
+      status: 'error',
+      lastError: 'fetch failed',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const res = await handlers(hostinger, superGuard).patchConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'hostinger-mcp' },
+        body: {
+          url: 'https://mcp.hostinger.com',
+          apiKeyEnvVar: null,
+          authType: 'oauth',
+          description: 'd',
+          notes: 'n',
+        },
+      }),
+      context
+    );
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).item).toMatchObject({
+      url: 'https://mcp.hostinger.com',
+      apiKeyEnvVar: null,
+      authType: 'oauth',
+      status: 'untested',
+      lastError: null,
+    });
+
+    const replicate = merging({
+      id: 'replicate-mcp',
+      url: 'https://mcp.replicate.com/sse',
+      transport: 'sse',
+      apiKeyEnvVar: 'REPLICATE_API_KEY',
+      status: 'error',
+      lastError: 'SSE GET returned HTTP 401',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    const rep = await handlers(replicate, superGuard).patchConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'replicate-mcp' },
+        body: { apiKeyEnvVar: null, authType: 'oauth', notes: 'n' },
+      }),
+      context
+    );
+    expect(rep.status).toBe(200);
+    expect(JSON.parse(rep.body).item).toMatchObject({ status: 'untested', lastError: null, authType: 'oauth' });
+
+    // The URL half alone would be refused: the localhost URL rule is gone.
+    const half = await handlers(merging({ id: 'h', url: 'https://mcp.hostinger.com' }), superGuard).patchConfig(
+      makeRequest({ params: { collection: 'mcp-servers', id: 'h' }, body: { url: 'http://localhost:8100' } }),
+      context
+    );
+    expect(half.status).toBe(400);
+    expect(JSON.parse(half.body).error).toMatch(/must use https/);
+  });
+});
+
+describe('config writes after the OAuth Connect security review (2026-10-08)', () => {
+  const editorOnly = {
+    requireRole: vi.fn(async (_request, minimum) =>
+      minimum === 'super_admin'
+        ? { user: null, role: null, error: { status: 403, body: '{"error":"Requires super_admin or higher"}' } }
+        : { user: { oid: 'editor-1' }, role: 'editor', error: null }
+    ),
+  };
+  const superAdmin = {
+    requireRole: vi.fn(async () => ({ user: { oid: 'owner' }, role: 'super_admin', error: null })),
+  };
+  const hostinger = (over = {}) => ({
+    id: 'hostinger-mcp',
+    name: 'Hostinger MCP',
+    url: 'https://mcp.hostinger.com',
+    transport: 'http',
+    authType: 'oauth',
+    apiKeyEnvVar: null,
+    enabled: false,
+    oauthToken: 'at',
+    oauthRefreshToken: 'rt',
+    oauthClientSecret: 'cs',
+    oauth: { status: 'connected', tokenEndpoint: 'https://auth.hostinger.com/token' },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    ...over,
+  });
+  const storeWith = (doc) => {
+    const state = { ...doc };
+    return makeStore({
+      readDoc: vi.fn(async () => ({ ...state })),
+      patchDoc: vi.fn(async (_c, _id, updates) => Object.assign(state, updates)),
+    });
+  };
+  const patchAs = (guard, store, body, { collection = 'mcp-servers', id = 'hostinger-mcp' } = {}) =>
+    createAdminIntegrationHandlers({ guard, store, ...fixed }).patchConfig(
+      makeRequest({ params: { collection, id }, body }),
+      context
+    );
+
+  it('refuses a nested path, so no editor can reach inside oauth, oauthPending or allowedTools', async () => {
+    const bodies = [
+      { 'oauth.tokenEndpoint': 'https://attacker.example/token', 'oauth.expiresAt': '2000-01-01T00:00:00Z' },
+      { 'oauthPending.tokenEndpoint': 'https://attacker.example/token' },
+      { 'allowedTools.0': 'delete_publer_posts' },
+    ];
+    for (const body of bodies) {
+      const store = storeWith(hostinger());
+      const res = await patchAs(editorOnly, store, body);
+      expect(res.status).toBe(400);
+      expect(JSON.parse(res.body).error).toMatch(/names a nested path/);
+      expect(store.patchDoc).not.toHaveBeenCalled();
+    }
+    // The same rule holds for the provider collection and for a PUT.
+    const providers = await patchAs(editorOnly, storeWith({ id: 'gemini' }), { 'models.0': 'x' }, {
+      collection: 'ai-providers',
+      id: 'gemini',
+    });
+    expect(providers.status).toBe(400);
+    const store = storeWith(hostinger());
+    const put = await createAdminIntegrationHandlers({ guard: superAdmin, store, ...fixed }).putConfig(
+      makeRequest({
+        params: { collection: 'mcp-servers', id: 'hostinger-mcp' },
+        body: { ...hostinger(), 'oauth.tokenEndpoint': 'https://attacker.example/' },
+      }),
+      context
+    );
+    expect(put.status).toBe(400);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+  });
+
+  it('switching an OAuth Connect server on or off needs super_admin; Plaud and keyless servers do not', async () => {
+    const refused = await patchAs(editorOnly, storeWith(hostinger()), { enabled: true });
+    expect(refused.status).toBe(403);
+    const allowed = await patchAs(superAdmin, storeWith(hostinger()), { enabled: true });
+    expect(allowed.status).toBe(200);
+    const plaud = await patchAs(
+      editorOnly,
+      storeWith({ id: 'plaud', url: 'https://mcp.plaud.ai/mcp', authType: 'oauth' }),
+      { enabled: true },
+      { id: 'plaud' }
+    );
+    expect(plaud.status).toBe(200);
+    const context7 = await patchAs(
+      editorOnly,
+      storeWith({ id: 'context7', url: 'https://mcp.context7.com/mcp' }),
+      { enabled: true },
+      { id: 'context7' }
+    );
+    expect(context7.status).toBe(200);
+  });
+
+  it('changing authType needs super_admin, so an editor cannot disconnect a sign-in', async () => {
+    const store = storeWith(hostinger());
+    const res = await patchAs(editorOnly, store, { authType: 'none' });
+    expect(res.status).toBe(403);
+    expect(store.patchDoc).not.toHaveBeenCalled();
+  });
+
+  it('a URL move clears a sign-in in progress even before the first connection', async () => {
+    const store = storeWith(
+      hostinger({ oauth: undefined, oauthToken: undefined, oauthPending: { stateHash: 'h' } })
+    );
+    await patchAs(superAdmin, store, { url: 'https://mcp2.hostinger.com' });
+    expect(store.patchDoc.mock.calls[0][2]).toMatchObject({ oauthPending: null, oauth: null });
   });
 });

@@ -28,7 +28,9 @@
  *     one for the connect) gets the address the guard saw, while Host and
  *     TLS SNI stay the original hostname;
  *   - redirects followed manually, up to `maxRedirects`, every hop
- *     re-validated and re-pinned;
+ *     re-validated and re-pinned — and, with `httpsOnly`, refused on any hop
+ *     that is not https, so an https request cannot be redirected down to
+ *     plain http (the MCP OAuth flow, lib/ai/mcp-oauth.js, sets it);
  *   - one deadline over the whole exchange, body included, and a byte cap on
  *     the body, so a server that sends headers and then stalls, or streams
  *     without end, is cut off rather than held open.
@@ -203,7 +205,8 @@ async function readBody(response, { maxBytes, signal }) {
  * @param {string} url
  * @param {{ fetch?: typeof fetch, resolve?: Function, dispatcherFor?: Function,
  *   maxRedirects?: number, timeoutMs?: number, maxBytes?: number,
- *   headers?: Record<string,string>, method?: string, body?: any }} [deps]
+ *   headers?: Record<string,string>, method?: string, body?: any,
+ *   httpsOnly?: boolean }} [deps]
  * @returns {Promise<{ response: Response, buffer: Buffer, text: () => string }>}
  */
 export async function guardedFetch(
@@ -218,6 +221,7 @@ export async function guardedFetch(
     headers,
     method = 'GET',
     body,
+    httpsOnly = false,
   } = {}
 ) {
   const controller = new AbortController();
@@ -226,6 +230,9 @@ export async function guardedFetch(
   let current = String(url);
   try {
     for (let hop = 0; hop <= maxRedirects; hop += 1) {
+      if (httpsOnly && !/^https:\/\//i.test(current)) {
+        throw refusal(`Only https is fetched here: ${current.split('?')[0]}`);
+      }
       const { address } = await validateFetchUrl(current, resolve ? { resolve } : {});
       const dispatcher = dispatcherFor(address);
       let response;

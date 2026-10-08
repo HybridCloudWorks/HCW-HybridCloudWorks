@@ -41,12 +41,22 @@ import {
 } from '../../../functions/src/lib/ai/model-catalog.js';
 import { USAGE_SOURCES } from '../../../functions/src/lib/ai/usage.js';
 import {
+  MCP_OAUTH_CALLBACK_PATH as API_CALLBACK_PATH,
+  PASTED_TOKEN_SERVER_IDS as API_PASTED_TOKEN_SERVER_IDS,
   mcpToolRefusal,
+  usesOAuthConnect as apiUsesOAuthConnect,
   validateMcpKeyBinding,
   validateMcpToolPolicy,
   validateMcpUrl,
 } from '../../../functions/src/lib/ai/mcp-policy.js';
-import { DEFAULT_MCP_SERVERS, PUBLER_MCP_ALLOWED_TOOLS } from './aiEngine/seed.js';
+import { DEFAULT_MCP_SERVERS, PUBLER_MCP_ALLOWED_TOOLS, mcpServerPatch } from './aiEngine/seed.js';
+import { MCP_OAUTH_CALLBACK_PATH } from '../components/admin/ai-engine/tabs.js';
+import {
+  PASTED_TOKEN_SERVER_IDS,
+  usesOAuthConnect,
+} from '../components/admin/ai-engine/McpOAuth.jsx';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { SOURCE_LABELS, labelForSource } from '../pages/admin/AIEngineUsageTab.jsx';
 
 const ids = DEFAULT_PROVIDERS.map((p) => p.id);
@@ -368,5 +378,124 @@ describe('the seeded Publer MCP server passes the API policy (#995)', () => {
     expect(
       mcpToolRefusal({ serverId: publer.id, server: publer, tool: 'get_publer_user' })
     ).toBeNull();
+  });
+});
+
+describe('the OAuth Connect servers (2026-10-08) match the API', () => {
+  const byId = (id) => DEFAULT_MCP_SERVERS.find((server) => server.id === id);
+
+  it('seeds Replicate at its SSE URL and Hostinger’s hosted server, both OAuth, neither with a key', () => {
+    expect(byId('replicate-mcp')).toMatchObject({
+      url: 'https://mcp.replicate.com/sse',
+      transport: 'sse',
+      authType: 'oauth',
+      apiKeyEnvVar: null,
+      enabled: false,
+    });
+    expect(byId('hostinger-mcp')).toMatchObject({
+      url: 'https://mcp.hostinger.com',
+      transport: 'http',
+      authType: 'oauth',
+      apiKeyEnvVar: null,
+      enabled: false,
+    });
+    expect(byId('hostinger-mcp').notes).not.toMatch(/Notion|localhost/i);
+    for (const id of ['replicate-mcp', 'hostinger-mcp']) {
+      const server = byId(id);
+      expect(validateMcpUrl(server.url)).toMatch(/^https:\/\//);
+      expect(validateMcpKeyBinding(server)).toBeNull();
+      expect(validateMcpToolPolicy(server)).toBeNull();
+      expect(apiUsesOAuthConnect(server)).toBe(true);
+    }
+  });
+
+  it('every seeded server is https and passes the API’s save-time checks', () => {
+    for (const server of DEFAULT_MCP_SERVERS) {
+      expect(() => validateMcpUrl(server.url), server.id).not.toThrow();
+      expect(() => validateMcpKeyBinding(server), server.id).not.toThrow();
+    }
+  });
+
+  it('the card and the API agree on which servers use Connect — Plaud does not', () => {
+    expect([...PASTED_TOKEN_SERVER_IDS]).toEqual([...API_PASTED_TOKEN_SERVER_IDS]);
+    for (const server of DEFAULT_MCP_SERVERS) {
+      expect(usesOAuthConnect(server), server.id).toBe(apiUsesOAuthConnect(server));
+    }
+    expect(usesOAuthConnect(byId('plaud'))).toBe(false);
+    expect(
+      DEFAULT_MCP_SERVERS.filter(usesOAuthConnect)
+        .map((s) => s.id)
+        .sort()
+    ).toEqual(['hostinger-mcp', 'replicate-mcp']);
+  });
+
+  it('migrates the stored Replicate document: no key, OAuth, the seed’s notes — URL and transport kept', () => {
+    const stored = {
+      id: 'replicate-mcp',
+      url: 'https://mcp.replicate.com/sse',
+      transport: 'sse',
+      apiKeyEnvVar: 'REPLICATE_API_KEY',
+      status: 'error',
+      lastError: 'SSE GET returned HTTP 401',
+      notes: 'Official Replicate remote MCP server (SSE). Uses REPLICATE_API_KEY.',
+    };
+    const patch = mcpServerPatch(stored);
+    expect(patch).toEqual({
+      apiKeyEnvVar: null,
+      authType: 'oauth',
+      notes: byId('replicate-mcp').notes,
+    });
+    const migrated = { ...stored, ...patch };
+    expect(validateMcpKeyBinding(migrated)).toBeNull();
+    expect(apiUsesOAuthConnect(migrated)).toBe(true);
+    expect(mcpServerPatch(migrated)).toEqual({});
+  });
+
+  it('migrates the stored Hostinger document in one patch the API accepts', () => {
+    const stored = {
+      id: 'hostinger-mcp',
+      url: 'http://localhost:8100',
+      transport: 'http',
+      apiKeyEnvVar: 'VPS_API_TOKEN',
+      description:
+        'Administer Hostinger resources (VPS, domains, DNS, and hosting) via the Hostinger API',
+      notes: 'Requires the secret (fetched from Notion DB).',
+      status: 'error',
+      lastError: 'fetch failed',
+    };
+    const patch = mcpServerPatch(stored);
+    expect(patch).toEqual({
+      url: 'https://mcp.hostinger.com',
+      apiKeyEnvVar: null,
+      authType: 'oauth',
+      description: byId('hostinger-mcp').description,
+      notes: byId('hostinger-mcp').notes,
+    });
+    // One patch: the old key name is refused by itself, so it must leave
+    // in the same write that moves the URL.
+    expect(() => validateMcpKeyBinding(stored)).toThrow(/not allowed/);
+    const migrated = { ...stored, ...patch };
+    expect(validateMcpUrl(migrated.url)).toBe('https://mcp.hostinger.com/');
+    expect(validateMcpKeyBinding(migrated)).toBeNull();
+    expect(apiUsesOAuthConnect(migrated)).toBe(true);
+    expect(mcpServerPatch(migrated)).toEqual({});
+  });
+
+  it('touches no other server, and treats an absent key name as no key name', () => {
+    const others = DEFAULT_MCP_SERVERS.filter(
+      (s) => !['replicate-mcp', 'hostinger-mcp'].includes(s.id)
+    );
+    for (const server of others) {
+      expect(mcpServerPatch(server), server.id).toEqual({});
+    }
+    const { apiKeyEnvVar: _gone, ...noKeyField } = byId('replicate-mcp');
+    expect(mcpServerPatch(noKeyField)).toEqual({});
+  });
+
+  it('the callback page sits where the API registers the redirect URI', () => {
+    expect(MCP_OAUTH_CALLBACK_PATH).toBe(API_CALLBACK_PATH);
+    expect(MCP_OAUTH_CALLBACK_PATH).toBe('/admin/ai-engine/oauth/callback');
+    const app = readFileSync(join(process.cwd(), 'src', 'App.jsx'), 'utf8');
+    expect(app).toContain('path="ai-engine/oauth/callback"');
   });
 });

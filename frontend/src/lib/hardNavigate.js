@@ -25,3 +25,13 @@
 export function hardReplace(url) {
   window.location.replace(url);
 }
+
+/**
+ * Leave the app for another site with a real navigation that Back returns
+ * from: `assign`, not `replace`, because the page being left is the AI
+ * Engine card the owner pressed Connect on, which is exactly where Back
+ * from a vendor's sign-in page should land.
+ */
+export function hardAssign(url) {
+  window.location.assign(url);
+}

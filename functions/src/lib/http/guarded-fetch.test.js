@@ -184,6 +184,25 @@ describe('guardedFetch', () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
 
+  it('with httpsOnly, refuses an http URL and an https → http redirect before fetching it', async () => {
+    const fetch = vi.fn(async () => res(200));
+    await expect(
+      guardedFetch('http://a.example/x', { fetch, resolve: publicAddr, dispatcherFor: pin, httpsOnly: true })
+    ).rejects.toMatchObject({ refused: true });
+    expect(fetch).not.toHaveBeenCalled();
+
+    const down = vi.fn(async () => res(302, { location: 'http://a.example/plain' }));
+    await expect(
+      guardedFetch('https://a.example/x', { fetch: down, resolve: publicAddr, dispatcherFor: pin, httpsOnly: true })
+    ).rejects.toMatchObject({ refused: true });
+    expect(down).toHaveBeenCalledTimes(1);
+
+    // Without the option, http stays allowed, as every existing caller expects.
+    const plain = vi.fn(async () => res(200));
+    await guardedFetch('http://a.example/x', { fetch: plain, resolve: publicAddr, dispatcherFor: pin });
+    expect(plain).toHaveBeenCalledTimes(1);
+  });
+
   it('resolves a relative Location against the current URL', async () => {
     const fetch = vi
       .fn()

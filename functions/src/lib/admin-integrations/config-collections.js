@@ -21,12 +21,24 @@
  *     (PUBLER_API_KEY) cannot be saved without one, any write that names
  *     `allowedTools` needs `super_admin`, and so does switching such a
  *     server on or off: enabling it is what puts its tools in reach.
+ *   - Since 2026-10-08 the OAuth Connect flow (ai/mcp-oauth.js) keeps four
+ *     more fields on a server — `oauth` and `oauthClient` (readable),
+ *     `oauthClientSecret` and `oauthPending` (write-only). No config write
+ *     can set any of them; only the cms/mcp/.../oauth routes do. A write
+ *     that changes a server's URL, transport, key or sign-in method resets
+ *     its status to untested and clears its last error, and one that moves
+ *     the URL or sign-in method of an OAuth-connected server disconnects it.
+ *     Changing `authType`, and switching an OAuth Connect server on or off,
+ *     need super_admin. No body on either collection may name a nested
+ *     path (`a.b`): Cosmos patches those inside a field these checks read
+ *     whole (nestedFieldError).
  *
  * Each handler body is a module-level function over `ctx` (guard, store, now,
  * aiConfigChanged); the factory at the bottom only wires them.
  */
 import {
   requiresToolAllowlist,
+  usesOAuthConnect,
   validateMcpKeyBinding,
   validateMcpToolPolicy,
   validateMcpUrl,
@@ -42,19 +54,98 @@ const CONFIG_COLLECTIONS = {
 // The token values are write-only, but consumers need to know whether one is
 // stored (RecordingsPage renders 'connected' from status + token presence,
 // and since 2026-09-05 shows whether the 12-hour refresh timer has a refresh
-// token to work with) — so reads carry a boolean in place of each.
-const stripOAuthToken = ({ oauthToken, oauthRefreshToken, ...rest }) => ({
+// token to work with) — so reads carry a boolean in place of each. The OAuth
+// Connect flow's client secret and pending sign-in (PKCE verifier, state
+// hash) are write-only too (2026-10-08, ai/mcp-oauth.js), with no boolean:
+// nothing on the page needs to know they exist.
+const stripOAuthToken = ({
+  oauthToken,
+  oauthRefreshToken,
+  oauthClientSecret: _clientSecret,
+  oauthPending: _pending,
+  ...rest
+}) => ({
   ...rest,
   hasOauthToken: Boolean(oauthToken),
   hasOauthRefreshToken: Boolean(oauthRefreshToken),
 });
+
+/**
+ * Fields only the OAuth Connect flow writes (ai/mcp-oauth-handlers.js), never
+ * a config write. `oauth.tokenEndpoint` is where the refresh token is POSTed
+ * and `oauthPending` is what a callback is checked against, so a browser that
+ * could set either could have a stored refresh token sent to a host it
+ * chose. They are dropped from every PUT and PATCH body, silently, because a
+ * form round-tripping a read carries the readable two back; a PUT keeps the
+ * stored values (carryForwardTokens).
+ */
+const SERVER_MANAGED_OAUTH_FIELDS = Object.freeze([
+  'oauth',
+  'oauthClient',
+  'oauthClientSecret',
+  'oauthPending',
+]);
+
+function withoutServerManagedFields(container, fields) {
+  if (container !== 'mcp_servers') return fields;
+  const kept = { ...fields };
+  for (const key of SERVER_MANAGED_OAUTH_FIELDS) delete kept[key];
+  return kept;
+}
+
+/**
+ * The sentence refusing a body that names a nested path, or null
+ * (2026-10-08, security review of the OAuth Connect change). A PATCH reaches
+ * Cosmos as field-path operations, and `a.b` is a NESTED write
+ * (cosmos-client.js toJsonPointer): `oauth.tokenEndpoint` would slip past the
+ * whole-field guard above and point the refresh — refresh token and client
+ * secret — at a host an editor chose, and `allowedTools.0` would slip past
+ * #995's super_admin rule. Every check on these routes reads top-level
+ * fields whole, and no caller writes a nested one, so no dotted name is
+ * accepted on either collection.
+ */
+function nestedFieldError(fields) {
+  const nested = Object.keys(fields).find((key) => key.includes('.'));
+  return nested
+    ? `Field "${nested.slice(0, 80)}" names a nested path; send the whole top-level field instead.`
+    : null;
+}
+
+/** The fields whose change makes a server's last test result meaningless. */
+const CONNECTION_FIELDS = Object.freeze(['url', 'transport', 'apiKeyEnvVar', 'authType']);
+
+const fieldChanged = (fields, existing, key) =>
+  Object.prototype.hasOwnProperty.call(fields, key) &&
+  String(fields[key] ?? '').trim() !== String(existing?.[key] ?? '').trim();
+
+/**
+ * What a config write on `mcp_servers` changes besides the fields it names
+ * (2026-10-08). A server whose URL, transport, key or sign-in method changed
+ * has not been tested in its new shape, so its status goes back to
+ * `untested` and the previous error goes — a red "SSE GET returned HTTP 401"
+ * from the old configuration must not sit on the card of the new one. And a
+ * server connected through OAuth Connect loses that connection when its URL
+ * or sign-in method changes: the token was issued for the old resource
+ * (RFC 8707) and is not sent anywhere else.
+ */
+function connectionChangeEffects(container, fields, existing) {
+  if (container !== 'mcp_servers' || !existing) return {};
+  if (!CONNECTION_FIELDS.some((key) => fieldChanged(fields, existing, key))) return {};
+  const effects = { status: 'untested', lastError: null };
+  const reroutes = fieldChanged(fields, existing, 'url') || fieldChanged(fields, existing, 'authType');
+  // A sign-in in progress is cleared too: its token would be for the old resource.
+  if (reroutes && (existing.oauth || existing.oauthPending)) {
+    Object.assign(effects, { oauthToken: null, oauthRefreshToken: null, oauth: null, oauthPending: null });
+  }
+  return effects;
+}
 
 /** What a read of this container returns: tokens stripped for mcp_servers. */
 const readableDoc = (container, doc) => (container === 'mcp_servers' ? stripOAuthToken(doc) : doc);
 
 /**
  * The checks every mcp_servers write passes (ADR 0033, security finding):
- * the URL is https (loopback excepted) and the key name is on the allowlist.
+ * the URL is https and the key name is on the allowlist.
  * Only the fields present are checked, so a PATCH that flips `enabled` on a
  * server saved before the allowlist still goes through; the next Sync or
  * call refuses the bad field with the same sentence.
@@ -107,25 +198,33 @@ const writeError = (container, fields, existing = null) =>
 function movesCredentialRouting(container, fields, existing) {
   if (container !== 'mcp_servers') return false;
   if (!existing) return true;
-  const changed = (key) =>
-    Object.prototype.hasOwnProperty.call(fields, key) &&
-    String(fields[key] ?? '').trim() !== String(existing[key] ?? '').trim();
-  return changed('url') || changed('apiKeyEnvVar');
+  // `authType` since 2026-10-08: it decides whether a server signs in with
+  // OAuth Connect, and changing it on a connected server disconnects it
+  // (connectionChangeEffects), so an editor could otherwise cut off a
+  // super_admin's sign-in.
+  return (
+    fieldChanged(fields, existing, 'url') ||
+    fieldChanged(fields, existing, 'apiKeyEnvVar') ||
+    fieldChanged(fields, existing, 'authType')
+  );
 }
 
 /**
  * Whether a write on `mcp_servers` changes which tools can be called (#995):
  * any body that names `allowedTools`, or one that names `enabled` on a
- * server whose key requires a tool list. Those need `super_admin` like a
- * routing move. An editor may still switch Firecrawl, Replicate and the
- * keyless servers on and off, as before.
+ * server whose key requires a tool list or that signs in with OAuth Connect
+ * (2026-10-08: its tools act on the account a super_admin signed in with,
+ * and Hostinger's can change VPS, DNS and domain settings). Those need
+ * `super_admin` like a routing move. An editor may still switch Firecrawl,
+ * Plaud and the keyless servers on and off, as before.
  */
 function changesToolReach(container, fields, existing) {
   if (container !== 'mcp_servers') return false;
   const has = (key) => Object.prototype.hasOwnProperty.call(fields, key);
   if (has('allowedTools')) return true;
+  if (!has('enabled')) return false;
   const keyName = has('apiKeyEnvVar') ? fields.apiKeyEnvVar : existing?.apiKeyEnvVar;
-  return has('enabled') && requiresToolAllowlist(keyName);
+  return requiresToolAllowlist(keyName) || usesOAuthConnect({ ...existing, ...fields });
 }
 
 /** The writes that need `super_admin` on top of `editor`. */
@@ -183,8 +282,9 @@ function carryForwardTokens(doc, incoming, existing) {
   // `allowedTools` rides along for a different reason (#995): a PUT that
   // omits it must not widen a server back to every tool, so an omitted list
   // keeps the stored one. Only a write that names it, at super_admin,
-  // changes it.
-  for (const key of ['oauthToken', 'oauthRefreshToken', 'allowedTools']) {
+  // changes it. The OAuth Connect fields (2026-10-08) are never in a PUT
+  // body at all (SERVER_MANAGED_OAUTH_FIELDS), so they always carry.
+  for (const key of ['oauthToken', 'oauthRefreshToken', 'allowedTools', ...SERVER_MANAGED_OAUTH_FIELDS]) {
     if (!Object.prototype.hasOwnProperty.call(incoming, key) && existing?.[key] !== undefined) {
       doc[key] = existing[key];
     }
@@ -202,7 +302,10 @@ function carryForwardTokens(doc, incoming, existing) {
  * value on the next read.
  */
 function putDocumentOf(container, body, existing = null) {
-  const { hasOauthToken: _ignored, hasOauthRefreshToken: _ignored2, ...incoming } = body;
+  const { hasOauthToken: _ignored, hasOauthRefreshToken: _ignored2, ...fields } = body;
+  const nested = nestedFieldError(fields);
+  if (nested) return { error: nested };
+  const incoming = withoutServerManagedFields(container, fields);
   const problem = writeError(container, incoming, existing);
   return problem ? { error: problem } : { incoming };
 }
@@ -236,8 +339,11 @@ function patchUpdatesOf(container, body, existing = null) {
     id: _ignored,
     hasOauthToken: _readArtefact,
     hasOauthRefreshToken: _readArtefact2,
-    ...updates
+    ...fields
   } = body;
+  const nested = nestedFieldError(fields);
+  if (nested) return { error: nested };
+  const updates = withoutServerManagedFields(container, fields);
   if (Object.keys(updates).length === 0) {
     return { error: 'Body must contain at least one updatable field' };
   }
@@ -302,7 +408,10 @@ async function putConfig(ctx, request, context) {
       createdAt: existing?.createdAt || nowIso,
       updatedAt: nowIso,
     };
-    if (container === 'mcp_servers') carryForwardTokens(doc, incoming, existing);
+    if (container === 'mcp_servers') {
+      carryForwardTokens(doc, incoming, existing);
+      Object.assign(doc, connectionChangeEffects(container, incoming, existing));
+    }
     await ctx.store.upsertDoc(container, doc);
     if (container === 'ai_providers') ctx.aiConfigChanged();
     await auditConfigWrite(ctx, context, {
@@ -335,6 +444,7 @@ async function patchConfig(ctx, request, context) {
     }
     const updated = await ctx.store.patchDoc(container, prepared.id, {
       ...prepared.updates,
+      ...connectionChangeEffects(container, prepared.updates, prepared.existing),
       updatedAt: ctx.now().toISOString(),
     });
     if (container === 'ai_providers') ctx.aiConfigChanged();

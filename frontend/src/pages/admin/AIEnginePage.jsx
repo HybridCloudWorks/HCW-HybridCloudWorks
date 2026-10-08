@@ -8,7 +8,9 @@
  *   2. Tasks         — one row per AI task: its mode (Recommended / Global /
  *                      Custom), the effective model the router will use,
  *                      and a per-task Test (ADR 0034 §4)
- *   3. MCP Servers   — server cards with tool browser, Sync, Add Server form
+ *   3. MCP Servers   — server cards with tool browser, Sync, Add Server form,
+ *                      and Connect for servers that sign in with OAuth
+ *                      (components/admin/ai-engine/McpOAuth.jsx)
  *   4. Playground    — one provider or MCP tool, a prompt, the answer and cost
  *   5. Usage         — every recorded call, by provider and by feature
  *
@@ -71,6 +73,12 @@ import PriorityList from '@/components/admin/ai-engine/PriorityList';
 import CatalogDrawer from '@/components/admin/ai-engine/CatalogDrawer';
 import useSelection from '@/components/admin/ai-engine/useSelection';
 import { TABS, resolveTab } from '@/components/admin/ai-engine/tabs';
+import McpOAuthPanel, {
+  McpOAuthResultBanner,
+  OAuthStateBadge,
+  oauthCardState,
+  usesOAuthConnect,
+} from '@/components/admin/ai-engine/McpOAuth';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -80,6 +88,12 @@ function StatusBadge({ status }) {
     error: { label: 'Error', cls: 'bg-red-100 text-red-700 border-red-200' },
     untested: { label: 'Untested', cls: 'bg-amber-100 text-amber-700 border-amber-200' },
     unavailable: { label: 'No API yet', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+    // An OAuth Connect server nobody has signed in to, or whose sign-in
+    // expired: amber, because nothing failed (mcp.js, 2026-10-08).
+    needs_connection: {
+      label: 'Not connected',
+      cls: 'bg-amber-100 text-amber-700 border-amber-200',
+    },
   };
   const { label, cls } = map[status] || map.untested;
   return (
@@ -617,11 +631,30 @@ function ServicesTab({
 
 // ─── MCP Servers Tab ──────────────────────────────────────────────────────────
 
-function McpServerCard({ server, onToggle, onSync, onRemove }) {
+/**
+ * A card's badge and whether its last error shows in red. A server that
+ * signs in with OAuth Connect shows its sign-in state, not the last RPC's
+ * status: before Connect, a 401 is the expected answer, not an error.
+ */
+function mcpCardStatus(server) {
+  const oauth = usesOAuthConnect(server);
+  const oauthState = oauth ? oauthCardState(server) : null;
+  return {
+    oauth,
+    badge: oauth ? <OAuthStateBadge state={oauthState} /> : <StatusBadge status={server.status} />,
+    showError:
+      Boolean(server.lastError) &&
+      server.status === 'error' &&
+      (!oauth || oauthState === 'connected'),
+  };
+}
+
+export function McpServerCard({ server, onToggle, onSync, onRemove }) {
   const [syncing, setSyncing] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { oauth, badge, showError } = mcpCardStatus(server);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -656,7 +689,7 @@ function McpServerCard({ server, onToggle, onSync, onRemove }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-semibold text-sm">{server.name}</span>
-              <StatusBadge status={server.status} />
+              {badge}
               {Array.isArray(server.allowedTools) ? (
                 // Read-only: the API enforces the list, and only a
                 // super_admin config write changes it (#995).
@@ -745,8 +778,9 @@ function McpServerCard({ server, onToggle, onSync, onRemove }) {
           </div>
         )}
 
+        {oauth && <McpOAuthPanel server={server} />}
         {server.notes && <p className="text-xs text-slate-400 mt-2 italic">{server.notes}</p>}
-        {server.lastError && server.status === 'error' && (
+        {showError && (
           <div className="mt-2 p-2 bg-red-50 rounded text-xs text-red-600">{server.lastError}</div>
         )}
       </CardContent>
@@ -902,14 +936,18 @@ function McpTab({ servers }) {
         </div>
       </div>
 
+      <McpOAuthResultBanner />
+
       <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-xs text-blue-700 dark:text-blue-300 flex gap-2">
         <Info className="h-4 w-4 shrink-0 mt-0.5" />
         <div>
           <strong>Transport:</strong> MCP requests go through the{' '}
           <strong>Azure Functions API</strong>. Each server uses its configured transport
           (Streamable HTTP or SSE). API keys come from Azure Function App settings / Key Vault
-          references, and OAuth tokens are stored in Cosmos DB — never exposed to the browser. Click{' '}
-          <em>Sync Tools</em> to fetch the tool list server-side.
+          references, and OAuth tokens are stored in Cosmos DB — never exposed to the browser.
+          Servers that sign in with OAuth show <em>Connect</em>: sign in at the provider once, and
+          the API keeps and renews the token. Click <em>Sync Tools</em> to fetch the tool list
+          server-side.
         </div>
       </div>
 

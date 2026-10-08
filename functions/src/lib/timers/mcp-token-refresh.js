@@ -1,0 +1,96 @@
+/**
+ * mcp-token-refresh.js — what the `refreshPlaudToken` timer runs since
+ * 2026-10-08: the MCP OAuth token refresh, of which Plaud is one half.
+ *
+ *   1. Plaud's own refresh, unchanged (plaud-token.js). Plaud's endpoint is
+ *      not the standard refresh grant, so it keeps its own path and is never
+ *      routed through the one below.
+ *   2. The standard refresh grant (ai/mcp-oauth.js) for every server
+ *      connected through OAuth Connect whose access token expires within 30
+ *      minutes — or already has, which over a 12-hour schedule is the usual
+ *      case for an hour-long token. An idle server's refresh token is
+ *      thereby spent and renewed at least once a day, so a vendor whose
+ *      refresh tokens lapse after days unused does not quietly disconnect.
+ *
+ * WHY THE PLAUD TIMER AND NOT A NEW ONE. A timer is armed by naming its flag
+ * suffix in the `enabled_timers` workspace variable, and a new suffix must
+ * also be added to `local.timer_catalogue` (infra/functionapp.tf) and the
+ * validation list in infra/variables.tf — a Terraform change and a TFC
+ * apply by the owner. Extending this one keeps its name, its flag
+ * (FEATURE_FLAG_REFRESH_PLAUD_TOKEN) and its schedule, so nothing needs
+ * re-arming. Requests about to use a token never wait for this timer
+ * anyway: mcp.js refreshes on demand two minutes before expiry and on a 401.
+ *
+ * One server failing never stops the others; each half reports its own
+ * summary.
+ */
+import { createOAuthHttp, refreshOAuthToken, tokenExpiresWithin } from '../ai/mcp-oauth.js';
+import { usesOAuthConnect } from '../ai/mcp-policy.js';
+import { createPlaudTokenRefresh } from './plaud-token.js';
+
+/** The timer refreshes a connected server whose token has less than this left. */
+export const TIMER_REFRESH_WINDOW_MS = 30 * 60_000;
+
+export function createMcpTokenRefresh({
+  store,
+  fetch,
+  oauthHttp = createOAuthHttp(),
+  now = () => new Date(),
+  log = {},
+}) {
+  const plaud = createPlaudTokenRefresh({ store, fetch, now, log });
+
+  async function refreshConnectedServers() {
+    const rows = await store.queryDocs(
+      'mcp_servers',
+      "SELECT * FROM c WHERE c.oauth.status = 'connected'",
+      []
+    );
+    const summary = { checked: 0, refreshed: 0, notDue: 0, disconnected: 0, failed: 0 };
+    for (const server of rows || []) {
+      if (!usesOAuthConnect(server) || server?.oauth?.status !== 'connected') continue;
+      summary.checked += 1;
+      if (!tokenExpiresWithin(server, TIMER_REFRESH_WINDOW_MS, now)) {
+        summary.notDue += 1;
+        continue;
+      }
+      try {
+        const result = await refreshOAuthToken({
+          store,
+          serverId: server.id,
+          server,
+          http: oauthHttp,
+          now,
+          log,
+        });
+        if (result.ok) summary.refreshed += 1;
+        else if (result.disconnected) summary.disconnected += 1;
+        else summary.failed += 1;
+      } catch (error) {
+        summary.failed += 1;
+        log.error?.(`[refreshPlaudToken] ${server.id}: ${error?.message || error}`);
+      }
+    }
+    return summary;
+  }
+
+  async function run() {
+    let plaudResult;
+    try {
+      plaudResult = await plaud.run();
+    } catch (error) {
+      log.error?.(`[refreshPlaudToken] Plaud refresh threw: ${error?.message || error}`);
+      plaudResult = { ok: false, reason: 'exception' };
+    }
+    let oauth;
+    try {
+      oauth = await refreshConnectedServers();
+    } catch (error) {
+      log.error?.(`[refreshPlaudToken] OAuth refresh sweep failed: ${error?.message || error}`);
+      oauth = { error: String(error?.message || error).slice(0, 300) };
+    }
+    return { plaud: plaudResult, oauth };
+  }
+
+  return { run };
+}

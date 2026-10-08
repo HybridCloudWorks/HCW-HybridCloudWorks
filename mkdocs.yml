@@ -136,6 +136,7 @@ nav:
       - Docker Hub publishing (OIDC connection): runbooks/docker-hub-publishing.md
       - Copilot code review MCP servers: runbooks/copilot-code-review-mcp.md
       - Publer REST proxy and MCP server: runbooks/publer.md
+      - MCP servers — OAuth Connect: runbooks/mcp-oauth-connect.md
   - Standards:
       - IaC repository standard: standards/iac-repository-standard.md
       - Naming convention: standards/naming-convention.md

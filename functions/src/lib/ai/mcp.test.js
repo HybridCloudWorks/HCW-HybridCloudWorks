@@ -103,13 +103,15 @@ describe('MCP secret and URL helpers', () => {
     expect(
       validateMcpKeyBinding({ url: 'https://MCP.Replicate.com/sse', apiKeyEnvVar: 'REPLICATE_API_KEY' })
     ).toBe('REPLICATE_API_KEY');
-    expect(validateMcpKeyBinding({ url: 'http://localhost:8100', apiKeyEnvVar: 'VPS_API_TOKEN' })).toBe(
-      'VPS_API_TOKEN'
-    );
     // The finding: a shared key named on a server at any other host.
     expect(() =>
-      validateMcpKeyBinding({ url: 'https://attacker.example/mcp', apiKeyEnvVar: 'VPS_API_TOKEN' })
-    ).toThrow(/VPS_API_TOKEN may only be sent to localhost/);
+      validateMcpKeyBinding({ url: 'https://attacker.example/mcp', apiKeyEnvVar: 'REPLICATE_API_KEY' })
+    ).toThrow(/REPLICATE_API_KEY may only be sent to mcp\.replicate\.com/);
+    // The lab-host token's localhost binding is gone with the localhost
+    // Hostinger entry (2026-10-08): the name is refused everywhere now.
+    for (const url of ['http://localhost:8100', 'https://mcp.hostinger.com']) {
+      expect(() => validateMcpKeyBinding({ url, apiKeyEnvVar: 'VPS_API_TOKEN' })).toThrow(/not allowed/);
+    }
     expect(() =>
       validateMcpKeyBinding({ url: 'https://firecrawl.dev.attacker.example/', apiKeyEnvVar: 'FIRECRAWL_API_KEY' })
     ).toThrow(/may only be sent to mcp\.firecrawl\.dev/);
@@ -124,9 +126,9 @@ describe('MCP secret and URL helpers', () => {
   });
 
   it('resolves no bearer for a shared key at an unbound host, or with no URL at all (AP-B1)', () => {
-    const env = { FIRECRAWL_API_KEY: 'fc', VPS_API_TOKEN: 'vps' };
+    const env = { FIRECRAWL_API_KEY: 'fc' };
     expect(
-      resolveMcpAuthHeaders({ apiKeyEnvVar: 'VPS_API_TOKEN', url: 'https://attacker.example/', env })
+      resolveMcpAuthHeaders({ apiKeyEnvVar: 'FIRECRAWL_API_KEY', url: 'https://attacker.example/', env })
     ).toEqual({});
     expect(resolveMcpAuthHeaders({ apiKeyEnvVar: 'FIRECRAWL_API_KEY', env })).toEqual({});
     expect(
@@ -144,14 +146,17 @@ describe('MCP secret and URL helpers', () => {
     ).toEqual({ Authorization: 'Bearer oauth' });
   });
 
-  it('requires https (loopback http excepted) and rejects embedded credentials', () => {
+  it('requires https with no exception and rejects embedded credentials', () => {
     expect(validateMcpUrl('https://example.test/mcp')).toBe('https://example.test/mcp');
     expect(() => validateMcpUrl('ftp://example.test/mcp')).toThrow(/https/);
     // A bearer token over plain http is readable on the wire (ADR 0033).
     expect(() => validateMcpUrl('http://example.test/mcp')).toThrow(/must use https/);
-    // The seeded Hostinger entry: no wire is crossed to localhost.
-    expect(validateMcpUrl('http://localhost:8100')).toBe('http://localhost:8100/');
-    expect(validateMcpUrl('http://127.0.0.1:8100/mcp')).toBe('http://127.0.0.1:8100/mcp');
+    // The loopback exception served only the localhost Hostinger entry,
+    // which a Function App could never reach; it is gone (2026-10-08).
+    for (const url of ['http://localhost:8100', 'http://127.0.0.1:8100/mcp', 'http://[::1]:8100/']) {
+      expect(() => validateMcpUrl(url)).toThrow(/must use https/);
+    }
+    expect(validateMcpUrl('https://mcp.hostinger.com')).toBe('https://mcp.hostinger.com/');
     expect(() => validateMcpUrl('https://user:pass@example.test/mcp')).toThrow(/credentials/);
   });
 });
@@ -223,7 +228,7 @@ describe('syncMcpTools', () => {
       id: 'rogue',
       url: 'https://attacker.example/mcp',
       transport: 'http',
-      apiKeyEnvVar: 'VPS_API_TOKEN',
+      apiKeyEnvVar: 'FIRECRAWL_API_KEY',
       enabled: true,
     };
     const store = makeStore(server);
@@ -231,16 +236,16 @@ describe('syncMcpTools', () => {
     const handlers = createMcpHandlers({
       guard: allowGuard,
       store,
-      env: { VPS_API_TOKEN: 'the-lab-token' },
+      env: { FIRECRAWL_API_KEY: 'the-firecrawl-key' },
       fetch,
       now: fixedNow,
     });
     const result = await handlers.syncMcpTools(request({ serverId: 'rogue' }), context);
     const body = JSON.parse(result.body);
     expect(body.ok).toBe(false);
-    expect(body.error).toMatch(/VPS_API_TOKEN may only be sent to/);
+    expect(body.error).toMatch(/FIRECRAWL_API_KEY may only be sent to/);
     expect(fetch).not.toHaveBeenCalled();
-    expect(result.body).not.toContain('the-lab-token');
+    expect(result.body).not.toContain('the-firecrawl-key');
 
     const proxied = await handlers.mcpProxy(
       request({ serverId: 'rogue', tool: 'anything', arguments: {} }),
@@ -412,24 +417,23 @@ describe('Publer MCP binding (2026-10-07)', () => {
   });
 
   it('leaves every other key, host and URL rule as it was', () => {
+    // The lab-host token left with the localhost Hostinger entry (2026-10-08).
     expect([...KNOWN_INTEGRATION_KEY_NAMES]).toEqual([
       'FIRECRAWL_API_KEY',
       'PUBLER_API_KEY',
       'REPLICATE_API_KEY',
-      'VPS_API_TOKEN',
     ]);
     expect(INTEGRATION_KEY_HOSTS).toEqual({
       FIRECRAWL_API_KEY: ['mcp.firecrawl.dev', 'api.firecrawl.dev'],
       PUBLER_API_KEY: ['mcp.publer.com'],
       REPLICATE_API_KEY: ['mcp.replicate.com', 'api.replicate.com'],
-      VPS_API_TOKEN: ['localhost', '127.0.0.1', '[::1]'],
     });
     // A query string elsewhere is untouched by the Publer rule.
     expect(validateMcpUrl('https://example.test/mcp?profile=a')).toBe(
       'https://example.test/mcp?profile=a'
     );
     // No other shared key gained mcp.publer.com.
-    for (const name of ['FIRECRAWL_API_KEY', 'REPLICATE_API_KEY', 'VPS_API_TOKEN']) {
+    for (const name of ['FIRECRAWL_API_KEY', 'REPLICATE_API_KEY']) {
       expect(() => validateMcpKeyBinding({ url: PUBLER_MCP_URL, apiKeyEnvVar: name })).toThrow(
         /may only be sent to/
       );
@@ -529,7 +533,7 @@ describe('MCP tool allowlist (#995, 2026-10-07)', () => {
       );
     }
     // The other shared keys, and no key, need no list.
-    for (const apiKeyEnvVar of ['FIRECRAWL_API_KEY', 'REPLICATE_API_KEY', 'VPS_API_TOKEN', 'MCP_X', null]) {
+    for (const apiKeyEnvVar of ['FIRECRAWL_API_KEY', 'REPLICATE_API_KEY', 'MCP_X', null]) {
       expect(validateMcpToolPolicy({ apiKeyEnvVar })).toBeNull();
     }
   });
