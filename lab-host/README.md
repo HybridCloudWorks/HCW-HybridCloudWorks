@@ -699,8 +699,12 @@ belonged to another user:
   expires: `Status token expires on <day> (<n> days)`, red inside the last
   30 days with the renewal steps named. Coder documents the scope as "View
   API keys"; it reads key metadata, never a secret. A token made without it
-  (the 2026-09-28 one) is refused that read with 403, and the card says
-  `expiry unknown: add the api_key:read scope at the next renewal`.
+  (the 2026-09-28 one) is refused that read, and Coder v2.38 says so with
+  **404**, not 403: its `apiKeyByID` handler answers an unauthorized read as
+  not found (`httpapi.Is404Error`). Both codes mean the scope (#1009), and
+  the card says `Status token expiry unknown: … Re-issue the token with
+  api_key:read added`. Re-issuing is the steps below, with the scope on the
+  `coder tokens create` line as written there.
 
 | `hcw-status`'s role, and the token's scope | The three calls | Change a template | Delete a template | Stop a workspace |
 | --- | --- | --- | --- | --- |

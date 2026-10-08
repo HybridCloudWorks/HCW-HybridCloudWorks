@@ -92,10 +92,21 @@ export const TOKEN_RENEW_WARNING_DAYS = 30;
  * The Coder scope that lets a token read its own record (`GET
  * /api/v2/users/me/keys/{id}`), documented by Coder as "View API keys". A
  * token scoped to `template:read` and `workspace:read` alone is refused that
- * read (403), so the card can only say "unknown" until the token is renewed
+ * read, so the card can only say "unknown" until the token is re-issued
  * with this scope added (lab-host/README.md, "The status token for the site").
+ *
+ * THE REFUSAL IS A 404, NOT A 403. Coder v2.38.0's `apiKeyByID` answers
+ * through `httpapi.Is404Error`, which counts an authorization failure as not
+ * found ("Both actual 404s and unauthorized errors should return 404s"), so
+ * a token without this scope reads its own record as missing. Until #1009
+ * only 403 meant "scope", and the expiry check could never say what to do.
+ * A 404 for the token's own id cannot mean the record is absent: Coder has
+ * just authenticated the request with that very key.
  */
 export const TOKEN_SCOPE_FOR_EXPIRY = 'api_key:read';
+
+/** The statuses Coder refuses an unscoped own-record read with: 403, and 404 since v2.38. */
+export const SCOPE_REFUSAL_STATUSES = Object.freeze([403, 404]);
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -290,9 +301,9 @@ async function readDetailOrUnknown({ fetchImpl, config, context }) {
  * the only reminder was a calendar. Reads the token's own record; answers
  * `{ known: true, expiresAt, daysLeft, renewSoon, tokenName, scopes }`, or
  * `{ known: false, reason }` with `reason` one of `unset`, `shape` (not a
- * Coder key, or a record without a date), `scope` (403: the token lacks
- * TOKEN_SCOPE_FOR_EXPIRY), `refused` (401: expired or revoked) or `error`.
- * Never throws, never carries the token.
+ * Coder key, or a record without a date), `scope` (403 or 404: the token
+ * lacks TOKEN_SCOPE_FOR_EXPIRY), `refused` (401: expired or revoked) or
+ * `error`. Never throws, never carries the token.
  */
 export async function readTokenExpiry({ fetchImpl, config, context, now = () => Date.now() }) {
   const keyId = tokenKeyId(config?.token);
@@ -319,12 +330,18 @@ function unknownExpiry(reason) {
 }
 
 /**
- * Why Coder would not give the record: the scope (403), the token (401), or
- * something else — logged as a status only, never the message, which
- * carries the request path and with it the key id.
+ * Why Coder would not give the record: the scope (403, or 404 from v2.38;
+ * see TOKEN_SCOPE_FOR_EXPIRY), the token (401), or something else — logged
+ * as a status only, never the message, which carries the request path and
+ * with it the key id.
  */
 function reasonForRefusal(error, context) {
-  if (error?.status === 403) return 'scope';
+  if (SCOPE_REFUSAL_STATUSES.includes(error?.status)) {
+    context?.warn?.(
+      `coder-status: Coder would not show CODER_STATUS_TOKEN its own record (${error.status}), which is how it refuses a token without the ${TOKEN_SCOPE_FOR_EXPIRY} scope; re-issue the token with ${TOKEN_SCOPE_FOR_EXPIRY} added (lab-host/README.md, "The status token for the site") and the expiry becomes readable`
+    );
+    return 'scope';
+  }
   if (error?.status === 401) return 'refused';
   const status = Number.isInteger(error?.status) ? `Coder answered ${error.status}` : 'no answer';
   context?.warn?.(`coder-status: the token's own record could not be read (${status})`);
