@@ -323,10 +323,14 @@ building and publishing apart:
   request that touches the image. It builds both targets, smoke-tests them and
   holds a read-only token and nothing else, because a pull request can edit
   the workflow and run any shell step in it.
-- **Publish to Docker Hub** runs only on a push to `main`, or a manual run
-  from `main`. It builds again, smoke-tests what it built, pushes those exact
-  images to Docker Hub with `docker push`, and attests them. It holds what the
-  build job does not:
+- **Publish to Docker Hub** runs only on a push to `main`, a manual run from
+  `main`, or the weekly rebuild. Every Tuesday the workflow rebuilds both
+  targets from `main` without the build cache. It publishes that rebuild only
+  when the Debian packages in the new `full` image differ from those in the
+  image the labs currently pin, tagged with the commit's SHA and the date.
+  However it starts, the job builds again, smoke-tests what it built, pushes
+  those exact images to Docker Hub with `docker push`, and attests them. It
+  holds what the build job does not:
 
 ```yaml
     permissions:
