@@ -15,8 +15,10 @@
  * ORDER BY property (admin-snapshots.js NEWEST_WRITTEN_FIRST).
  *
  * Each status is in exactly one source, so an item is counted once. A type
- * is matched on the three fields the canonical type falls back through and
- * checked again on the resolved value, the way the queue checks it.
+ * is matched in the query on the canonical type (CANONICAL_TYPE_SQL), the
+ * same rule the queue leaves those types out by, so a row is in exactly one
+ * of the review sources whatever its casing; and checked again on the
+ * resolved value after the read.
  */
 import { REVIEW_DECISION_STATUSES } from '../cms/content-status.js';
 import {
@@ -56,19 +58,42 @@ const FIELDS = [
 ];
 const PROJECTION = FIELDS.map((field) => `c["${field}"]`).join(', ');
 
-const TYPE_CLAUSE = ' AND (c.type = @type OR c.contentType = @type OR c.publishTarget = @type)';
 // Not live exactly as the code reads it (`Live === true`): anything that is
 // not the boolean true. `c.Live != true` alone would drop a null Live, since
 // Cosmos compares values of different types as undefined.
 const NOT_LIVE_CLAUSE = ' AND (NOT IS_BOOL(c.Live) OR c.Live = false)';
 
+/**
+ * The canonical type in Cosmos SQL, as getCanonicalContentTypeForAdmin
+ * resolves it: the first non-empty of `type`, `contentType` and
+ * `publishTarget`, trimmed and lower-cased, `blog` when none. Only its
+ * membership in a set of named types is used, and for that the two agree.
+ */
+export const CANONICAL_TYPE_SQL =
+  "LOWER(TRIM((IS_STRING(c.type) AND c.type != '') ? c.type : " +
+  "((IS_STRING(c.contentType) AND c.contentType != '') ? c.contentType : " +
+  "((IS_STRING(c.publishTarget) AND c.publishTarget != '') ? c.publishTarget : 'blog'))))";
+
+/** A type source's rows: those whose canonical type is `@type`. */
+const TYPE_CLAUSE = ` AND ${CANONICAL_TYPE_SQL} = @type`;
+
+/**
+ * Leaves out, in the query, the types another source lists (review of
+ * #1021): filtered after the read, rows of those types filled the window
+ * first, and a run of new frameworks could push every other review item out
+ * of it.
+ */
+const EXCLUDE_TYPES_CLAUSE = ` AND NOT ARRAY_CONTAINS(@excludeTypes, ${CANONICAL_TYPE_SQL})`;
+
 /** One bounded, ordered window over `content`. */
-function readWindow(store, { statuses, type = null, notLive = false, limit }) {
+function readWindow(store, { statuses, type = null, excludeTypes = null, notLive = false, limit }) {
   const params = [{ name: '@statuses', value: [...statuses] }];
   if (type) params.push({ name: '@type', value: type });
+  if (excludeTypes) params.push({ name: '@excludeTypes', value: [...excludeTypes] });
   const where = [
     'ARRAY_CONTAINS(@statuses, c.contentStatus)',
     type ? TYPE_CLAUSE : '',
+    excludeTypes ? EXCLUDE_TYPES_CLAUSE : '',
     notLive ? NOT_LIVE_CLAUSE : '',
   ].join('');
   return store.queryDocs(
@@ -113,14 +138,14 @@ function contentDecision(row, category, nowMs) {
 }
 
 /** A content source: one window, the rows it keeps, and the category its items land in. */
-function contentSource({ id, label, category, statuses, type, notLive, limit, keep = () => true }) {
+function contentSource({ id, label, category, statuses, type, excludeTypes, notLive, limit, keep = () => true }) {
   return Object.freeze({
     id,
     label,
     category,
     role: 'viewer',
     async collect({ store, now }) {
-      const rows = (await readWindow(store, { statuses, type, notLive, limit })) || [];
+      const rows = (await readWindow(store, { statuses, type, excludeTypes, notLive, limit })) || [];
       const nowMs = now().getTime();
       const items = rows
         .filter((row) => !isBlockedContentSource(row) && keep(row))
@@ -140,7 +165,9 @@ export const CONTENT_SOURCES = Object.freeze([
     label: 'Review Queue',
     category: 'queues',
     statuses: REVIEW_DECISION_STATUSES,
+    excludeTypes: TYPES_WITH_THEIR_OWN_TAB,
     limit: 100,
+    // Checked again on the resolved value, as the type sources check theirs.
     keep: (row) => !TYPES_WITH_THEIR_OWN_TAB.has(getCanonicalContentTypeForAdmin(row)),
   }),
   contentSource({

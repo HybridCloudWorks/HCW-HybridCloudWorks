@@ -3984,6 +3984,23 @@ This project has not cut a tagged release; entries are grouped under
     bucket on its next edit. Press **Recount** on `/admin` once after the
     Functions deploy. Until then the Editor badge still counts articles in
     review.
+  - **The pull request's review closed four ways an item could still go
+    missing:**
+    - The review queue leaves frameworks and Coder Corner out in the
+      query, on the canonical type, rather than after the read, so a run
+      of them can no longer fill its window. The two type sources match on
+      the same rule, so a `Framework ` typed in another case is in exactly
+      one source instead of none. The queries were run against the Cosmos
+      emulator.
+    - Newsletter issues are read by their last write, so a keep or a
+      reject of an old issue is in the window.
+    - The queue's other views (live, ready, in progress, rejected) read
+      their window in their own sort field's order, with the rows that
+      lack the field after, instead of the newest-written window.
+    - Recount writes the counters only under the ETag they had before its
+      scan. A change-feed update that lands during a run makes it scan
+      again, up to three times, and then say so, instead of writing older
+      counts over newer ones.
 - **The element defaults in `index.css` sit in `@layer base`, so a utility on
   a paragraph or heading now applies.** The `p` rule (`margin-bottom: 1rem;
   line-height: 1.7`), the `h1`–`h6` rule (`color: var(--dark-gray);

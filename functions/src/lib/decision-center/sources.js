@@ -155,7 +155,12 @@ function newsletterPlace(row) {
   return { tab: 'newsletter', stage: 'keep', since: row.createdAt };
 }
 
-/** Every issue carries `createdAt` (newsletter/admin-handlers.js lists by it). */
+/**
+ * Ordered by `_ts`, the last write, not `createdAt` (review of #1021): an
+ * issue waits from `savedAt` or `rejectedAt` as often as from `createdAt`,
+ * and a keep or a reject is a write, so an issue just kept or rejected is in
+ * the window however old it is. The items are sorted by waiting time after.
+ */
 const newsletters = windowSource({
   id: 'newsletters',
   label: 'Newsletter issues awaiting a decision',
@@ -164,7 +169,7 @@ const newsletters = windowSource({
   read: ({ store }, limit) =>
     store.queryDocs(
       'newsletters',
-      `SELECT TOP ${limit} c.id, c.status, c.subject, c.savedAt, c.createdAt, c.updatedAt, c.rejectedAt, c.periodStart, c.periodEnd FROM c WHERE c.kind = 'weekly_issue' AND (c.status = 'draft' OR c.status = 'rejected') ORDER BY c.createdAt DESC`,
+      `SELECT TOP ${limit} c.id, c.status, c.subject, c.savedAt, c.createdAt, c.updatedAt, c.rejectedAt, c.periodStart, c.periodEnd FROM c WHERE c.kind = 'weekly_issue' AND (c.status = 'draft' OR c.status = 'rejected') ORDER BY c._ts DESC`,
       []
     ),
   toItem: (row) => {

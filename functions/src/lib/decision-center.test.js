@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { SOURCES, collectDecisions, createDecisionCenterHandlers } from './decision-center.js';
 import { byNewest, countByCategory, decisionItem } from './decision-center/items.js';
+import { CANONICAL_TYPE_SQL } from './decision-center/content-sources.js';
 import {
   ambassadorHref,
   chapterHref,
@@ -29,14 +30,22 @@ const guardAs = (role) => ({
 
 const param = (params, name) => params?.find((p) => p.name === name)?.value;
 
-/** Content rows answered by which source's window asked: its statuses and its type. */
+/** The canonical type as CANONICAL_TYPE_SQL computes it in Cosmos. */
+const canonicalOf = (row) =>
+  String([row.type, row.contentType, row.publishTarget].find((v) => typeof v === 'string' && v !== '') ?? 'blog')
+    .trim()
+    .toLowerCase();
+
+/** Content rows answered by which source's window asked: its statuses, its type, and the types it leaves out. */
 function contentRows(params, content) {
   const statuses = param(params, '@statuses') || [];
   const type = param(params, '@type');
+  const excluded = param(params, '@excludeTypes') || [];
   return content.filter(
     (row) =>
       statuses.includes(row.contentStatus) &&
-      (!type || [row.type, row.contentType, row.publishTarget].includes(type))
+      (!type || canonicalOf(row) === type) &&
+      !excluded.includes(canonicalOf(row))
   );
 }
 
@@ -188,6 +197,36 @@ describe('collectDecisions — categories and order', () => {
       ([container, , params]) => container === 'content' && !param(params, '@type') && param(params, '@statuses').includes('ingested')
     );
     expect(param(reviewWindow[2], '@statuses')).toEqual(['draft', 'ingested', 'inspected', 'in_review']);
+  });
+
+  it('leaves the frameworks and Coder Corner out of the review window in the query, so they cannot fill it (review of #1021)', async () => {
+    const frameworks = Array.from({ length: 120 }, (_, i) => ({
+      id: `fw-${i}`,
+      contentStatus: 'inspected',
+      type: 'Framework ',
+      fetchedAt: '2026-10-08T10:00:00Z',
+    }));
+    const data = {
+      ...FULL,
+      content: [...frameworks, { id: 'blog-1', contentStatus: 'ingested', type: 'blog', fetchedAt: '2026-09-01T00:00:00Z' }],
+    };
+    const store = fakeStore(data);
+    const { items } = await collectDecisions({ store, now, env: {}, role: 'viewer' });
+    expect(ids(items)).toContain('content:blog-1');
+    const reviewWindow = store.queryDocs.mock.calls.find(
+      ([container, , params]) => container === 'content' && param(params, '@excludeTypes')
+    );
+    expect(param(reviewWindow[2], '@excludeTypes')).toEqual(['framework', 'coder_corner']);
+    expect(reviewWindow[1]).toContain(`AND NOT ARRAY_CONTAINS(@excludeTypes, ${CANONICAL_TYPE_SQL})`);
+    // The type sources still have their own windows.
+    expect(items.filter((item) => item.category === 'frameworks').length).toBeGreaterThan(0);
+  });
+
+  it('reads the newsletter issues by their last write, so a keep or a reject of an old issue is in the window (review of #1021)', async () => {
+    const store = fakeStore(FULL);
+    await collectDecisions({ store, now, env: {}, role: 'super_admin' });
+    const [, query] = store.queryDocs.mock.calls.find(([container]) => container === 'newsletters');
+    expect(query).toMatch(/ ORDER BY c\._ts DESC$/);
   });
 
   it('reads every source with a bounded, ordered query — no unbounded scan', async () => {

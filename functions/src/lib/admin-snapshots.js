@@ -328,6 +328,27 @@ function createSnapshotReads(store) {
     );
 
   /**
+   * A view's window in the view's own order (review of #1021). The `_ts`
+   * window is the newest written, which is not the newest by `publishedAt`
+   * or `fetchedAt`: a page rewritten lately for an unrelated reason fills it
+   * and pushes out an item the view should list first. So the rows that
+   * carry the sort field are read ordered by it, in Cosmos, and the rows
+   * that lack it (which Cosmos would drop from that ORDER BY, and which the
+   * in-memory sort puts last) come from a second window, newest written
+   * first. Both are bounded by `top`.
+   */
+  async function fetchInViewOrder(where, params, top, field) {
+    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(field)) {
+      throw new Error(`fetchInViewOrder: ${JSON.stringify(field)} is not a sort field`);
+    }
+    const [withField, withoutField] = await Promise.all([
+      fetchProjected(`(${where}) AND IS_DEFINED(c.${field})`, params, top, ` ORDER BY c.${field} DESC`),
+      fetchProjected(`(${where}) AND NOT IS_DEFINED(c.${field})`, params, top, NEWEST_WRITTEN_FIRST),
+    ]);
+    return [...(withField || []), ...(withoutField || [])];
+  }
+
+  /**
    * The dashboard snapshot's newest review items: the most recently written
    * review items, ordered by how long each has waited. Until #1013 the
    * window was an unordered TOP 30, so "newest" meant the newest of an
@@ -358,7 +379,7 @@ function createSnapshotReads(store) {
     return { items: rows, stats: summarizeDashboardItems(rows) };
   }
 
-  return { countWhere, fetchProjected, recentNeedsReviewItems, fullScanStats };
+  return { countWhere, fetchProjected, fetchInViewOrder, recentNeedsReviewItems, fullScanStats };
 }
 
 const seedFromStats = (stats, totalDocs) => {
@@ -370,6 +391,43 @@ const seedFromStats = (stats, totalDocs) => {
   seed.totalDocs = totalDocs;
   return seed;
 };
+
+/** Times a Recount scans again when the change feed overtakes it. */
+const RECOUNT_ATTEMPTS = 3;
+const isWriteConflict = (error) => [409, 412].includes(error?.code ?? error?.statusCode);
+
+/**
+ * One Recount: the counters' ETag, the scan, the markers, then the counters,
+ * written only under that ETag. `{ written: false }` when the content
+ * changed during the run: a marker the feed moved after it was read, or a
+ * counters document the feed wrote after the ETag was taken (412), or one
+ * created meanwhile (409). Nothing the scan computed is written then, so
+ * older counts never land over newer ones (review of #1021).
+ */
+async function recountOnce({ store, reads, now, user, rederiveMarkers }) {
+  const before = await store.readDoc("system", DASHBOARD_STATS_DOC_ID, DASHBOARD_STATS_DOC_ID);
+  const scan = await reads.fullScanStats();
+  const markers = await rederiveMarkers({ store, items: scan.items, now });
+  if (markers.skipped > 0) return { written: false, scan, markers };
+
+  const seed = seedFromStats(scan.stats, scan.items.length);
+  seed.id = DASHBOARD_STATS_DOC_ID;
+  const nowIso = now().toISOString();
+  seed.updatedAt = nowIso;
+  seed.recalculatedAt = nowIso;
+  seed.recalculatedBy = user.email || user.preferred_username || user.oid || "admin";
+
+  // Deliberate full replace (source used .set() without merge): a
+  // recalculation must clear drifted keys, not merge over them.
+  try {
+    if (before?._etag) await store.replaceDocIfMatch("system", { ...seed, _etag: before._etag });
+    else await store.createDoc("system", seed);
+  } catch (error) {
+    if (isWriteConflict(error)) return { written: false, scan, markers };
+    throw error;
+  }
+  return { written: true, scan, markers };
+}
 
 const isTaxonomyFiltered = ({ kindFilter, ideaOriginFilter }) =>
   (kindFilter && kindFilter !== "all") ||
@@ -423,10 +481,14 @@ async function buildQueueSnapshot({ reads, now }, body) {
   const fetchSize = narrowedInJs ? normalizedLimit * 3 : normalizedLimit;
 
   const { where, params, sortField } = queueFilterFor(statusFilter);
-  const [totalCount, rawItems] = await Promise.all([
-    reads.countWhere(where, params),
-    reads.fetchProjected(where, params, fetchSize, NEWEST_WRITTEN_FIRST),
-  ]);
+  // The review view orders by a waiting time no one field holds
+  // (reviewWaitingSince), and every one of its fields is written no later
+  // than the document, so its window is the newest written. Every other view
+  // is read in its own sort field's order (fetchInViewOrder).
+  const window = Object.hasOwn(QUEUE_SORTS, statusFilter)
+    ? reads.fetchProjected(where, params, fetchSize, NEWEST_WRITTEN_FIRST)
+    : reads.fetchInViewOrder(where, params, fetchSize, sortField);
+  const [totalCount, rawItems] = await Promise.all([reads.countWhere(where, params), window]);
 
   const blockedInPage = rawItems.filter(isBlockedContentSource).length;
   const filters = queueItemFilters({
@@ -600,6 +662,13 @@ export function createAdminSnapshotHandlers({
      * 2026-10-08) to move that document out of the wrong bucket on its next
      * change. Markers first: a run that fails part-way leaves the counters
      * as they were, and pressing Recount again finishes it.
+     *
+     * A run the change feed overtakes starts again (review of #1021). The
+     * counters are written only under the ETag they had before the scan, so
+     * a feed delta that landed during the run makes the write a 412 instead
+     * of putting the scan's older counts over it; a marker the feed moved
+     * after the scan read it (`skipped`) means the same. Either way the scan
+     * is out of date, and the run scans again, up to RECOUNT_ATTEMPTS times.
      */
     async recalculateDashboardStats(request, context) {
       const auth = await guard.requireRole(request, "editor");
@@ -607,29 +676,25 @@ export function createAdminSnapshotHandlers({
 
       try {
         const { user } = auth;
-        const scan = await reads.fullScanStats();
         // Loaded here rather than imported: triggers/dashboard-stats.js
         // imports this module, and a static import back would make the two a
         // cycle whose evaluation order decides whether either loads.
         const { rederiveMarkers } = await import("./triggers/dashboard-stats.js");
-        const markers = await rederiveMarkers({ store, items: scan.items, now });
-        const seed = seedFromStats(scan.stats, scan.items.length);
-        seed.id = DASHBOARD_STATS_DOC_ID;
-        const nowIso = now().toISOString();
-        seed.updatedAt = nowIso;
-        seed.recalculatedAt = nowIso;
-        seed.recalculatedBy =
-          user.email || user.preferred_username || user.oid || "admin";
-
-        // Deliberate full replace (source used .set() without merge): a
-        // recalculation must clear drifted keys, not merge over them.
-        await store.upsertDoc("system", seed);
-
-        return json(200, {
-          success: true,
-          totalDocs: scan.items.length,
-          stats: scan.stats,
-          markers,
+        for (let attempt = 1; attempt <= RECOUNT_ATTEMPTS; attempt += 1) {
+          const outcome = await recountOnce({ store, reads, now, user, rederiveMarkers });
+          if (outcome.written) {
+            return json(200, {
+              success: true,
+              totalDocs: outcome.scan.items.length,
+              stats: outcome.scan.stats,
+              markers: outcome.markers,
+              attempts: attempt,
+            });
+          }
+        }
+        return json(409, {
+          error: "Content changed while recounting",
+          message: `Content changed during each of ${RECOUNT_ATTEMPTS} recounts, so the counters were left as they were. Press Recount again in a minute.`,
         });
       } catch (error) {
         context.error("recalculateDashboardStats failed:", error);

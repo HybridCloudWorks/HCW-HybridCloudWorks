@@ -43,9 +43,15 @@ const makeRequest = (body) => ({
 /** Store fake routing COUNT queries vs projected fetches. */
 function makeStore({ count = 0, rows = [], doc = null } = {}) {
   return {
-    queryDocs: vi.fn(async (_c, query) =>
-      query.includes("VALUE COUNT") ? [count] : rows,
-    ),
+    queryDocs: vi.fn(async (_c, query) => {
+      if (query.includes("VALUE COUNT")) return [count];
+      // The two windows of a view read in its own order are disjoint in
+      // Cosmos: the rows with the sort field, and the rows without it.
+      const window = query.match(/(NOT )?IS_DEFINED\(c\.(\w+)\)/);
+      if (!window) return rows;
+      const [, without, field] = window;
+      return rows.filter((row) => (row[field] !== undefined) === !without);
+    }),
     readDoc: vi.fn(async () => doc),
     upsertDoc: vi.fn(async (_c, d) => d),
   };
@@ -304,6 +310,26 @@ describe("getQueueSnapshot", () => {
     );
     // The window is the newest written, not an arbitrary TOP n (#1013).
     expect(fetchCall[1]).toMatch(/ ORDER BY c\._ts DESC$/);
+  });
+
+  it("reads every other view in its own sort field's order, with the rows that lack it after (review of #1021)", async () => {
+    const rows = [
+      // Rewritten lately for another reason: newest written, but published long ago.
+      { id: "rewritten", Live: true, publishedAt: "2026-01-01T00:00:00Z", _ts: 1_790_000_000 },
+      { id: "just-published", Live: true, publishedAt: "2026-08-06T00:00:00Z", _ts: 1_780_000_000 },
+      { id: "no-date", Live: true, _ts: 1_785_000_000 },
+    ];
+    const store = makeStore({ count: 3, rows });
+    const h = createAdminSnapshotHandlers({ guard: allowGuard(), store, ...fixed });
+    const body = JSON.parse(
+      (await h.getQueueSnapshot(makeRequest({ statusFilter: "published_live", itemLimit: 10 }), context)).body,
+    );
+    expect(body.items.map((i) => i.id)).toEqual(["just-published", "rewritten", "no-date"]);
+    const windows = store.queryDocs.mock.calls.map(([, q]) => q).filter((q) => !q.includes("VALUE COUNT"));
+    expect(windows).toHaveLength(2);
+    expect(windows[0]).toMatch(/AND IS_DEFINED\(c\.publishedAt\) ORDER BY c\.publishedAt DESC$/);
+    expect(windows[1]).toMatch(/AND NOT IS_DEFINED\(c\.publishedAt\) ORDER BY c\._ts DESC$/);
+    for (const window of windows) expect(window).toMatch(/^SELECT TOP 10 /);
   });
 
   it("puts an article sent from Drafts where its wait says, not at the bottom", async () => {
@@ -577,12 +603,72 @@ describe("recalculateDashboardStats", () => {
       skipped: 0,
     });
 
-    const doc = store.upsertDoc.mock.calls[0][1];
+    // No counters document yet: created, so one made meanwhile is a conflict, not overwritten.
+    const doc = store.createDoc.mock.calls.find(([c]) => c === "system")[1];
     expect(doc).toMatchObject({
       id: DASHBOARD_STATS_DOC_ID,
       totalDocs: 2,
       recalculatedAt: "2026-08-07T03:00:00.000Z",
       recalculatedBy: "admin@hcw.dev",
+    });
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(body.attempts).toBe(1);
+  });
+
+  describe("a run the change feed overtakes starts again (review of #1021)", () => {
+    const stale = () => Object.assign(new Error("changed since read"), { code: 412 });
+    const counters = { id: DASHBOARD_STATS_DOC_ID, _etag: "v1", rejected: 0 };
+    const rows = [{ id: "a", contentStatus: "ingested", type: "blog" }];
+    const markers = [{ id: "a", bucket: "needsReview", type: "blog", _etag: "m1" }];
+    const handlersOver = (store) =>
+      createAdminSnapshotHandlers({ guard: allowGuard("editor"), store, ...fixed });
+
+    it("writes the counters only under the ETag they had before the scan", async () => {
+      const store = recountStore({ rows, markers });
+      store.readDoc.mockResolvedValue(counters);
+      const res = await handlersOver(store).recalculateDashboardStats(makeRequest({}), context);
+      expect(res.status).toBe(200);
+      expect(store.replaceDocIfMatch).toHaveBeenCalledWith(
+        "system",
+        expect.objectContaining({ id: DASHBOARD_STATS_DOC_ID, _etag: "v1", totalDocs: 1 }),
+      );
+    });
+
+    it("scans again when the feed wrote the counters during the run", async () => {
+      const store = recountStore({ rows, markers });
+      store.readDoc.mockResolvedValue(counters);
+      store.replaceDocIfMatch.mockRejectedValueOnce(stale());
+      const res = await handlersOver(store).recalculateDashboardStats(makeRequest({}), context);
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body).attempts).toBe(2);
+      const scans = store.queryDocs.mock.calls.filter(([c]) => c === "content");
+      expect(scans).toHaveLength(2);
+    });
+
+    it("scans again when the feed moved a marker after the scan read it, and writes nothing from that run", async () => {
+      const moved = [{ id: "a", bucket: "inProgress", type: "blog", _etag: "m1" }];
+      const store = recountStore({ rows, markers: moved });
+      store.readDoc.mockResolvedValue(counters);
+      // The marker rewrite loses to the feed once; the counters write is never reached on that run.
+      store.replaceDocIfMatch.mockRejectedValueOnce(stale());
+      const res = await handlersOver(store).recalculateDashboardStats(makeRequest({}), context);
+      expect(res.status).toBe(200);
+      expect(JSON.parse(res.body).attempts).toBe(2);
+      const systemWrites = store.replaceDocIfMatch.mock.calls.filter(([c]) => c === "system");
+      expect(systemWrites).toHaveLength(1);
+    });
+
+    it("gives up after three overtaken runs, says so, and leaves the counters as they were", async () => {
+      const store = recountStore({ rows, markers });
+      store.readDoc.mockResolvedValue(counters);
+      store.replaceDocIfMatch.mockImplementation(async (container, doc) => {
+        if (container === "system") throw stale();
+        return doc;
+      });
+      const res = await handlersOver(store).recalculateDashboardStats(makeRequest({}), context);
+      expect(res.status).toBe(409);
+      expect(JSON.parse(res.body).message).toMatch(/Press Recount again/);
+      expect(store.queryDocs.mock.calls.filter(([c]) => c === "content")).toHaveLength(3);
     });
   });
 
@@ -622,6 +708,8 @@ describe("recalculateDashboardStats", () => {
     const res = await h.recalculateDashboardStats(makeRequest({}), context);
     expect(res.status).toBe(500);
     expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.createDoc.mock.calls.some(([c]) => c === "system")).toBe(false);
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
   });
 
   it("denies non-editors without scanning", async () => {
