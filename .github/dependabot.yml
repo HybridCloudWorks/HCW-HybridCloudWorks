@@ -40,6 +40,18 @@ updates:
     cooldown:
       default-days: 3
       semver-major-days: 7
+    # undici's major follows the runtime, not the calendar. guarded-fetch.js
+    # passes an Agent from this package to the built-in fetch, which is the
+    # undici Node bundles, and the two must share a major: on Node 24 (the
+    # Function App's line, bundled undici 7) an undici 8 Agent makes fetch
+    # throw UND_ERR_INVALID_ARG. #902 proposed exactly that with every check
+    # green. Lift this when functions/package.json's engines move to a Node
+    # line that bundles undici 8 (Node 26 does); the end-to-end case in
+    # src/lib/http/guarded-fetch.test.js fails until the two agree.
+    ignore:
+      - dependency-name: undici
+        update-types:
+          - version-update:semver-major
     groups:
       azure-functions-minor-patch:
         update-types:

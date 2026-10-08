@@ -3943,6 +3943,20 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **undici stays on the major Node 24 bundles, and a test now proves the
+  guarded fetch works with the runtime's own fetch.** Dependabot's #902
+  (undici 7.30.0 → 8.11.2) was green on every check. Measured on Node
+  24.21.0, the Function App's line, with its bundled undici 7.29.1: an
+  undici 8 Agent passed to the built-in `fetch` throws `fetch failed`
+  (`UND_ERR_INVALID_ARG`), while the undici 7 Agent reaches the server.
+  `guardedFetch` does exactly that for every outbound request it pins, and
+  every existing case injected a fake fetch or dispatcher, so nothing would
+  have failed before production did. `guarded-fetch.test.js` now sends one
+  request through the real `pinnedDispatcher` and `globalThis.fetch` to a
+  local server. CI runs it on Node 24: it passes with undici 7.30.0 and
+  fails with 8.11.2, naming both versions. `.github/dependabot.yml` ignores
+  undici majors for `/functions` until the engines move to a Node line that
+  bundles undici 8. #902 was closed unmerged.
 - **The version-floor tests judge their literal numbers against a frozen
   floors file, so the weekly updater's pull requests can pass.** The
   updater's first pull request (#999: python 3.14.8, terraform 1.16.5,
