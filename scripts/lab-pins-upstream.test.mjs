@@ -68,6 +68,8 @@ describe('upstream readers', () => {
     expect(newestAptVersion(index, 'docker-ce')).toBe('29.9.0');
     expect(newestAptVersion(index, 'containerd.io')).toBe('2.3.7');
     expect(newestAptVersion(index, 'runc')).toBeNull();
+    // The dot in a package name is a literal, not "any character".
+    expect(newestAptVersion('Package: containerdXio\nVersion: 9.9.9\n', 'containerd.io')).toBeNull();
   });
   it('skips prereleases, drafts and non-numeric tags in a GitHub releases listing', () => {
     expect(

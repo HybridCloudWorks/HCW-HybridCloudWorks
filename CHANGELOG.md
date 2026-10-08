@@ -3943,6 +3943,16 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **`lab-pins-upstream.mjs` escapes the package name in its apt index
+  regex. The fix had been stranded since #899.** Commit `7c0e84fa` was
+  pushed to `feat/lab-supply-chain` 25 seconds after #899 merged, which
+  re-created the branch and kept the commit out of `main`. Unescaped, the
+  dot in `containerd.io` matches any character (`containerdXio` passed);
+  this is CodeQL alerts #386 and #390 (`js/regex/missing-regexp-anchor`).
+  The commit was cherry-picked unchanged onto a branch from `main`, with
+  its test (a non-matching `containerdXio` stanza now reads null). Rule
+  recorded: a fix found after a merge goes on a new branch, never on the
+  merged one.
 - **Two frontend tests that failed under load now wait for what they
   assert (#997).** Each turned a run on `main` red on 2026-10-08 and passed
   on the next run of the same workflow.
