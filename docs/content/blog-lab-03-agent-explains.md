@@ -157,13 +157,13 @@ learn.
 PowerShell:
 
 ```powershell
-git clone https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
+git clone https://github.com/saulpatinojr/HCW-HybridCloudWorks.git
 ```
 
 bash:
 
 ```bash
-git clone https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
+git clone https://github.com/saulpatinojr/HCW-HybridCloudWorks.git
 ```
 
 From the clone's root, `Test-Path lab-image/sandbox-template/Dockerfile` in
