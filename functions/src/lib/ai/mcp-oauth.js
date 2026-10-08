@@ -535,20 +535,24 @@ export function createCodeVerifier(random = randomBytes) {
   return base64url(random(32));
 }
 
-/** The S256 code challenge of a verifier (RFC 7636 §4.2). */
+/**
+ * The S256 code challenge of a verifier (RFC 7636 §4.2).
+ *
+ * SHA-256 is the method the RFC fixes, BASE64URL(SHA256(ASCII(verifier))),
+ * and the authorization server computes the same to compare, so no other
+ * hash is possible. The verifier is not a password: it is 32 bytes from
+ * randomBytes, used once. CodeQL's js/insufficient-password-hash reads it as
+ * one from the names it flows through, and is dismissed as a false positive
+ * on this ground (#1019).
+ */
 export function codeChallengeS256(verifier) {
   return base64url(createHash('sha256').update(String(verifier), 'ascii').digest());
 }
 
 /**
- * What is stored in place of `state`: its SHA-256, hex.
- *
- * Not a password hash, and deliberately not a slow one: `state` is 32 bytes
- * from randomBytes, single-use, ten minutes long and bound to one admin, so
- * there is nothing to brute-force and a fast digest is the right store, as
- * for a session id. CodeQL's js/insufficient-password-hash reads it as a
- * password from the names it flows through; alert #394 is dismissed as a
- * false positive for this reason (#1019).
+ * What is stored in place of `state`: its SHA-256, hex. A fast digest on
+ * purpose: `state` is 32 random bytes, single-use and ten minutes long, so
+ * there is nothing to brute-force, as with a session id.
  */
 export function hashState(state) {
   return createHash('sha256').update(String(state), 'utf8').digest('hex');
