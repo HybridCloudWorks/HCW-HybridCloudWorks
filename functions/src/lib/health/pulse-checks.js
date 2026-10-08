@@ -243,7 +243,8 @@ const latestOf = (values) =>
 
 /**
  * Lab agents by their heartbeat: online while the last beat is under 90 s old
- * (labs.js isAgentOnline, the rule the Labs page and checkAgentHealth use).
+ * and it did not announce a shutdown, and the agent is not deactivated
+ * (labs.js isAgentOnline, the rule the Labs page and the public door use).
  * `agents` are `{ lastSeenAt, online }` — the pulse computes `online` from
  * `lastSeenAt`; the page reads it from getLabsSnapshot, which does the same.
  */
@@ -261,7 +262,9 @@ export function labAgentsVerdict(agents, now) {
 export const labAgentsFromRows = (rows, now) =>
   (rows || []).map((row) => ({
     lastSeenAt: row.lastSeenAt ?? null,
-    online: isAgentOnline(row.lastSeenAt, now),
+    // The whole row: the rule reads status and active as well as lastSeenAt
+    // (#1009, #1018), so a stopping or deactivated agent is not online.
+    online: isAgentOnline(row, now),
   }));
 
 const mcpLine = (server) => {

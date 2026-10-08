@@ -204,6 +204,17 @@ describe('the pulse’s checks', () => {
     expect(labAgentsVerdict([], nowMs).status).toBe('unknown');
   });
 
+  it('counts a fresh heartbeat that announced a shutdown, or a deactivated agent, as offline (labs.js isAgentOnline)', () => {
+    const fresh = new Date(nowMs - 5 * 1000).toISOString();
+    for (const row of [
+      { id: 'a1', lastSeenAt: fresh, status: 'stopping' },
+      { id: 'a1', lastSeenAt: fresh, status: 'offline' },
+      { id: 'a1', lastSeenAt: fresh, status: 'idle', active: false },
+    ]) {
+      expect(labAgentsVerdict(labAgentsFromRows([row], nowMs), nowMs).status, JSON.stringify(row)).toBe('offline');
+    }
+  });
+
   it('reads the AI providers’ last recorded tests, and calls a week-old test stale', () => {
     const fresh = [
       { id: 'anthropic', status: 'connected', lastTested: minutesAgo(60), lastTestedBy: 'probe' },

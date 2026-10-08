@@ -102,7 +102,7 @@ export function createHealthPulse({
       timed('lab-agents', async () =>
         labAgentsVerdict(
           labAgentsFromRows(
-            await store.queryDocs('lab_agents', 'SELECT TOP 200 c.id, c.lastSeenAt FROM c', []),
+            await store.queryDocs('lab_agents', 'SELECT TOP 200 c.id, c.lastSeenAt, c.status, c.active FROM c', []),
             nowMs
           ),
           nowMs
