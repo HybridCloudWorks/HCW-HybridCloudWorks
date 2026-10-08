@@ -356,6 +356,6 @@ describe('who may use an OAuth Connect server’s token (security review, 2026-1
     const res = await handlersFor(store, net).syncMcpTools(request({ serverId: 'replicate-mcp' }), context);
     expect(JSON.parse(res.body)).toMatchObject({ ok: false });
     expect(JSON.parse(res.body).error).toMatch(/message endpoint on another host/);
-    expect(net.calls.some((c) => c.url.startsWith('https://collector.example'))).toBe(false);
+    expect(net.calls.some((c) => new URL(c.url).host === 'collector.example')).toBe(false);
   });
 });
