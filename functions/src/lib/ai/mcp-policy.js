@@ -3,8 +3,15 @@
  * credential is resolved (ADR 0033, security finding). Split from mcp.js,
  * which re-exports everything here, so the transport and the policy read as
  * two pages. Every check is the same as it was in mcp.js: a disallowed key
- * name resolves to no header, a plain-http URL off loopback is refused, and
- * an unresolved Key Vault reference is not a secret.
+ * name resolves to no header, a plain-http URL is refused, and an unresolved
+ * Key Vault reference is not a secret.
+ *
+ * 2026-10-08: the loopback-http exception and the lab-host token's localhost
+ * binding are gone, and that token is no longer an MCP key name at all. Both
+ * existed for one seeded server, Hostinger at http://localhost:8100,
+ * which nothing ever listened on — a Function App has no localhost MCP server
+ * — and which now points at Hostinger's hosted server and signs in with OAuth
+ * (mcp-oauth.js). Every MCP URL is https, with no exception.
  */
 
 /**
@@ -27,6 +34,11 @@ export function readMcpSecret(env, name) {
  * Bearer header on the next Sync. The allowlist is the MCP_* namespace plus
  * the integration keys the seeded servers already use; anything else is
  * refused at save time and again at call time.
+ *
+ * REPLICATE_API_KEY stays listed although the seeded Replicate MCP server no
+ * longer names it (2026-10-08: that server accepts only its own OAuth
+ * tokens). The key itself still serves Replicate's REST API for cover images,
+ * and its binding below keeps it at Replicate's hosts if a server names it.
  */
 export const MCP_KEY_ENV_PATTERN = /^MCP_[A-Z0-9_]+$/;
 export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
@@ -35,7 +47,6 @@ export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
   // Publer's MCP can publish and delete, so the key alone is not enough.
   'PUBLER_API_KEY',
   'REPLICATE_API_KEY',
-  'VPS_API_TOKEN',
 ]);
 
 /**
@@ -43,12 +54,11 @@ export const KNOWN_INTEGRATION_KEY_NAMES = Object.freeze([
  * finding AP-B1). The allowlist above stopped an editor naming the Cosmos
  * connection string, but it still let the three keys the seeded servers use
  * be routed anywhere: save a server at `https://attacker.example/` with
- * `apiKeyEnvVar: "VPS_API_TOKEN"`, press Sync, and the lab-host token
- * arrives as a bearer. So each shared key is bound to the hosts its vendor
- * actually serves from, and a server naming the key at any other host is
- * refused at save time and again at call time. `MCP_*` settings are
- * per-server secrets the owner creates for one server, so they bind to no
- * host. `[::1]` is spelled as `URL.hostname` returns it.
+ * `apiKeyEnvVar: "FIRECRAWL_API_KEY"`, press Sync, and the key arrives as a
+ * bearer. So each shared key is bound to the hosts its vendor actually serves
+ * from, and a server naming the key at any other host is refused at save
+ * time and again at call time. `MCP_*` settings are per-server secrets the
+ * owner creates for one server, so they bind to no host.
  */
 export const INTEGRATION_KEY_HOSTS = Object.freeze({
   FIRECRAWL_API_KEY: Object.freeze(['mcp.firecrawl.dev', 'api.firecrawl.dev']),
@@ -57,7 +67,6 @@ export const INTEGRATION_KEY_HOSTS = Object.freeze({
   // server's, so it is deliberately not listed: the MCP binding is one host.
   PUBLER_API_KEY: Object.freeze(['mcp.publer.com']),
   REPLICATE_API_KEY: Object.freeze(['mcp.replicate.com', 'api.replicate.com']),
-  VPS_API_TOKEN: Object.freeze(['localhost', '127.0.0.1', '[::1]']),
 });
 
 /**
@@ -159,9 +168,9 @@ export function validateMcpToolPolicy({ apiKeyEnvVar, allowedTools }) {
  *
  * A server with no `allowedTools` may call any tool name, which is exactly
  * what every server could do before #995: `mcpProxy` has never limited a
- * call to the synced tool list, so Firecrawl, Replicate, the VPS token and
- * keyless or `MCP_*` servers keep that behaviour until someone gives them a
- * list. A server that does carry a list is held to it, an empty one
+ * call to the synced tool list, so Firecrawl, the OAuth servers and keyless
+ * or `MCP_*` servers keep that behaviour until someone gives them a list.
+ * A server that does carry a list is held to it, an empty one
  * included. A server whose key requires a list and has none refuses every
  * call.
  */
@@ -201,8 +210,6 @@ export function resolveMcpAuthHeaders({ oauthToken, apiKeyEnvVar, url, env = pro
   return bearerToken ? { Authorization: `Bearer ${bearerToken}` } : {};
 }
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
-
 /**
  * Hosts whose MCP URL may carry no query string (2026-10-07). Publer's
  * settings page hands out its server URL as `https://mcp.publer.com?api_key=`
@@ -218,8 +225,9 @@ const NO_QUERY_HOSTS = new Set(['mcp.publer.com']);
 /**
  * Reject malformed or credential-bearing URLs before making an outbound call.
  * https is required (ADR 0033): a bearer token over plain http is readable on
- * the wire. The one exception is a loopback host, where no wire is crossed —
- * the seeded Hostinger entry points at localhost.
+ * the wire. There is no loopback exception any more (2026-10-08): it served
+ * only the seeded Hostinger entry at localhost, which a Function App could
+ * never reach.
  */
 export function validateMcpUrl(value) {
   let parsed;
@@ -228,10 +236,7 @@ export function validateMcpUrl(value) {
   } catch {
     throw new Error('MCP server URL must be a valid URL');
   }
-  if (parsed.protocol === 'http:' && !LOOPBACK_HOSTS.has(parsed.hostname)) {
-    throw new Error('MCP server URL must use https (http is allowed for localhost only)');
-  }
-  if (!['http:', 'https:'].includes(parsed.protocol)) {
+  if (parsed.protocol !== 'https:') {
     throw new Error('MCP server URL must use https');
   }
   if (parsed.username || parsed.password) {
@@ -243,4 +248,28 @@ export function validateMcpUrl(value) {
     );
   }
   return parsed.toString();
+}
+
+/**
+ * Where a vendor's sign-in sends the browser back to, on the site origin
+ * (mcp-oauth.js builds the full redirect URI). The admin SPA serves the page
+ * at this path; frontend/src/lib/aiEngine.test.js holds the two together.
+ */
+export const MCP_OAUTH_CALLBACK_PATH = '/admin/ai-engine/oauth/callback';
+
+/**
+ * Servers marked `authType: 'oauth'` whose token is NOT obtained by Connect:
+ * Plaud's is pasted on the Recording Hub's Connect tab and refreshed by
+ * Plaud's own non-standard endpoint (lib/timers/plaud-token.js).
+ */
+export const PASTED_TOKEN_SERVER_IDS = Object.freeze(['plaud']);
+
+/**
+ * Whether a server signs in through the generic OAuth Connect flow
+ * (mcp-oauth.js): marked `authType: 'oauth'` and not one of the pasted-token
+ * servers. Such a server is never called without a live connection, and its
+ * token is refreshed with the standard refresh grant.
+ */
+export function usesOAuthConnect(server) {
+  return server?.authType === 'oauth' && !PASTED_TOKEN_SERVER_IDS.includes(server?.id);
 }

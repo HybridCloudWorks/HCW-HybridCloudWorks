@@ -121,6 +121,43 @@ export async function removeMcpServer(serverId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OAuth Connect for remote MCP servers (2026-10-08)
+//
+// Replicate's and Hostinger's hosted servers accept only tokens their own
+// sign-in issues. Connect asks the API to start that sign-in, and the browser
+// goes to the vendor; the vendor sends it back to the callback page, which
+// hands the code to `completeMcpOAuth`. Tokens never reach the browser.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Start a sign-in. Returns the vendor URL to send the browser to. */
+export async function startMcpOAuth(serverId) {
+  const res = await sendJSON(`cms/mcp/${encodeURIComponent(serverId)}/oauth/start`, 'POST', {});
+  return res.authorizationUrl;
+}
+
+/**
+ * Finish a sign-in with what the vendor's redirect carried: `code`, `state`
+ * and, from servers that send it, `iss` (RFC 9207), which the API checks
+ * against the issuer the sign-in started with. Resolves
+ * `{ connected, serverId, serverName, toolCount, syncError? }`.
+ */
+export async function completeMcpOAuth({ state, code, iss }) {
+  const res = await sendJSON('cms/mcp/oauth/complete', 'POST', {
+    state,
+    code,
+    ...(iss ? { iss } : {}),
+  });
+  await notifyConfigSubscribers('mcp-servers');
+  return res;
+}
+
+/** Forget a server's sign-in: its tokens and connection, server-side. */
+export async function disconnectMcpOAuth(serverId) {
+  await sendJSON(`cms/mcp/${encodeURIComponent(serverId)}/oauth/disconnect`, 'POST', {});
+  await notifyConfigSubscribers('mcp-servers');
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The model catalogue (ADR 0034 slice 2, #857) — admin_settings/ai-model-catalog
 // ─────────────────────────────────────────────────────────────────────────────
 

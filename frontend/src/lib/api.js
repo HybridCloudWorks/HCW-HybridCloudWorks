@@ -56,6 +56,10 @@ const FUNCTION_TIMEOUT_MS = {
   // answer was discarded while its spinner kept turning.
   testAiProvider: 50000,
   aiProxy: 125000,
+  // The MCP OAuth callback: the code exchange (8 s cap) and then the same
+  // tool sync Sync Tools runs (30 s cap, SSE 25 s), in one request. Under
+  // the 20 s default a slow sync would read as a failed sign-in.
+  'cms/mcp/oauth/complete': 60000,
   // Forge Studio's AI actions: the handler runs under an 85 s budget
   // (forge-studio.js FORGE_ASSIST_HTTP_BUDGET_MS); sync-budgets.test.js in
   // functions pins this value above it.

@@ -2317,17 +2317,24 @@ export const SERVICE_DOCS = {
   },
 
   // ── Hostinger ────────────────────────────────────────────────────────────
+  // Hostinger's hosted MCP server, signed in with OAuth Connect (2026-10-08).
+  // The localhost entry this replaced was never reachable from the API.
   'hostinger-mcp': {
     id: 'hostinger-mcp',
     name: 'Hostinger MCP',
     type: 'mcp_server',
     tagline:
-      'Administer Hostinger resources (VPS, domains, DNS, and hosting) via the Hostinger API.',
+      'Administer Hostinger resources (VPS, domains, DNS, and hosting) through Hostinger’s hosted MCP server.',
     requirements: [
-      { label: 'Hostinger account', detail: 'hPanel → Profile → API', required: true },
       {
-        label: 'API Token',
-        detail: 'Generated in Hostinger Panel, stored in Notion as VPS_API_TOKEN',
+        label: 'Hostinger account',
+        detail: 'The account whose resources the tools act on',
+        required: true,
+      },
+      {
+        label: 'Sign-in with Connect',
+        detail:
+          'No API key or app setting: press Connect on the card and sign in at Hostinger. The token is kept server-side and renewed automatically.',
         required: true,
       },
     ],
@@ -2335,30 +2342,23 @@ export const SERVICE_DOCS = {
       {
         feature: 'AI Engine Playground',
         usage:
-          'Perform administration actions, query VPS details, and manage DNS zones directly from the playground',
+          'Query VPS details and manage DNS zones and domains from the Playground. Nothing on this platform calls a Hostinger tool on its own.',
         files: ['src/pages/admin/AIEnginePage.jsx'],
         status: HCW_STATUS.AVAILABLE,
       },
     ],
     sections: {
       install: {
-        title: 'Configure & Setup',
+        title: 'Connect',
         steps: [
           {
-            heading: '1. Stored in Notion',
-            body: 'The Hostinger API token is securely managed in the Notion Secrets database under the key "VPS_API_TOKEN".',
+            heading: '1. Connect',
+            body: 'Go to /admin/ai-engine?tab=mcp → Hostinger MCP → Connect (super_admin). The browser goes to Hostinger; sign in and approve the “mcp:use” access. You return to the MCP Servers tab with “Hostinger MCP is connected. N tools synced.”',
             codes: [],
           },
           {
-            heading: '2. Synchronize secrets',
-            body: 'Run the setup script or trigger a secrets sync workflow to import the token into the Azure Function App settings / Key Vault workflow.',
-            codes: [
-              { lang: 'bash', label: 'Terminal', content: 'node setup-api-keys-from-notion.js' },
-            ],
-          },
-          {
-            heading: '3. Enable in AI Engine',
-            body: 'Go to /admin/ai-engine → MCP Servers → Hostinger MCP → toggle On → click Sync Tools.',
+            heading: '2. Enable',
+            body: 'Toggle Hostinger MCP on (super_admin, as is calling its tools: the token is your Hostinger account). Its tools can change VPS, DNS and domain settings, so it ships off; switch it on only while you need it.',
             codes: [],
           },
         ],
@@ -2368,7 +2368,7 @@ export const SERVICE_DOCS = {
         steps: [
           {
             heading: 'Query VPS info',
-            body: 'Call VPS list tools to monitor VPS resource usage and list domains.',
+            body: 'Playground → MCP Tool → Hostinger MCP → a VPS list tool. The tool list comes from Sync Tools after Connect.',
             codes: [{ lang: 'json', label: 'Arguments example', content: '{}' }],
           },
         ],
@@ -2377,14 +2377,87 @@ export const SERVICE_DOCS = {
         title: 'Disconnect',
         steps: [
           {
-            heading: 'Disable and clean secrets',
-            body: 'Toggle Off in the AI Engine and optionally remove the VPS_API_TOKEN from the Azure Function App settings / Key Vault configuration.',
+            heading: 'Disconnect and disable',
+            body: 'Press Disconnect on the card (deletes the stored token) and toggle the server off. To revoke the access at Hostinger as well, remove HybridCloudWorks from the authorized apps in your Hostinger account.',
             codes: [],
           },
         ],
       },
     },
     references: [{ label: 'Hostinger API Repository', url: 'https://github.com/hostinger/api/' }],
+  },
+
+  // ── Replicate ────────────────────────────────────────────────────────────
+  'replicate-mcp': {
+    id: 'replicate-mcp',
+    name: 'Replicate MCP',
+    type: 'mcp_server',
+    tagline:
+      'Replicate’s hosted MCP server: search and run open-source models (images, audio, video, text) as tools.',
+    requirements: [
+      {
+        label: 'Replicate account',
+        detail: 'Runs are billed to the account that signs in',
+        required: true,
+      },
+      {
+        label: 'Sign-in with Connect',
+        detail:
+          'This server accepts only its own OAuth tokens, not REPLICATE_API_KEY. Press Connect on the card and sign in at Replicate.',
+        required: true,
+      },
+    ],
+    hcwUses: [
+      {
+        feature: 'AI Engine Playground',
+        usage:
+          'Search and run models from the Playground. Cover images do not use this server; they call Replicate’s REST API with REPLICATE_API_KEY.',
+        files: ['src/pages/admin/AIEnginePage.jsx'],
+        status: HCW_STATUS.AVAILABLE,
+      },
+    ],
+    sections: {
+      install: {
+        title: 'Connect',
+        steps: [
+          {
+            heading: '1. Connect',
+            body: 'Go to /admin/ai-engine?tab=mcp → Replicate MCP → Connect (super_admin). Sign in at Replicate and approve. You return to the MCP Servers tab with “Replicate MCP is connected. N tools synced.”',
+            codes: [],
+          },
+          {
+            heading: '2. Enable',
+            body: 'Toggle Replicate MCP on (super_admin, as is calling its tools). Model runs cost money on the signed-in account.',
+            codes: [],
+          },
+        ],
+      },
+      use: {
+        title: 'Use',
+        steps: [
+          {
+            heading: 'Search models',
+            body: 'Playground → MCP Tool → Replicate MCP → a model search tool.',
+            codes: [
+              { lang: 'json', label: 'Arguments example', content: '{\n  "query": "flux"\n}' },
+            ],
+          },
+        ],
+      },
+      uninstall: {
+        title: 'Disconnect',
+        steps: [
+          {
+            heading: 'Disconnect and disable',
+            body: 'Press Disconnect on the card (deletes the stored token) and toggle the server off. REPLICATE_API_KEY is untouched: cover images still use it.',
+            codes: [],
+          },
+        ],
+      },
+    },
+    references: [
+      { label: 'Replicate MCP documentation', url: 'https://replicate.com/docs/topics/mcp' },
+    ],
   },
 
   // ── Publer ───────────────────────────────────────────────────────────────

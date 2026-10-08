@@ -3943,6 +3943,75 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Replicate MCP and Hostinger MCP sign in with OAuth Connect instead of
+  sitting red on the AI Engine.** On 2026-10-08 both cards read "Error":
+  Replicate's hosted server (`https://mcp.replicate.com/sse`) answers the
+  `REPLICATE_API_KEY` bearer with `401 invalid_token` because it accepts
+  only tokens from its own sign-in, and Hostinger pointed at
+  `http://localhost:8100`, where nothing ever listened and whose key was
+  never an app setting. Both servers publish the MCP authorization profile,
+  and nothing here could follow it.
+  - `functions/src/lib/ai/mcp-oauth.js` is that profile: protected-resource
+    metadata (RFC 9728, the 401's `resource_metadata` first), authorization-
+    server metadata (RFC 8414, OpenID configuration as the fallback),
+    dynamic client registration (RFC 7591) as a public client, PKCE `S256`
+    only, `resource` (RFC 8707), the code exchange and the refresh grant —
+    every request through `guardedFetch`, https on every hop (its new
+    `httpsOnly` option), and no redirect followed by a request carrying a
+    secret. A server without `S256` or a registration endpoint is refused
+    with a sentence that says which.
+  - Three super_admin routes, `POST /api/cms/mcp/{serverId}/oauth/start`,
+    `/api/cms/mcp/oauth/complete` and `/api/cms/mcp/{serverId}/oauth/disconnect`.
+    The pending sign-in lives write-only on the server's document (the
+    state's SHA-256, the verifier, who started it, ten minutes) and is
+    refused for another administrator, after expiry, and on replay. The
+    vendors return the browser to
+    `https://hybridcloudworks.com/admin/ai-engine/oauth/callback`, a new
+    lazy admin page that completes the sign-in and lands back on the MCP
+    Servers tab with the result. Connect and disconnect are audited.
+  - `mcp.js` refreshes an OAuth Connect server's token when it has under
+    two minutes left, refreshes once and retries once on a 401, and never
+    calls such a server without a connection. A refresh the vendor refuses
+    turns the card amber, "Sign-in expired", with Connect — not red.
+    The `refreshPlaudToken` timer also refreshes these servers when their
+    token expires within 30 minutes; its name, flag and schedule are
+    unchanged, so nothing needs re-arming. Plaud keeps its own refresh.
+  - The seeds and their migration: Replicate keeps its SSE URL and loses
+    `apiKeyEnvVar`; Hostinger moves to `https://mcp.hostinger.com` over
+    Streamable HTTP; both gain `authType: 'oauth'`. The lab-host token's
+    localhost binding and the URL rule's loopback-http exception served only
+    the old Hostinger entry and are gone. A config write that changes a
+    server's URL, transport, key or sign-in method clears its stale status
+    and error, and one that moves a connected server's URL disconnects it.
+    No config write can set the flow's own fields, and reads strip the
+    client secret and pending sign-in as they strip the tokens.
+  - The token is the super_admin's vendor account, and Hostinger's tools can
+    change VPS, DNS and domain settings, so calling a Connect server's tools,
+    switching it on or off and changing `authType` need super_admin; every
+    other server keeps the editor gate. Found by the change's own security
+    review, and fixed here: the config routes now refuse a body naming a
+    nested path (`a.b`) on either collection. Cosmos patches those inside a
+    field, so an editor could have pointed `oauth.tokenEndpoint` — and with
+    it the refresh token — at their own host, and `allowedTools.0` had
+    slipped past #995's super_admin rule since that change. The callback's
+    `iss` (RFC 9207) is checked verbatim against the issuer the sign-in
+    started with, and an SSE stream naming a message endpoint on another
+    host does not get the token.
+  - The pull request's review closed the rest of the ways round those
+    rules. A PUT is judged on the document it stores, so leaving out
+    `enabled` or `url` is a change like naming it, and an omitted `authType`
+    is kept rather than dropped. A config write cannot set a Connect
+    server's tokens, and deleting one needs super_admin, as Disconnect does.
+    The metadata `issuer` must be the identifier it was fetched for (RFC
+    8414): Replicate's origin written with and without the root `/` is
+    one URL, and any other spelling, path or tenant is refused. The final
+    token write of a sign-in, a refreshed token and a refused refresh's
+    disconnect are each written under the ETag of the document they were
+    decided from, so a Disconnect, a URL move or another instance's newer
+    token that lands meanwhile is never undone. Log lines name no server
+    document.
+  - The owner presses Connect on each card and signs in at the vendor:
+    [MCP servers — OAuth Connect](docs/runbooks/mcp-oauth-connect.md).
 - **The Hybrid Lab's health signals say what is true, and the repository
   move leaves no trap behind (#1009).** From the read-only review of
   2026-10-08.

@@ -26,7 +26,7 @@ vi.mock('@/lib/aiEngine', () => ({
 vi.mock('@/components/ui/use-toast', () => ({ useToast: () => ({ toast }) }));
 vi.mock('react-router', () => ({ useNavigate: () => vi.fn() }));
 
-const { FeatureSwitches, ProviderCard, describeLastTest, orderByPriority } =
+const { FeatureSwitches, McpServerCard, ProviderCard, describeLastTest, orderByPriority } =
   await import('./AIEnginePage.jsx');
 
 const catalogue = {
@@ -174,5 +174,71 @@ describe('ProviderCard — a Test result, from the button or the weekly probe (#
     expect(screen.queryByText('timeout after 45000 ms')).toBeNull();
     // The pin left with ADR 0034 slice 4: the Priority list names the model.
     expect(screen.queryByRole('combobox')).toBeNull();
+  });
+});
+
+describe('McpServerCard — an OAuth Connect server is never a red “Error” for want of a sign-in (2026-10-08)', () => {
+  const noop = () => {};
+  const renderCard = (server) =>
+    render(<McpServerCard server={server} onToggle={noop} onSync={noop} onRemove={noop} />);
+  const replicate = (over = {}) => ({
+    id: 'replicate-mcp',
+    name: 'Replicate MCP',
+    url: 'https://mcp.replicate.com/sse',
+    transport: 'sse',
+    authType: 'oauth',
+    apiKeyEnvVar: null,
+    enabled: false,
+    tools: [],
+    ...over,
+  });
+
+  it('shows Not connected and Connect, and hides the 401 the old key left behind', () => {
+    renderCard(replicate({ status: 'error', lastError: 'SSE GET returned HTTP 401' }));
+    expect(screen.getByText('Not connected')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Connect Replicate MCP' })).toBeTruthy();
+    expect(screen.queryByText('Error')).toBeNull();
+    expect(screen.queryByText('SSE GET returned HTTP 401')).toBeNull();
+  });
+
+  it('shows Sign-in expired with Connect after a refused refresh', () => {
+    renderCard(
+      replicate({
+        status: 'needs_connection',
+        lastError: 'Sign-in to Replicate MCP has expired. Press Connect on its card.',
+        oauth: { status: 'disconnected' },
+      })
+    );
+    expect(screen.getAllByText(/Sign-in expired/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Connect Replicate MCP' })).toBeTruthy();
+  });
+
+  it('shows Connected, and a real error from a connected server in red', () => {
+    renderCard(
+      replicate({
+        hasOauthToken: true,
+        oauth: { status: 'connected', expiresAt: '2026-10-08T13:00:00.000Z' },
+        status: 'error',
+        lastError: 'MCP server returned HTTP 500',
+      })
+    );
+    expect(screen.getByText('Connected')).toBeTruthy();
+    expect(screen.getByText('MCP server returned HTTP 500')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Disconnect Replicate MCP' })).toBeTruthy();
+  });
+
+  it('leaves an API-key server’s card as it was: status badge, red error, no Connect', () => {
+    renderCard({
+      id: 'firecrawl',
+      name: 'Firecrawl',
+      url: 'https://mcp.firecrawl.dev/sse',
+      apiKeyEnvVar: 'FIRECRAWL_API_KEY',
+      status: 'error',
+      lastError: 'SSE GET returned HTTP 401',
+      tools: [],
+    });
+    expect(screen.getByText('Error')).toBeTruthy();
+    expect(screen.getByText('SSE GET returned HTTP 401')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Connect/ })).toBeNull();
   });
 });

@@ -4,6 +4,13 @@
  * The browser calls these handlers with its Entra bearer token. MCP
  * credentials are resolved here from Azure Function App settings / Key Vault
  * references or from the write-only oauthToken field in Cosmos DB.
+ *
+ * A server that signs in with the OAuth Connect flow (`usesOAuthConnect`,
+ * 2026-10-08) is never called without a live connection: its access token is
+ * refreshed first when it has under two minutes left, and a 401 or
+ * `invalid_token` from the server earns one refresh and one retry
+ * (rpcWithOAuth below; the grants themselves are mcp-oauth.js). API-key and
+ * keyless servers, and Plaud's pasted token, take the path they always did.
  */
 import { parseMcpResponseBody } from '../cloud-tools/mcp-parse.js';
 import {
@@ -15,12 +22,22 @@ import {
   readMcpSecret,
   requiresToolAllowlist,
   resolveMcpAuthHeaders,
+  usesOAuthConnect,
   validateMcpAllowedTools,
   validateMcpApiKeyEnvVar,
   validateMcpKeyBinding,
   validateMcpToolPolicy,
   validateMcpUrl,
 } from './mcp-policy.js';
+import {
+  McpOAuthNotConnectedError,
+  REFRESH_SKEW_MS,
+  createOAuthHttp,
+  notConnectedMessage,
+  oauthConnectionState,
+  refreshOAuthToken,
+  tokenExpiresWithin,
+} from './mcp-oauth.js';
 
 const MCP_CONTAINER = 'mcp_servers';
 const SESSION_TTL_MS = 5 * 60_000;
@@ -57,6 +74,7 @@ export {
   readMcpSecret,
   requiresToolAllowlist,
   resolveMcpAuthHeaders,
+  usesOAuthConnect,
   validateMcpAllowedTools,
   validateMcpApiKeyEnvVar,
   validateMcpKeyBinding,
@@ -216,6 +234,16 @@ function sseEndpoint(postUrl, frame, sseUrl) {
   }
 }
 
+/** Whether an SSE message endpoint is https on the stream's own origin. */
+function sameOriginHttps(endpoint, sseUrl) {
+  try {
+    const url = new URL(endpoint);
+    return url.protocol === 'https:' && url.origin === new URL(sseUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
 function matchingSseResponse(data, targetId) {
   if (!data.startsWith('{')) return null;
   try {
@@ -231,7 +259,7 @@ function matchingSseResponse(data, targetId) {
  * SSE transport in the seeded configuration, while custom servers default to
  * Streamable HTTP.
  */
-function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs }) {
+function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs, requireSameOriginEndpoint }) {
   return new Promise(async (resolve, reject) => {
     const controller = new AbortController();
     const timeoutHandle = setTimeout(
@@ -341,6 +369,17 @@ function sseRpc(sseUrl, authHeaders, rpcBody, { fetchImpl, timeoutMs }) {
         buffer = drained.tail;
         for (const frame of drained.frames) {
           postUrl = sseEndpoint(postUrl, frame, sseUrl);
+          // An OAuth Connect token is for this server only (RFC 8707): a
+          // stream that names its message endpoint on another host, or over
+          // plain http, does not get it.
+          if (postUrl && requireSameOriginEndpoint && !sameOriginHttps(postUrl, sseUrl)) {
+            return finish(
+              null,
+              new McpUpstreamError(
+                'The SSE server named a message endpoint on another host or over http; the sign-in token is not sent there'
+              )
+            );
+          }
           if (postUrl && !readyTimer) readyTimer = setTimeout(sendRequest, 1_000);
           if (postUrl && frame.data.includes('SSE Connection established')) {
             if (readyTimer) clearTimeout(readyTimer);
@@ -434,6 +473,23 @@ async function markServerError(store, serverId, message, now) {
 }
 
 /**
+ * An OAuth server with no live connection: amber "press Connect", not a red
+ * error, because nothing failed — nobody has signed in yet, or the sign-in
+ * expired.
+ */
+async function markServerNeedsConnection(store, serverId, message, now) {
+  try {
+    await store.patchDoc(MCP_CONTAINER, serverId, {
+      status: 'needs_connection',
+      lastTested: now().toISOString(),
+      lastError: message,
+    });
+  } catch {
+    // As above: the refusal is the useful result.
+  }
+}
+
+/**
  * The configured server, or the outcome refusing the call: 500 when the
  * configuration could not be read (`onReadError` gets the error, so each
  * caller logs it its own way), 404 when there is no such server.
@@ -498,19 +554,79 @@ function prepareToolCall({ serverId, server, tool, toolArguments }) {
   return { url };
 }
 
+/**
+ * The upstream told us the bearer is not (or no longer) good: a 401, or an
+ * `invalid_token` in the body. A 403 is not this — a refresh does not grant
+ * a scope the token was never given.
+ */
+function isTokenRejection(error) {
+  return (
+    error instanceof McpUpstreamError &&
+    (error.status === 401 || errorFields(error).upstreamError === 'invalid_token')
+  );
+}
+
+/**
+ * An RPC to a server that signs in with OAuth Connect. Refuses without a live
+ * connection (nothing is sent tokenless); refreshes first when the access
+ * token has under REFRESH_SKEW_MS left; and on a token rejection refreshes
+ * once and retries once. A refresh the server refuses marks the document as
+ * needing a connection (mcp-oauth.js) and surfaces as the "press Connect"
+ * sentence; one that could not reach the server leaves the original failure
+ * standing.
+ */
+async function rpcWithOAuth({ serverId, server, send, options }) {
+  const { store, now = () => new Date(), oauthHttp, log } = options;
+  if (oauthConnectionState(server) !== 'connected') {
+    throw new McpOAuthNotConnectedError(notConnectedMessage(server, serverId));
+  }
+  const refresh = (current) =>
+    refreshOAuthToken({ store, serverId, server: current, http: oauthHttp, now, log });
+
+  let current = server;
+  if (tokenExpiresWithin(current, REFRESH_SKEW_MS, now)) {
+    const refreshed = await refresh(current);
+    if (refreshed.ok) current = refreshed.server;
+    else if (refreshed.disconnected) throw new McpOAuthNotConnectedError(refreshed.message);
+    // Transient: the stored token may still have a minute in it; try it.
+  }
+
+  try {
+    return await send(current);
+  } catch (error) {
+    if (!isTokenRejection(error)) throw error;
+    const refreshed = await refresh(current);
+    if (!refreshed.ok) {
+      if (refreshed.disconnected) throw new McpOAuthNotConnectedError(refreshed.message);
+      throw error;
+    }
+    // One retry. A second rejection is reported as the auth failure it is.
+    return send(refreshed.server);
+  }
+}
+
 /** One JSON-RPC call to a configured server, with the credential it stores. */
 function rpcOnServer({ serverId, server, url, rpcBody, env, options }) {
-  return callMcpRpc({
-    serverId,
-    url,
-    transport: server.transport || 'http',
-    authHeaders: resolveMcpAuthHeaders({
-      oauthToken: server.oauthToken,
-      apiKeyEnvVar: server.apiKeyEnvVar,
+  const sendWith = (current, transportOptions) =>
+    callMcpRpc({
+      serverId,
       url,
-      env,
-    }),
-    rpcBody,
+      transport: server.transport || 'http',
+      authHeaders: resolveMcpAuthHeaders({
+        oauthToken: current.oauthToken,
+        apiKeyEnvVar: current.apiKeyEnvVar,
+        url,
+        env,
+      }),
+      rpcBody,
+      options: transportOptions,
+    });
+  const send = (current) => sendWith(current, options);
+  if (!usesOAuthConnect(server)) return send(server);
+  return rpcWithOAuth({
+    serverId,
+    server,
+    send: (current) => sendWith(current, { ...options, requireSameOriginEndpoint: true }),
     options,
   });
 }
@@ -557,11 +673,12 @@ function toolCallOutcome(rpcResult) {
  * arguments, 500 configuration read failed) and 200
  * for an upstream failure the proxy reports in the body. `code` is
  * `UNAUTHENTICATED` when the upstream rejected the credential (401/402/403 or
- * `invalid_token`), which is the signal a caller uses to say "reconnect"
- * rather than "retry".
+ * `invalid_token`), or when an OAuth Connect server has no live connection,
+ * which is the signal a caller uses to say "reconnect" rather than "retry".
  *
  * @param {object} params
- * @param {{ readDoc: Function }} params.store
+ * @param {{ readDoc: Function, patchDoc?: Function }} params.store - patchDoc
+ *   is needed only for an OAuth Connect server, whose refreshed token is stored
  * @param {string} params.serverId
  * @param {string} params.tool
  * @param {object} [params.arguments]
@@ -569,6 +686,11 @@ function toolCallOutcome(rpcResult) {
  * @param {Function} [params.fetch]
  * @param {{ warn?: Function, error?: Function }} [params.log]
  * @param {number} [params.timeoutMs]
+ * @param {() => Date} [params.now]
+ * @param {Function} [params.oauthHttp] - mcp-oauth.js createOAuthHttp(), for tests
+ * @param {Function} [params.authorize] - `({ serverId, server })` → a refusal
+ *   outcome or null, run after the policy checks and before any upstream
+ *   request; mcpProxy uses it to hold OAuth Connect servers to super_admin
  */
 export async function callMcpTool({
   store,
@@ -579,6 +701,9 @@ export async function callMcpTool({
   fetch: fetchImpl = globalThis.fetch,
   log = console,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  now = () => new Date(),
+  oauthHttp = createOAuthHttp(),
+  authorize = null,
 }) {
   const serverId = String(rawServerId || '').trim();
   const tool = String(rawTool || '').trim();
@@ -600,6 +725,10 @@ export async function callMcpTool({
 
   const prepared = prepareToolCall({ serverId, server, tool, toolArguments });
   if (prepared.failure) return prepared.failure;
+  if (authorize) {
+    const refusal = await authorize({ serverId, server });
+    if (refusal) return refusal;
+  }
 
   try {
     const rpcResult = await rpcOnServer({
@@ -613,10 +742,14 @@ export async function callMcpTool({
         id: 2,
       },
       env,
-      options: { fetchImpl, log, timeoutMs },
+      options: { fetchImpl, log, timeoutMs, store, now, oauthHttp },
     });
     return toolCallOutcome(rpcResult);
   } catch (error) {
+    if (error instanceof McpOAuthNotConnectedError) {
+      log.warn?.('[mcp] tools/call refused: the server signs in with Connect and is not connected');
+      return { ok: false, error: error.message, code: 'UNAUTHENTICATED', httpStatus: 200 };
+    }
     // Content-free on purpose: a McpUpstreamError carries `responseBody`,
     // which for a tool call can be the tool's output — a transcript — and
     // logging the error object whole would put that in Function logs. The
@@ -652,9 +785,10 @@ function toolListOutcome(rpcResult) {
  * tools/list on a validated server, the result stored on its document. The
  * patch names `tools` and the status fields only: a sync records what the
  * server offers and never widens `allowedTools`, which only a super_admin
- * config write sets (#995).
+ * config write sets (#995). Resolves `{ ok: true, tools }` or
+ * `{ ok: false, error, code? }`; the document is marked either way.
  */
-async function syncToolList(ctx, context, { serverId, server, url }) {
+async function syncToolListOutcome(ctx, context, { serverId, server, url }) {
   const { store, env, now, transportOptions } = ctx;
   try {
     const rpcResult = await rpcOnServer({
@@ -666,7 +800,10 @@ async function syncToolList(ctx, context, { serverId, server, url }) {
       options: transportOptions,
     });
     const outcome = toolListOutcome(rpcResult);
-    if (outcome.error) return syncFailed(ctx, serverId, outcome.error);
+    if (outcome.error) {
+      await markServerError(store, serverId, outcome.error, now);
+      return { ok: false, error: outcome.error };
+    }
 
     await store.patchDoc(MCP_CONTAINER, serverId, {
       tools: outcome.tools,
@@ -674,16 +811,54 @@ async function syncToolList(ctx, context, { serverId, server, url }) {
       lastTested: now().toISOString(),
       lastError: null,
     });
-    return json(200, { ok: true, tools: outcome.tools });
+    return { ok: true, tools: outcome.tools };
   } catch (error) {
+    if (error instanceof McpOAuthNotConnectedError) {
+      await markServerNeedsConnection(store, serverId, error.message, now);
+      return { ok: false, error: error.message, code: 'UNAUTHENTICATED' };
+    }
     const message = error.message || 'MCP tool sync failed';
     context.error?.('[syncMcpTools] upstream call failed:', error);
     await markServerError(store, serverId, message, now);
-    return json(200, {
-      ...failureBody(mcpAuthError(error, message)),
-      tools: [],
-    });
+    return failureBody(mcpAuthError(error, message));
   }
+}
+
+async function syncToolList(ctx, context, args) {
+  const outcome = await syncToolListOutcome(ctx, context, args);
+  return json(200, outcome.ok ? outcome : { ...outcome, tools: [] });
+}
+
+/**
+ * The same tool sync the Sync Tools button runs, for a caller that already
+ * holds the document — the OAuth callback runs it right after storing the
+ * new token (mcp-oauth-handlers.js). Resolves `{ ok: true, tools }` or
+ * `{ ok: false, error, code? }`.
+ */
+export async function syncMcpServerTools({
+  store,
+  serverId,
+  server,
+  env = process.env,
+  fetch: fetchImpl = globalThis.fetch,
+  now = () => new Date(),
+  log = console,
+  timeoutMs = DEFAULT_TIMEOUT_MS,
+  oauthHttp = createOAuthHttp(),
+  context = {},
+}) {
+  const { url, error } = validatedMcpUrl(server);
+  if (error) {
+    await markServerError(store, serverId, error, now);
+    return { ok: false, error };
+  }
+  const ctx = {
+    store,
+    env,
+    now,
+    transportOptions: { fetchImpl, log, timeoutMs, store, now, oauthHttp },
+  };
+  return syncToolListOutcome(ctx, context, { serverId, server, url });
 }
 
 /** POST syncMcpTools: parse, find the server, check its URL, then list its tools. */
@@ -708,7 +883,11 @@ async function syncMcpTools(ctx, request, context) {
   return syncToolList(ctx, context, { serverId, server: loaded.server, url });
 }
 
-/** Create the two admin MCP handlers with injectable dependencies for tests. */
+/**
+ * Create the two admin MCP handlers with injectable dependencies for tests.
+ * `oauthHttp` is the request function the OAuth refresh uses
+ * (mcp-oauth.js createOAuthHttp); tests pass one over their fake fetch.
+ */
 export function createMcpHandlers({
   guard,
   store,
@@ -717,8 +896,15 @@ export function createMcpHandlers({
   now = () => new Date(),
   log = console,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  oauthHttp = createOAuthHttp(),
 }) {
-  const ctx = { guard, store, env, now, transportOptions: { fetchImpl, log, timeoutMs } };
+  const ctx = {
+    guard,
+    store,
+    env,
+    now,
+    transportOptions: { fetchImpl, log, timeoutMs, store, now, oauthHttp },
+  };
 
   return {
     async mcpProxy(request, context) {
@@ -738,6 +924,23 @@ export function createMcpHandlers({
           error: (...args) => context.error?.('[mcpProxy]', ...args),
         },
         timeoutMs,
+        now,
+        oauthHttp,
+        // An OAuth Connect server's token is the account a super_admin
+        // signed in with — Hostinger's can change VPS, DNS and domain
+        // settings — so its tools are a super_admin's to call, the same
+        // role that connects it. Every other server keeps the editor gate.
+        authorize: async ({ serverId, server }) => {
+          if (!usesOAuthConnect(server)) return null;
+          const elevated = await guard.requireRole(request, 'super_admin');
+          if (!elevated.error) return null;
+          return {
+            ok: false,
+            error: `${server.name || serverId} acts on the account a super_admin signed in with, so calling its tools needs super_admin.`,
+            code: 'FORBIDDEN',
+            httpStatus: 403,
+          };
+        },
       });
       return json(httpStatus, outcome);
     },

@@ -45,7 +45,7 @@ import { createLinkCheck } from '../lib/timers/link-check.js';
 import { createCertReverify } from '../lib/timers/cert-reverify.js';
 import { createCertImageCleanup } from '../lib/timers/cert-image-cleanup.js';
 import { createSkillsHubScrape } from '../lib/timers/skills-hub.js';
-import { createPlaudTokenRefresh } from '../lib/timers/plaud-token.js';
+import { createMcpTokenRefresh } from '../lib/timers/mcp-token-refresh.js';
 import { createAgentHealthCheck } from '../lib/timers/agent-health.js';
 import { createTempStorageCleanup } from '../lib/timers/temp-storage.js';
 import { createForgeScheduled } from '../lib/timers/forge-scheduled.js';
@@ -249,7 +249,11 @@ timer('syncSocialCalendarScheduled', 'SYNC_SOCIAL_CALENDAR', '0 */5 * * * *', (c
 );
 
 timer('refreshPlaudToken', 'REFRESH_PLAUD_TOKEN', '0 0 */12 * * *', (context) =>
-  createPlaudTokenRefresh({ store, log: context }).run()
+  // Since 2026-10-08 the MCP OAuth token refresh: Plaud's own refresh, then
+  // the standard refresh grant for every server connected through OAuth
+  // Connect. Name, flag and schedule unchanged so nothing needs re-arming
+  // (lib/timers/mcp-token-refresh.js says why).
+  createMcpTokenRefresh({ store, log: context }).run()
 );
 
 timer('checkAgentHealth', 'CHECK_AGENT_HEALTH', '0 */5 * * * *', (context) =>

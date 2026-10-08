@@ -19,6 +19,11 @@
  *
  * Ported from Site-Main index.js (088f458). The tokens live in the document,
  * as they did upstream — no app secret is involved.
+ *
+ * Since 2026-10-08 the timer runs this as one half of the MCP OAuth token
+ * refresh (mcp-token-refresh.js); the other half is the standard refresh
+ * grant for servers connected through OAuth Connect. Plaud stays here
+ * because its endpoint is not the standard one.
  */
 
 export const PLAUD_REFRESH_URL =

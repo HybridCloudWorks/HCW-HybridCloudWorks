@@ -13,7 +13,7 @@
  * one-line module quietly becomes a three-line one.
  */
 import { describe, expect, it } from 'vitest';
-import { hardReplace } from './hardNavigate';
+import { hardAssign, hardReplace } from './hardNavigate';
 
 describe('hardReplace', () => {
   it('delegates to location.replace without throwing', () => {
@@ -21,5 +21,15 @@ describe('hardReplace', () => {
     expect(() => hardReplace('/admin')).not.toThrow();
     // jsdom performs no navigation, so the document is exactly where it was.
     expect(window.location.href).toBe(before);
+  });
+});
+
+describe('hardAssign', () => {
+  it('delegates to location.assign without throwing', () => {
+    // A same-document hash is the one navigation jsdom performs, so it shows
+    // the call reached `assign`; the MCP Connect button's behavioural test
+    // (McpOAuth.test.jsx) mocks this module.
+    expect(() => hardAssign('#oauth')).not.toThrow();
+    expect(window.location.hash).toBe('#oauth');
   });
 });

@@ -187,6 +187,7 @@ const AdminSocialHubPage = lazyPage(() => import('@/pages/admin/SocialHubPage'))
 const AdminRecordingHubPage = lazyPage(() => import('@/pages/admin/RecordingHubPage'));
 const AdminAIEnginePage = lazyPage(() => import('@/pages/admin/AIEnginePage'));
 const AdminServiceDocsPage = lazyPage(() => import('@/pages/admin/ServiceDocsPage'));
+const AdminMcpOAuthCallbackPage = lazyPage(() => import('@/pages/admin/McpOAuthCallbackPage'));
 const AdminForgeStudioPage = lazyPage(() => import('@/pages/admin/ForgeStudioPage'));
 const AdminLinkiePage = lazyPage(() => import('@/pages/admin/LinkiePage'));
 const AdminMailingListPage = lazyPage(() => import('@/pages/admin/MailingListPage'));
@@ -455,6 +456,8 @@ function App() {
                 <Route path="forge-studio" element={<AdminForgeStudioPage />} />
                 <Route path="ai-engine" element={<AdminAIEnginePage />} />
                 <Route path="ai-engine/docs/:serviceId" element={<AdminServiceDocsPage />} />
+                {/* An MCP vendor's sign-in returns here (OAuth Connect, 2026-10-08). */}
+                <Route path="ai-engine/oauth/callback" element={<AdminMcpOAuthCallbackPage />} />
                 <Route path="linkie" element={<AdminLinkiePage />} />
                 <Route path="mailing-list" element={<AdminMailingListPage />} />
                 <Route path="ops-health" element={<Navigate to="/admin/health" replace />} />

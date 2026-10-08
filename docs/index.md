@@ -34,6 +34,9 @@ records; this site holds the longer narrative.
   the other things that look like one
 - [Alerting and support](runbooks/alerting-and-support.md)
 - [Copilot code review MCP servers](runbooks/copilot-code-review-mcp.md)
+- [MCP servers — OAuth Connect](runbooks/mcp-oauth-connect.md) — signing the
+  AI Engine in to Replicate's and Hostinger's hosted MCP servers, what each
+  result means, and how the tokens are kept and renewed
 - [Labs host access and Arc onboarding](runbooks/labs-host.md) — reaching the
   lab host from a desktop over SSH and VS Code, onboarding it to Azure Arc,
   what Connected looks like, and how to disconnect

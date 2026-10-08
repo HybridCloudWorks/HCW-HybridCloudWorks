@@ -14,6 +14,14 @@
 
 export const AI_ENGINE_PATH = '/admin/ai-engine';
 
+/**
+ * Where a vendor's MCP sign-in sends the browser back to (2026-10-08). The
+ * API registers `<site origin>` + this path with each vendor verbatim
+ * (functions/src/lib/ai/mcp-policy.js MCP_OAUTH_CALLBACK_PATH), and
+ * aiEngine.test.js holds the two together.
+ */
+export const MCP_OAUTH_CALLBACK_PATH = `${AI_ENGINE_PATH}/oauth/callback`;
+
 export const TABS = Object.freeze([
   { id: 'services', label: 'AI Services' },
   { id: 'routing', label: 'Tasks' },

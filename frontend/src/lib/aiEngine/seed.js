@@ -239,18 +239,23 @@ export const DEFAULT_MCP_SERVERS = [
   },
 
   {
+    // Replicate's hosted server accepts only tokens from its own sign-in
+    // (2026-10-08): the REPLICATE_API_KEY bearer answers 401 invalid_token.
+    // The key stays for Replicate's REST API (cover images); this server
+    // signs in with Connect (functions/src/lib/ai/mcp-oauth.js).
     id: 'replicate-mcp',
     name: 'Replicate MCP',
     description: 'Run 50k+ open-source AI models as MCP tools — images, audio, video, text',
     url: 'https://mcp.replicate.com/sse',
     transport: 'sse',
     enabled: false,
-    apiKeyEnvVar: 'REPLICATE_API_KEY',
+    apiKeyEnvVar: null,
+    authType: 'oauth',
     tools: [],
     status: 'untested',
     order: 6,
     notes:
-      'Official Replicate remote MCP server (SSE). Uses REPLICATE_API_KEY. Docs: https://replicate.com/docs/topics/mcp',
+      'Official Replicate remote MCP server (SSE). Signs in with your Replicate account: press Connect, sign in at Replicate and approve. The token is kept server-side and renewed automatically. REPLICATE_API_KEY is not used here (this server accepts only its own sign-in); it still serves cover images. Docs: https://replicate.com/docs/topics/mcp',
   },
   {
     id: 'aws-knowledge-mcp',
@@ -296,19 +301,23 @@ export const DEFAULT_MCP_SERVERS = [
       'Uses the public Draw.io MCP server (https://mcp.draw.io/mcp) to create and update charts, workflows, and diagrams. No local installation required.',
   },
   {
+    // Hostinger's hosted MCP server (2026-10-08). The localhost:8100 entry
+    // this replaces was never reachable: a Function App has no localhost
+    // MCP server, and its key was not an app setting.
     id: 'hostinger-mcp',
     name: 'Hostinger MCP',
     description:
-      'Administer Hostinger resources (VPS, domains, DNS, and hosting) via the Hostinger API',
-    url: 'http://localhost:8100',
+      'Administer Hostinger resources (VPS, domains, DNS, and hosting) through Hostinger’s hosted MCP server',
+    url: 'https://mcp.hostinger.com',
     transport: 'http',
     enabled: false,
-    apiKeyEnvVar: 'VPS_API_TOKEN',
+    apiKeyEnvVar: null,
+    authType: 'oauth',
     tools: [],
     status: 'untested',
     order: 11,
     notes:
-      'Requires the VPS_API_TOKEN secret (fetched from Notion DB). The hostinger-api-mcp server must be deployed as an HTTP endpoint for cloud proxy access.',
+      'Hostinger’s hosted MCP server (Streamable HTTP). Signs in with your Hostinger account: press Connect, sign in at Hostinger and approve. The token is kept server-side and renewed automatically. Its tools can change VPS, DNS and domain settings, so it ships switched off.',
   },
   {
     // Publer's own MCP server (2026-10-07). The URL carries no `?api_key=`:
@@ -381,10 +390,28 @@ const MCP_URL_PATCHES = {
   'aws-knowledge-mcp': 'https://knowledge-mcp.global.api.aws',
   'microsoftdocs-mcp': 'https://learn.microsoft.com/api/mcp',
   'replicate-mcp': 'https://mcp.replicate.com/sse',
-  'hostinger-mcp': 'http://localhost:8100',
+  'hostinger-mcp': 'https://mcp.hostinger.com',
 };
 const MCP_TRANSPORT_PATCHES = {
   'replicate-mcp': 'sse',
+  'hostinger-mcp': 'http',
+};
+
+/**
+ * Field migrations for stored servers (2026-10-08): Replicate and Hostinger
+ * moved to OAuth Connect, so their stored documents lose the key name the
+ * server refuses (or that was never set) and gain `authType: 'oauth'`, which
+ * is what puts the Connect button on the card. Their notes and Hostinger's
+ * description follow the seed, since the old ones told the owner to fetch a
+ * token from Notion for a localhost server. Values come from
+ * DEFAULT_MCP_SERVERS, so the seed and the migration cannot disagree.
+ *
+ * Written in ONE patch with any URL change: the API checks a key name
+ * against the URL beside it, and the old key name is no longer allowed.
+ */
+const MCP_FIELD_PATCH_KEYS = {
+  'replicate-mcp': ['apiKeyEnvVar', 'authType', 'notes'],
+  'hostinger-mcp': ['apiKeyEnvVar', 'authType', 'description', 'notes'],
 };
 
 const putConfig = (route, id, data) => sendJSON(`cms/config/${route}/${id}`, 'PUT', data);
@@ -434,8 +461,13 @@ function providerSchemaWrites(providers) {
   });
 }
 
-/** The URL and transport a stored server should move to, if it has not. */
-function serverEndpointPatch(server) {
+/**
+ * The one PATCH a stored server needs to match the seed's migrations — its
+ * URL, transport and migrated fields — or an empty object when it already
+ * does. Exported for aiEngine.test.js, which holds the result against the
+ * API's own policy.
+ */
+export function mcpServerPatch(server, defaults = DEFAULT_MCP_SERVERS) {
   const patch = {};
   if (MCP_URL_PATCHES[server.id] && server.url !== MCP_URL_PATCHES[server.id]) {
     patch.url = MCP_URL_PATCHES[server.id];
@@ -443,12 +475,18 @@ function serverEndpointPatch(server) {
   if (MCP_TRANSPORT_PATCHES[server.id] && server.transport !== MCP_TRANSPORT_PATCHES[server.id]) {
     patch.transport = MCP_TRANSPORT_PATCHES[server.id];
   }
+  const seed = defaults.find((doc) => doc.id === server.id);
+  for (const key of (seed && MCP_FIELD_PATCH_KEYS[server.id]) || []) {
+    const wanted = seed[key] ?? null;
+    // null and absent are the same "no key name" to the API.
+    if ((server[key] ?? null) !== wanted) patch[key] = wanted;
+  }
   return patch;
 }
 
 function serverEndpointWrites(servers) {
   return servers.flatMap((server) => {
-    const patch = serverEndpointPatch(server);
+    const patch = mcpServerPatch(server);
     return Object.keys(patch).length > 0 ? [patchConfig('mcp-servers', server.id, patch)] : [];
   });
 }
