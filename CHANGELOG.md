@@ -3943,6 +3943,52 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The admin dashboard's pipeline fits its card with six stages of one
+  size, the Publish stage shows its count, and every number on the page
+  opens what it counts.**
+  - The pipeline row was `flex` with a `min-w-38` box per stage. At 1280 px
+    the six boxes, five chevrons and gaps needed about 1072 px of a 926 px
+    card: `#admin-main` scrolled 97 px sideways (17 px at 1440), Live Pages
+    ran past the card's edge, and five of the six descriptions were cut to
+    a few letters. The stages are now an ordered list on an equal grid
+    sized by the card, not the window: six columns from 56rem of card,
+    three from 28rem, two below, every box the height of the tallest. The
+    count sits beside the step number, where it cannot squeeze the label;
+    descriptions wrap to two lines; the chevrons sit in the gaps and only
+    when the six share a row.
+  - `getAdminDashboardSnapshot` returns `readyToPublish` (approved,
+    forge_ready or published, and not live), shown on the Publish stage
+    and on the sidebar's Publish item. It is the same COUNT
+    `getPublishSnapshot` now runs for `readyTotal`, which counted every
+    live page as staged: the ready window includes the `published` status,
+    and only the list dropped live items in JS. The publish fetch excludes
+    them too, so its 150-row window is not spent on live pages.
+  - The stat row is a shared `StatTile` (`components/admin/shared`) in the
+    page's own section card: one height, a note line held open on every
+    tile, spans rather than paragraphs. Tiles went from 192 px, with 70 px
+    of nothing under the label, to 124 px. Five columns from 48rem of card;
+    not `@2xl`, which `index.css` sets to 1400 px.
+  - A type tile's number is still the type's total across every stage, and
+    the section now says so. No admin list shows that set (the Review Queue
+    and the Frameworks and Coder Corner lists all open on needs-review and
+    have no all-statuses view), so the Blogs tile used to land on a list
+    that did not hold its number, with nothing to say so. Each type tile
+    now names `status=needs_review` in its link and its note says how many
+    are waiting there. The headline count and the live, editor and rejected
+    counts in the header are links too.
+  - One 24 px gap between sections (was 32), and the paragraphs that close
+    a block set `mb-0` over the `p` default. On a phone the header's
+    actions wrap below the headline instead of squeezing it onto four
+    lines. The Decision Center below the stat row is the one from #1021,
+    unchanged here.
+  - `DashboardPage.test.jsx` looked for the pipeline with
+    `closest('[data-slot="card"], div')`; the Card renders no `data-slot`,
+    so it only ever found the nearest div. It now checks the ordered list
+    of six. `e2e/admin-authenticated.spec.js` checks the dashboard at
+    1280 px, 1440 px and on a Pixel 5: no sideways scroll, the row inside
+    its card and centred in it, six boxes within 1 px of one size, no
+    description cut, five even stat tiles. Run against the old row
+    layout, all three fail.
 - **"Needs a decision" on `/admin` is now a Decision Center over every
   decision waiting, and an article sent to review is one of them (#1013,
   #1014).** It used to show the newest few Review Queue items, and "newest"

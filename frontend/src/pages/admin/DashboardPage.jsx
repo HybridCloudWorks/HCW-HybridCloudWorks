@@ -26,11 +26,14 @@ import {
   BookOpen,
   Code2,
   ChevronRight,
+  ArrowRight,
   AlertCircle,
+  Layers,
 } from 'lucide-react';
 import useDashboardCounts from '@/hooks/useDashboardCounts';
 import { NAV_GROUPS } from '@/config/adminNav';
 import DecisionCenter from '@/components/admin/dashboard/DecisionCenter';
+import StatTile from '@/components/admin/shared/StatTile';
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
@@ -85,6 +88,7 @@ export const PIPELINE_STAGES = Object.freeze([
     label: 'Publish',
     description: 'Go live, now or scheduled',
     to: '/admin/published',
+    countKey: 'publish',
     color:
       'border-emerald-200 bg-emerald-50/40 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300',
   },
@@ -99,55 +103,85 @@ export const PIPELINE_STAGES = Object.freeze([
   },
 ]);
 
+/**
+ * One stage: the step number and its count on the top row, the label and a
+ * two-line description below.
+ *
+ * STACKED, NOT SIDE BY SIDE. The row used to put the step circle, the text
+ * and the count in one line inside a `flex-1 min-w-38` box: at xl the six
+ * boxes, five chevrons and gaps needed about 1072 px of a 926 px card, so
+ * Live Pages ran past the card's edge and five of the six descriptions were
+ * cut to a few letters. Here the text has the whole box width, the count
+ * sits beside the step number where it cannot squeeze the label, and the
+ * description wraps to two lines instead of truncating to one.
+ */
 function PipelineStage({ step, stage, count, isLast }) {
   return (
-    <>
+    <li className="relative min-w-0">
       <Link
         to={stage.to}
-        className={`flex-1 min-w-38 flex items-center gap-3 px-3 py-3 rounded-xl border transition-all hover:shadow-sm hover:-translate-y-0.5 ${stage.color}`}
+        data-testid="pipeline-stage"
+        className={`flex h-full flex-col gap-2 rounded-xl border px-3 py-3 transition-all hover:shadow-sm hover:-translate-y-0.5 ${stage.color}`}
         aria-label={`${stage.label}: ${stage.description}${count ? `, ${count} items` : ''}`}
       >
-        <span
-          className="shrink-0 w-7 h-7 rounded-full border border-current text-xs font-bold flex items-center justify-center"
-          aria-hidden="true"
-        >
-          {step}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="font-semibold text-sm">{stage.label}</p>
-          <p className="text-muted-foreground text-xs truncate">{stage.description}</p>
-        </div>
-        {count > 0 && (
-          <span className="shrink-0 min-w-5.5 h-5 rounded-full bg-amber-500 text-white text-[11px] font-bold flex items-center justify-center px-1.5">
-            {count > 999 ? '999+' : count}
+        <span className="flex items-center justify-between gap-2">
+          <span
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-current text-xs font-bold"
+            aria-hidden="true"
+          >
+            {step}
           </span>
-        )}
+          {count > 0 && (
+            <span className="flex h-5 min-w-5.5 shrink-0 items-center justify-center rounded-full bg-amber-500 px-1.5 text-[11px] font-bold text-white">
+              {count > 999 ? '999+' : count}
+            </span>
+          )}
+        </span>
+        <span className="flex min-w-0 flex-col">
+          <span className="text-sm font-semibold leading-5">{stage.label}</span>
+          <span
+            data-testid="pipeline-stage-description"
+            className="line-clamp-2 text-xs leading-4 text-muted-foreground"
+          >
+            {stage.description}
+          </span>
+        </span>
       </Link>
+      {/* The connector costs no width: it sits in the gap beside the step
+          number, and only when the six stages share one row. On two or three
+          columns the step numbers carry the order instead. */}
       {!isLast && (
         <ChevronRight
-          className="hidden xl:block shrink-0 h-4 w-4 text-muted-foreground/40"
+          className="pointer-events-none absolute top-6.75 -right-3.5 hidden h-3 w-3 -translate-y-1/2 text-muted-foreground/50 @4xl:block"
           aria-hidden="true"
         />
       )}
-    </>
+    </li>
   );
 }
 
+/**
+ * The six stages on an equal grid, sized by the card, not the window
+ * (container queries): the content column's width depends on the sidebar as
+ * much as on the viewport. Six columns from 56rem (896 px, which the 926 px
+ * card at xl clears), three from 28rem, two below. `auto-rows-fr` makes every
+ * box the height of the tallest, so all six are the same size whichever row
+ * they land on.
+ */
 function DashboardPipeline({ counts }) {
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base flex items-center gap-2">
-          <TrendingUp className="h-4 w-4 text-primary" aria-hidden="true" />
-          The pipeline
-        </CardTitle>
-        <p className="text-xs text-muted-foreground">
-          Every piece of content moves left to right. A number is how many items are waiting at that
-          stage; open a stage to work it.
-        </p>
-      </CardHeader>
-      <CardContent>
-        <div className="flex flex-wrap xl:flex-nowrap items-center gap-2">
+    <Section
+      testId="pipeline-card"
+      title="The pipeline"
+      icon={TrendingUp}
+      iconColor="text-primary"
+      hint="Every piece of content moves left to right. A number is how many items are waiting at that stage; open a stage to work it."
+    >
+      <div className="@container">
+        <ol
+          data-testid="pipeline"
+          className="m-0 grid list-none auto-rows-fr grid-cols-2 gap-4 p-0 @md:grid-cols-3 @4xl:grid-cols-6"
+        >
           {PIPELINE_STAGES.map((stage, index) => (
             <PipelineStage
               key={stage.id}
@@ -157,32 +191,82 @@ function DashboardPipeline({ counts }) {
               isLast={index === PIPELINE_STAGES.length - 1}
             />
           ))}
-        </div>
-      </CardContent>
-    </Card>
+        </ol>
+      </div>
+    </Section>
   );
 }
 
 // ── Sections ──────────────────────────────────────────────────────────────────
 
-function DashboardHeader({ today, counts, loadError, recalculating, onRecalculate, onNewContent }) {
+function Section({ title, icon: Icon, iconColor, to, children, hint, testId }) {
   return (
-    <div className="flex items-start justify-between gap-4">
-      <div>
-        <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider mb-1">
+    <Card data-testid={testId}>
+      <CardHeader className="pb-3 flex flex-row items-start justify-between gap-3">
+        <div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Icon className={`h-4 w-4 ${iconColor}`} aria-hidden="true" />
+            {title}
+          </CardTitle>
+          {hint && <p className="mt-1 mb-0 text-xs text-muted-foreground">{hint}</p>}
+        </div>
+        {to && (
+          <Link
+            to={to}
+            className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors shrink-0"
+          >
+            View all <ArrowRight className="h-3 w-3" aria-hidden="true" />
+          </Link>
+        )}
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+/** A count in running text that opens the page listing what it counts. */
+function CountLink({ to, children }) {
+  return (
+    <Link
+      to={to}
+      className="underline-offset-2 hover:text-primary hover:underline focus-visible:underline"
+    >
+      {children}
+    </Link>
+  );
+}
+
+function DashboardHeader({ today, counts, loadError, recalculating, onRecalculate, onNewContent }) {
+  // The actions wrap below the text when the column is narrower than both:
+  // side by side on a phone, they squeezed the headline onto four lines.
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
+      <div className="min-w-0 flex-1 basis-64">
+        <p className="mb-1 text-xs font-medium uppercase tracking-wider text-muted-foreground">
           {today}
         </p>
         <h1 className="text-2xl font-bold tracking-tight">
-          {counts.queue > 0
-            ? `${pluralize(counts.queue, 'item')} waiting for you`
-            : "You're all caught up 🎉"}
+          {counts.queue > 0 ? (
+            <CountLink to="/admin/queue?status=needs_review">
+              {`${pluralize(counts.queue, 'item')} waiting for you`}
+            </CountLink>
+          ) : (
+            "You're all caught up 🎉"
+          )}
         </h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          {counts.live} pieces live · {counts.editor} in editor
-          {counts.rejected > 0 && ` · ${counts.rejected} rejected`}
+        <p className="mt-1 mb-0 text-sm text-muted-foreground">
+          <CountLink to="/admin/live-pages">{counts.live} pieces live</CountLink>
+          {' · '}
+          <CountLink to="/admin/editor">{counts.editor} in editor</CountLink>
+          {counts.rejected > 0 && (
+            <>
+              {' · '}
+              <CountLink to="/admin/queue?status=rejected">{counts.rejected} rejected</CountLink>
+            </>
+          )}
         </p>
         {loadError && (
-          <p className="text-sm text-destructive flex items-center gap-1.5 mt-2" role="alert">
+          <p className="mt-2 mb-0 flex items-center gap-1.5 text-sm text-destructive" role="alert">
             <AlertCircle className="h-3.5 w-3.5" aria-hidden="true" /> {loadError}
           </p>
         )}
@@ -211,68 +295,100 @@ function DashboardHeader({ today, counts, loadError, recalculating, onRecalculat
   );
 }
 
+/**
+ * The content types, each counted across every stage, and Rejected.
+ *
+ * WHAT A TILE OPENS, AND WHY ITS NOTE SAYS SO. A type's number is its total
+ * across every stage (the stats document's `total`). No list in the admin
+ * shows that set: the Review Queue and the Frameworks and Coder Corner lists
+ * have no all-statuses view, and each opens on its needs-review filter. The
+ * Blogs tile used to show the total and land on that filter with nothing to
+ * say so. Now the section says the number is every stage, the tile's link
+ * names the filter it opens (`status=needs_review`, explicit rather than the
+ * page's default), and the note says how many are waiting there, which is
+ * the count the destination shows. Rejected opens the rejected list.
+ */
+const TYPE_TILES = Object.freeze([
+  {
+    label: 'Blogs',
+    noun: 'blog',
+    types: ['blog', 'news'],
+    to: '/admin/queue?contentType=blog&status=needs_review',
+    icon: FileText,
+    iconClassName: 'text-blue-500',
+  },
+  {
+    label: 'Architecture',
+    noun: 'architecture',
+    types: ['architecture'],
+    to: '/admin/queue?contentType=architecture&status=needs_review',
+    icon: Globe,
+    iconClassName: 'text-purple-500',
+  },
+  {
+    label: 'Frameworks',
+    noun: 'framework',
+    types: ['framework'],
+    to: '/admin/frameworks?status=needs_review',
+    icon: BookOpen,
+    iconClassName: 'text-sky-500',
+  },
+  {
+    label: 'Coder Corner',
+    noun: 'Coder Corner',
+    types: ['coder_corner'],
+    to: '/admin/coder-corner?status=needs_review',
+    icon: Code2,
+    iconClassName: 'text-amber-500',
+  },
+]);
+
+/** A type tile from countsFromSnapshot's byType, which holds every type. */
+function typeTile({ types, noun, ...tile }, byType) {
+  const sum = (bucket) => types.reduce((n, type) => n + byType[type][bucket], 0);
+  const total = sum('total');
+  const waiting = sum('needsReview');
+  return {
+    ...tile,
+    value: total,
+    note: `${waiting} to review`,
+    ariaLabel: `${tile.label}: ${total} across every stage, ${waiting} waiting for review. Opens the ${noun} review list.`,
+  };
+}
+
 function DashboardStats({ counts }) {
-  const t = counts.byType;
-  const cards = [
-    {
-      label: 'Blogs',
-      icon: FileText,
-      count: (t.blog?.total || 0) + (t.news?.total || 0),
-      to: '/admin/queue?contentType=blog',
-      color: 'text-blue-500',
-    },
-    {
-      label: 'Architecture',
-      icon: Globe,
-      count: t.architecture?.total || 0,
-      to: '/admin/queue?contentType=architecture',
-      color: 'text-purple-500',
-    },
-    {
-      label: 'Frameworks',
-      icon: BookOpen,
-      count: t.framework?.total || 0,
-      to: '/admin/frameworks',
-      color: 'text-sky-500',
-    },
-    {
-      label: 'Coder Corner',
-      icon: Code2,
-      count: t.coder_corner?.total || 0,
-      to: '/admin/coder-corner',
-      color: 'text-amber-500',
-    },
+  const tiles = [
+    ...TYPE_TILES.map((tile) => typeTile(tile, counts.byType)),
     {
       label: 'Rejected',
       icon: AlertCircle,
-      count: counts.rejected,
+      iconClassName: 'text-destructive',
+      value: counts.rejected,
       to: '/admin/queue?status=rejected',
-      color: 'text-destructive',
       note: counts.rejected > 0 ? 'Auto-deletes in 24h' : null,
+      noteClassName: 'text-red-700 dark:text-red-300',
+      ariaLabel: `Rejected: ${counts.rejected}.${counts.rejected > 0 ? ' Auto-deletes in 24h.' : ''} Opens the rejected list.`,
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-      {cards.map(({ label, icon: Icon, count, to, color, note }) => (
-        <Link
-          key={label}
-          to={to}
-          className="flex flex-col gap-1 p-4 border rounded-xl hover:bg-muted/50 transition-colors group"
-        >
-          <div className="flex items-center justify-between">
-            <Icon className={`h-4 w-4 ${color}`} aria-hidden="true" />
-            <ChevronRight
-              className="h-3 w-3 text-muted-foreground/30 group-hover:text-muted-foreground transition-colors"
-              aria-hidden="true"
-            />
-          </div>
-          <p className="text-2xl font-bold mt-1">{count}</p>
-          <p className="text-xs text-muted-foreground font-medium">{label}</p>
-          {note && <p className="text-[10px] text-destructive/70">{note}</p>}
-        </Link>
-      ))}
-    </div>
+    <Section
+      title="Content by type"
+      icon={Layers}
+      iconColor="text-primary"
+      hint="Each type's total across every stage. A tile opens that type's review list, and its note says how many are waiting there."
+    >
+      {/* Sized by the card, like the pipeline: five from 48rem (the 926 px
+          card at xl), three from 32rem, two below. Not `@2xl`: index.css
+          sets `--container-2xl` to 1400px, so `@2xl` would never apply. */}
+      <div className="@container">
+        <div className="grid auto-rows-fr grid-cols-2 gap-3 @lg:grid-cols-3 @3xl:grid-cols-5">
+          {tiles.map(({ label, ...tile }) => (
+            <StatTile key={label} label={label} {...tile} />
+          ))}
+        </div>
+      </div>
+    </Section>
   );
 }
 
@@ -288,7 +404,7 @@ function DashboardExplore() {
         <h2 id="explore-heading" className="text-base font-semibold">
           Explore ContentForge
         </h2>
-        <p className="text-xs text-muted-foreground">
+        <p className="mt-1 mb-0 text-xs text-muted-foreground">
           What each part of the menu is for. Hover any menu item for the same sentence.
         </p>
       </div>
@@ -305,7 +421,7 @@ function DashboardExplore() {
               <CardTitle className="text-sm uppercase tracking-wider text-muted-foreground">
                 {group.label}
               </CardTitle>
-              <p className="text-xs text-muted-foreground">{group.description}</p>
+              <p className="mb-0 text-xs text-muted-foreground">{group.description}</p>
             </CardHeader>
             <CardContent>
               <ul className="space-y-1">
@@ -382,8 +498,11 @@ export default function DashboardPage() {
     );
   }
 
+  // One gap token between sections (24 px). Each section owns its inside
+  // spacing; nothing here carries a margin of its own, and the paragraphs
+  // that close a block set `mb-0` over the `p` default in index.css.
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <DashboardHeader
         today={today}
         counts={counts}

@@ -136,6 +136,7 @@ const ITEMS = [
     Newspaper,
     'Publish',
     'Push finished content live, now or on a schedule, and see what went out.',
+    { badgeKey: 'publish' },
   ],
   [
     'pipeline',
