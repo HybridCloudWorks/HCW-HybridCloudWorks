@@ -292,6 +292,8 @@ describe('fails closed while no agent can run the job', () => {
     // the door open for 90 s after a stop (#1009).
     ['an agent whose fresh heartbeat said offline', [onlineAgent({ status: 'offline' })]],
     ['an agent whose fresh heartbeat said stopping', [onlineAgent({ status: 'stopping' })]],
+    // The guard refuses it at once; its heartbeat stays fresh 90 s (#1018).
+    ['an agent deactivated since its last heartbeat', [onlineAgent({ active: false })]],
     ['an online agent not registered for terraform-validate', [onlineAgent({ capabilities: ['shell-echo'] })]],
     ['an online agent with no capabilities field', [onlineAgent({ capabilities: undefined })]],
   ])('refuses with %s, and neither counts nor queues', async (_label, agents) => {

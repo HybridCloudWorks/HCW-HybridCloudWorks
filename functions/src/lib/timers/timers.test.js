@@ -920,9 +920,9 @@ describe('agent health + temp storage', () => {
     ]);
     expect(await createAgentHealthCheck({ store, now }).run()).toEqual({
       markedOffline: 1,
-      agentIds: ['agent-1'],
-      notifiedOffline: [],
-      notifiedBack: [],
+      heartbeatWon: 0,
+      notifiedOffline: 0,
+      notifiedBack: 0,
     });
     expect(store.queryDocs.mock.calls[0].slice(0, 2)).toEqual(['lab_agents', AGENT_HEALTH_QUERY]);
     // offlineSince is when it went quiet, not when this run noticed (#1009).
@@ -956,8 +956,10 @@ describe('agent health + temp storage', () => {
       { partitionKey: 'agent-1' }
     );
     // Logged at warn: host.json holds Function logs at Warning (#1009).
-    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/marked offline: agent-1/));
-    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/offline message sent for agent-1/));
+    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/marked 1 agent\(s\) offline/));
+    expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/offline message sent for 1 agent\(s\)/));
+    // Content-free: counts, never the document id (review of #1018).
+    for (const [line] of log.warn.mock.calls) expect(line).not.toContain('agent-1');
 
     const quiet = memStore({}, () => []);
     await createAgentHealthCheck({ store: quiet, notifier, now }).run();
@@ -967,16 +969,16 @@ describe('agent health + temp storage', () => {
   it('marks the agent offline even when the notifier is absent or throws, and leaves the message owed (LAB-2)', async () => {
     const stale = () => [{ id: 'agent-1', agentId: 'agent-1', active: true, status: 'busy', lastSeenAt: iso(-10 * 60 * 1000) }];
     const store = memStore({}, stale);
-    expect(await createAgentHealthCheck({ store, now }).run()).toMatchObject({ markedOffline: 1, agentIds: ['agent-1'] });
+    expect(await createAgentHealthCheck({ store, now }).run()).toMatchObject({ markedOffline: 1 });
 
     const throwing = { notifyTelegram: vi.fn(async () => { throw new Error('telegram down'); }) };
     const store2 = memStore({}, stale);
     const log = { warn: vi.fn(), log: vi.fn() };
     expect(await createAgentHealthCheck({ store: store2, notifier: throwing, now, log }).run()).toEqual({
       markedOffline: 1,
-      agentIds: ['agent-1'],
-      notifiedOffline: [],
-      notifiedBack: [],
+      heartbeatWon: 0,
+      notifiedOffline: 0,
+      notifiedBack: 0,
     });
     expect(throwing.notifyTelegram).toHaveBeenCalledTimes(1);
     expect(store2.patchDoc).toHaveBeenCalledTimes(1);

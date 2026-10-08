@@ -355,7 +355,7 @@ variables hold, and the later line copies each to the clipboard in turn for
 the paste.
 
 ```powershell
-gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks | Select-String 'COPILOT_REVIEW_CLIENT_ID|^TENANT_ID|^SUBSCRIPTION_ID|COPILOT_REVIEW_APP_ID'
+gh variable list --repo saulpatinojr/HCW-HybridCloudWorks | Select-String 'COPILOT_REVIEW_CLIENT_ID|^TENANT_ID|^SUBSCRIPTION_ID|COPILOT_REVIEW_APP_ID'
 ```
 
 Then, in the repository, **Settings → Secrets and variables → Agents →
@@ -374,7 +374,7 @@ the Actions tab at
 To copy one value without retyping it, PowerShell:
 
 ```powershell
-gh variable get COPILOT_REVIEW_CLIENT_ID --repo HybridCloudWorks/HCW-HybridCloudWorks | Set-Clipboard
+gh variable get COPILOT_REVIEW_CLIENT_ID --repo saulpatinojr/HCW-HybridCloudWorks | Set-Clipboard
 ```
 
 and the same with `TENANT_ID`, `SUBSCRIPTION_ID` and `COPILOT_REVIEW_APP_ID`
@@ -389,7 +389,7 @@ key), and the next review session's log showing `azure/login` with a
 PowerShell:
 
 ```powershell
-gh workflow run copilot-setup-steps.yml --repo HybridCloudWorks/HCW-HybridCloudWorks; Start-Sleep -Seconds 20; gh run list --repo HybridCloudWorks/HCW-HybridCloudWorks --workflow copilot-setup-steps.yml --limit 1
+gh workflow run copilot-setup-steps.yml --repo saulpatinojr/HCW-HybridCloudWorks; Start-Sleep -Seconds 20; gh run list --repo saulpatinojr/HCW-HybridCloudWorks --workflow copilot-setup-steps.yml --limit 1
 ```
 
 **Success looks like:** the run is `completed success` and its single step,
@@ -427,10 +427,10 @@ No personal access token is created at any point in this step.
    line. PowerShell:
 
     ```powershell
-    $appId = (gh api /orgs/HybridCloudWorks/installations | ConvertFrom-Json).installations | Where-Object app_slug -eq 'hcw-copilot-review-reader' | Select-Object -ExpandProperty app_id; gh variable set COPILOT_REVIEW_APP_ID --repo HybridCloudWorks/HCW-HybridCloudWorks --body $appId
+    $appId = (gh api /orgs/HybridCloudWorks/installations | ConvertFrom-Json).installations | Where-Object app_slug -eq 'hcw-copilot-review-reader' | Select-Object -ExpandProperty app_id; gh variable set COPILOT_REVIEW_APP_ID --repo saulpatinojr/HCW-HybridCloudWorks --body $appId
     ```
 
-    **Success looks like:** `gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks`
+    **Success looks like:** `gh variable list --repo saulpatinojr/HCW-HybridCloudWorks`
     shows `COPILOT_REVIEW_APP_ID` with the same integer the App page shows.
     If the first half returns nothing, the App is not yet installed on the
     organisation (step 3) — the variable would then be set empty, so check
@@ -449,7 +449,7 @@ No personal access token is created at any point in this step.
 
 **Success looks like:** the App listed at
 <https://github.com/organizations/HybridCloudWorks/settings/installations>
-as installed on one repository; `gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks`
+as installed on one repository; `gh variable list --repo saulpatinojr/HCW-HybridCloudWorks`
 shows `COPILOT_REVIEW_APP_ID`; and the secret appears under Agents with that
 exact name. Both names are load-bearing: the workflow reads them verbatim and
 reports "not configured" while either is missing.

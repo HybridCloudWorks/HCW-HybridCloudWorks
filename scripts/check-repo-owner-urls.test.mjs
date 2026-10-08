@@ -1,5 +1,5 @@
 /**
- * No shipped file names the repository's former owner (#1009). The reasoning
+ * No live file names the repository's former owner (#1009). The reasoning
  * is in scripts/check-repo-owner-urls.mjs, which ci.yml also runs on its own
  * on every pull request.
  *
@@ -14,8 +14,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ALLOWED,
+  HISTORICAL,
   namesFormerOwner,
-  GUARDED,
   describeFinding,
   findFormerOwnerUrls,
   listGuardedFiles,
@@ -46,11 +46,28 @@ describe('what the check catches', () => {
     );
   });
 
-  it('is about the owner, not the words: the organisation board and the image names are not repository URLs', () => {
+  it('catches every form the repository is named in: web and git address, raw download, API path, gh --repo', () => {
+    for (const line of [
+      'git clone git@github.com:HybridCloudWorks/HCW-HybridCloudWorks.git',
+      'Invoke-WebRequest -Uri https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/x.ps1',
+      'gh api repos/HybridCloudWorks/HCW-HybridCloudWorks/pulls/1/reviews',
+      'gh variable set X -R HybridCloudWorks/HCW-HybridCloudWorks -b y',
+      'gh pr list --repo hybridcloudworks/hcw-hybridcloudworks',
+      'HybridCloudWorks/HCW-HybridCloudWorks at the start of a line',
+    ]) {
+      expect(namesFormerOwner(line), line).toBe(true);
+    }
+  });
+
+  it('is about the owner, not the words: the organisation, its images and the new owner are not stale', () => {
     for (const line of [
       'https://github.com/orgs/HybridCloudWorks/projects/1',
       'docker.io/hybridcloudworks/hcw-lab@sha256:abc',
+      'hybridcloudworks/hcw-lab-runner:2026.10.08',
       'https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-host',
+      'gh pr list --repo saulpatinojr/HCW-HybridCloudWorks',
+      // A name that merely ends in the old owner's is someone else.
+      'not-hybridcloudworks/HCW-HybridCloudWorks',
     ]) {
       expect(namesFormerOwner(line), line).toBe(false);
     }
@@ -66,23 +83,32 @@ describe('what the check catches', () => {
 });
 
 describe('the repository', () => {
-  it('guards the paths the 2026-10-08 review named', () => {
-    expect([...GUARDED]).toEqual([
-      'lab-host/',
-      'vps-agent/',
-      'frontend/src/',
-      'functions/src/',
-      'scripts/',
-      '.github/',
-      'mkdocs.yml',
+  it('leaves out only the dated records (review of #1018)', () => {
+    expect([...HISTORICAL]).toEqual([
+      'CHANGELOG.md',
+      'docs/history/',
+      'docs/decisions/',
+      'docs/architecture/architecture-review-2026-08.md',
+      'docs/architecture/resource-validation-report.md',
     ]);
   });
 
-  it('names its former owner nowhere it ships', () => {
+  it('names its former owner in no live file', () => {
     const files = listGuardedFiles(REPO);
-    // A listing that came back empty would pass anything.
-    expect(files).toContain('lab-host/bootstrap.sh');
-    expect(files).toContain('mkdocs.yml');
+    // A listing that came back empty, or kept to the old few directories,
+    // would pass anything: the runbooks, infra-lab and the session
+    // instructions are read too, and the dated records are not.
+    for (const file of [
+      'lab-host/bootstrap.sh',
+      'mkdocs.yml',
+      'docs/runbooks/labs-host.md',
+      'infra-lab/README.md',
+      '.claude/CLAUDE.md',
+    ]) {
+      expect(files).toContain(file);
+    }
+    expect(files).not.toContain('CHANGELOG.md');
+    expect(files.some((file) => file.startsWith('docs/history/'))).toBe(false);
     expect(findFormerOwnerUrls(files, readTracked(REPO)).map(describeFinding)).toEqual([]);
   });
 
@@ -103,7 +129,9 @@ describe('the repository', () => {
       timeout: 60_000,
     });
     expect(result.status, result.stderr).toBe(0);
-    expect(result.stdout).toMatch(/^No tracked file under lab-host\/, .* names the former owner's GitHub address\.$/m);
+    expect(result.stdout).toMatch(
+      /^No tracked file outside the dated records \(CHANGELOG\.md, .*\) names the former owner's repository; \d+ files read\.$/m
+    );
   });
 
   it('ci.yml runs the check on every pull request, outside the path filter', () => {

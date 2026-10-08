@@ -3958,9 +3958,15 @@ This project has not cut a tagged release; entries are grouped under
     back sends "Lab agent back online after N min", retried by the timer if
     it could not go. That morning's 04:30 reboot, back in 43 seconds, had
     sent a red alert and nothing after it.
-  - An agent whose fresh heartbeat says `stopping` or `offline` is not
-    online. The goodbye heartbeat wrote `lastSeenAt`, so the public door
-    stayed open for 90 seconds after a stop.
+  - An agent whose fresh heartbeat says `stopping` or `offline`, or that the
+    registry has deactivated, is not online. The goodbye heartbeat wrote
+    `lastSeenAt`, so the public door stayed open for 90 seconds after a stop;
+    a `stopping` heartbeat with jobs still draining was stored as `busy`, and
+    the agent's own 30-second heartbeat said `idle` during the drain, so
+    the door reopened until the final `offline`. Both now stay `stopping`.
+  - `checkAgentHealth` writes its offline mark with the ETag of the read
+    that decided it, so a heartbeat landing between the two wins and no
+    false outage message goes.
   - The public estate card's "Last heartbeat" was Arc's last status change,
     so a healthy host read as silent for days. It is now "Arc status
     since", beside a new "Job runner heartbeat" row, and policy checks that
@@ -3971,14 +3977,19 @@ This project has not cut a tagged release; entries are grouped under
   - `checkAgentHealth` logs marks, recoveries and messages at warn, which
     `host.json` ingests, and `vps-agent` writes its errors and warnings with
     the syslog priority prefixes `<3>` and `<4>`, so the lab host's data
-    collection rule picks them up.
-  - Every shipped `github.com/HybridCloudWorks/` URL now names
-    `saulpatinojr`, including the lab host's clone URL, the agent's
-    checkout and the Coder template's clone; the CMS draft import, which
-    refuses redirects, fetches from the new owner with its draft ids
-    unchanged. `bootstrap.sh` repoints an existing checkout's origin, and
-    CI fails on the old address. Coder's allowed GitHub organisation is
-    unchanged, pending #1015.
+    collection rule picks them up. What those lines say is content-free:
+    counts and the error's class, never a document id or an error's text
+    (a docker-runner error can quote a path from a learner's payload). The
+    agent writes the job id and the detail on an info line beside each,
+    which stays in the host's journal.
+  - Every live reference to the repository under its former owner now
+    names `saulpatinojr`: the lab host's clone URL, the agent's checkout,
+    the Coder template's clone, and the runbooks' `gh --repo` lines and
+    raw download. The CMS draft import, which refuses redirects, fetches
+    from the new owner with its draft ids unchanged. `bootstrap.sh`
+    repoints an existing checkout's origin, and CI fails on the old address
+    or owner/name in any tracked file outside the dated records. Coder's
+    allowed GitHub organisation is unchanged, pending #1016.
   - The labs host pages say what is merged and what the host has applied,
     and the runbook states the order after a merge: `bootstrap.sh`, then
     the Coder template push at once.

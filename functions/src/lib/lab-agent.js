@@ -211,18 +211,24 @@ function outageUpdates(agent, updates) {
   return { goingOffline, comingBack, owesBack, extra };
 }
 
-/** The warn lines a transition writes, and the "back online" it may owe. */
+/**
+ * The warn lines a transition writes, and the "back online" it may owe.
+ *
+ * Content-free: Warning is the level host.json ingests, so these name the
+ * transition and never the agent's document id. The registry holds one agent
+ * per host, and the owner's message, which is not telemetry, names it.
+ */
 async function reportOutage({ store, notifier }, context, agent, outage, atMs) {
   const id = agent.agentId;
   if (outage.goingOffline) {
     context.warn?.(
-      `heartbeatAgent: ${id} reported its own shutdown and is marked offline; the owner is told only if it stays offline ${OFFLINE_NOTIFY_AFTER_MS / 60_000} minutes`
+      `heartbeatAgent: an agent reported its own shutdown and is marked offline; the owner is told only if it stays offline ${OFFLINE_NOTIFY_AFTER_MS / 60_000} minutes`
     );
   }
   if (!outage.comingBack) return;
   const minutes = outageMinutes(agent.offlineSince, atMs);
   context.warn?.(
-    `heartbeatAgent: ${id} back online${minutes ? ` after ${minutes} min` : ''}${outage.owesBack ? '; the owner was told it was offline' : ''}`
+    `heartbeatAgent: an agent is back online${minutes ? ` after ${minutes} min` : ''}${outage.owesBack ? '; the owner was told it was offline' : ''}`
   );
   if (!outage.owesBack) return;
   const sent = await tellOwnerAgentBack({
@@ -235,11 +241,11 @@ async function reportOutage({ store, notifier }, context, agent, outage, atMs) {
   if (!sent) return;
   try {
     await store.patchDoc('lab_agents', id, BACK_ONLINE_SENT, { partitionKey: id });
-    context.warn?.(`heartbeatAgent: back-online message sent for ${id}`);
+    context.warn?.('heartbeatAgent: back-online message sent');
   } catch (err) {
     // The message went; the next health run would send it again, which is
     // the lesser fault than claiming here that it did not.
-    context.warn?.(`heartbeatAgent: back-online message sent for ${id}, but clearing the debt failed: ${err?.message}`);
+    context.warn?.(`heartbeatAgent: back-online message sent, but clearing the debt failed: ${err?.message}`);
   }
 }
 
@@ -272,11 +278,13 @@ async function heartbeatAgent({ guard, store, now, notifier }, request, context)
   // would wipe the stored hostname and version on every heartbeat — and
   // would route each one through the read-modify-write path, turning a
   // 30-second poll into two round trips instead of one.
-  // `offline` is terminal and wins over the job-derived `busy`: the agent
-  // sends `offline` with activeJobs > 0 when its shutdown deadline expires
-  // with work still running, and that is exactly the moment to say so.
+  // Both shutdown statuses win over the job-derived `busy`. The agent sends
+  // `stopping` while it drains its jobs and `offline` with activeJobs > 0
+  // when its shutdown deadline expires with work still running; rewriting
+  // either to `busy` read a departing agent as online and let the public
+  // door queue work its poller will never claim (review of #1018).
   let effective = status;
-  if (status !== 'offline' && activeJobs > 0) effective = 'busy';
+  if (!AGENT_DOWN_STATUSES.includes(status) && activeJobs > 0) effective = 'busy';
   const at = now();
   const updates = {
     status: effective,

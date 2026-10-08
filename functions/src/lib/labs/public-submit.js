@@ -172,8 +172,8 @@ export const PUBLIC_STATUS_CACHE_ID = 'labs:public-submit';
  */
 async function readReadiness({ store, now }) {
   const [agents, queued] = await Promise.all([
-    // `status` as well as `lastSeenAt`: the online rule reads both (#1009).
-    store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status, c.capabilities FROM c', []),
+    // `status` and `active` as well as `lastSeenAt`: the online rule reads all three (#1009, #1018).
+    store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status, c.active, c.capabilities FROM c', []),
     store.queryDocs(LAB_JOBS_CONTAINER, "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'", []),
   ]);
   const count = Number(Array.isArray(queued) ? queued[0] : Number.NaN);

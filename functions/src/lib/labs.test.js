@@ -158,6 +158,11 @@ describe('isAgentOnline', () => {
     expect(AGENT_DOWN_STATUSES).toEqual(['stopping', 'offline']);
   });
 
+  it('is offline once deactivated, however fresh the last heartbeat (review of #1018)', () => {
+    expect(isAgentOnline({ active: false, status: 'idle', lastSeenAt: ago(1_000) }, nowMs)).toBe(false);
+    expect(isAgentOnline({ active: true, status: 'idle', lastSeenAt: ago(1_000) }, nowMs)).toBe(true);
+  });
+
   it('is offline from three missed heartbeats, and for a record with no heartbeat at all', () => {
     expect(isAgentOnline({ status: 'idle', lastSeenAt: ago(AGENT_STALE_AFTER_MS - 1) }, nowMs)).toBe(true);
     expect(isAgentOnline({ status: 'idle', lastSeenAt: ago(AGENT_STALE_AFTER_MS) }, nowMs)).toBe(false);

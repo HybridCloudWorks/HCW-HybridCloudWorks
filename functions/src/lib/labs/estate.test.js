@@ -185,6 +185,12 @@ describe('shapeArcRow / shapePolicyRows / shapeAgentRows', () => {
       lastHeartbeatAt: null,
     });
     expect(shapeAgentRows([], [], NOW)).toEqual({ online: false, queued: 0, lastHeartbeatAt: null });
+    // Deactivated since its last heartbeat: the guard already refuses it (#1018).
+    expect(shapeAgentRows([{ active: false, status: 'idle', lastSeenAt: ago(1_000) }], [0], NOW)).toEqual({
+      online: false,
+      queued: 0,
+      lastHeartbeatAt: null,
+    });
   });
 });
 
@@ -254,7 +260,7 @@ describe('GET /api/public/labs/estate', () => {
       coder: { reachable: true, running: 1, max: 5 },
       asOf: new Date(NOW).toISOString(),
     });
-    expect(store.queryDocs).toHaveBeenCalledWith('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status FROM c', []);
+    expect(store.queryDocs).toHaveBeenCalledWith('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status, c.active FROM c', []);
     expect(store.queryDocs).toHaveBeenCalledWith(
       'lab_jobs',
       "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'",

@@ -37,6 +37,17 @@
  * Every state change is logged at warn. host.json holds Function logs at
  * Warning, so the information line this used to write ("N agent(s) marked
  * offline") was never ingested, and a mark could not be found afterwards.
+ * Those lines are content-free, counts and never document ids, and so is the
+ * run's result; the owner's message, which is not telemetry, names the agent.
+ *
+ * A MARK IS A DECISION FROM A READ, so it is written with that read's ETag.
+ * A heartbeat that lands between this run's read and its mark has made the
+ * agent fresh again; an unguarded mark would overwrite it with `offline` and
+ * could send a false outage message. The guarded mark loses with a 412
+ * instead, and this run leaves that agent to the next one (review of #1018).
+ * The stamps that record a message went (`offlineNotifiedAt`, the "back
+ * online" clear) are not guarded: they record a fact about the message, true
+ * whatever else changed on the document.
  */
 import { AGENT_DOWN_STATUSES, AGENT_STALE_AFTER_MS } from '../labs.js';
 
@@ -52,10 +63,13 @@ export const AGENT_ONLINE_SOURCE = 'lab_agent_online';
 
 /**
  * The whole registry, once a run. It holds a handful of documents; TOP bounds
- * a mistake. The fields are every one the three decisions read.
+ * a mistake. The fields are every one the three decisions read, and `_etag`,
+ * which guards the marks those decisions write.
  */
 export const AGENT_HEALTH_QUERY =
-  'SELECT TOP 100 c.id, c.agentId, c.active, c.status, c.lastSeenAt, c.hostname, c.offlineSince, c.offlineNotifiedAt, c.backOnlineAt FROM c';
+  'SELECT TOP 100 c.id, c.agentId, c.active, c.status, c.lastSeenAt, c.hostname, c.offlineSince, c.offlineNotifiedAt, c.backOnlineAt, c._etag FROM c';
+
+const isPreconditionFailed = (error) => error?.code === 412 || error?.statusCode === 412;
 
 /** The patch that settles a "back online" owed: both fields null, one round trip. */
 export const BACK_ONLINE_SENT = Object.freeze({ offlineNotifiedAt: null, backOnlineAt: null });
@@ -176,7 +190,7 @@ export async function tellOwnerAgentBack({ notifier, agent, backAtMs, log = {}, 
     const result = await notifier.notifyTelegram(backOnlineMessage(agent, backAtMs));
     if (result?.sent === true) return true;
     log.warn?.(
-      `${label} back-online message for ${agentIdOf(agent)} not sent (${result?.reason || 'no reason given'}); checkAgentHealth tries again`
+      `${label} back-online message not sent (${result?.reason || 'no reason given'}); checkAgentHealth tries again`
     );
   } catch (error) {
     log.warn?.(`${label} back-online notification failed: ${error?.message || error}`);
@@ -185,42 +199,60 @@ export async function tellOwnerAgentBack({ notifier, agent, backAtMs, log = {}, 
 }
 
 export function createAgentHealthCheck({ store, notifier = null, now = () => new Date(), log = {} }) {
-  const patchAgent = (agent, updates) =>
-    store.patchDoc('lab_agents', agentIdOf(agent), updates, { partitionKey: agentIdOf(agent) });
+  const patchAgent = (agent, updates, options = {}) =>
+    store.patchDoc('lab_agents', agentIdOf(agent), updates, { partitionKey: agentIdOf(agent), ...options });
 
-  /** One "offline" message for every agent due; stamps each when it went. */
+  /**
+   * Write the marks, each guarded by the ETag of the read that decided it.
+   * Returns the ids whose mark lost to a heartbeat, which this run then
+   * leaves alone. A row read without an ETag is marked unguarded, as before.
+   */
+  async function writeMarks(marks) {
+    const lost = new Set();
+    for (const { agent, updates } of marks) {
+      const guard = typeof agent._etag === 'string' ? { ifMatch: agent._etag } : {};
+      try {
+        await patchAgent(agent, updates, guard);
+      } catch (error) {
+        if (!isPreconditionFailed(error)) throw error;
+        lost.add(agentIdOf(agent));
+      }
+    }
+    return lost;
+  }
+
+  /** One "offline" message for every agent due; stamps each when it went. Returns how many. */
   async function tellOwnerOffline(agents, atMs) {
-    if (agents.length === 0 || !notifier?.notifyTelegram) return [];
-    const ids = agents.map(agentIdOf);
+    if (agents.length === 0 || !notifier?.notifyTelegram) return 0;
     let result;
     try {
       result = await notifier.notifyTelegram(offlineMessage(agents, atMs));
     } catch (error) {
       log.warn?.(`[checkAgentHealth] owner notification failed: ${error?.message || error}`);
-      return [];
+      return 0;
     }
     if (result?.sent !== true) {
       log.warn?.(
-        `[checkAgentHealth] offline message for ${ids.join(', ')} not sent (${result?.reason || 'no reason given'}); the next run tries again`
+        `[checkAgentHealth] offline message for ${agents.length} agent(s) not sent (${result?.reason || 'no reason given'}); the next run tries again`
       );
-      return [];
+      return 0;
     }
     for (const agent of agents) await patchAgent(agent, { offlineNotifiedAt: isoOf(atMs) });
-    log.warn?.(`[checkAgentHealth] offline message sent for ${ids.join(', ')}`);
-    return ids;
+    log.warn?.(`[checkAgentHealth] offline message sent for ${agents.length} agent(s)`);
+    return agents.length;
   }
 
-  /** The "back online" messages a heartbeat could not send. */
+  /** The "back online" messages a heartbeat could not send. Returns how many went. */
   async function tellOwnerBack(agents, atMs) {
-    const sent = [];
+    let sent = 0;
     for (const agent of agents) {
       const backAtMs = msOf(agent.backOnlineAt) ?? msOf(agent.lastSeenAt) ?? atMs;
       if (await tellOwnerAgentBack({ notifier, agent, backAtMs, log, label: '[checkAgentHealth]' })) {
         await patchAgent(agent, BACK_ONLINE_SENT);
-        log.warn?.(`[checkAgentHealth] back-online message sent for ${agentIdOf(agent)}`);
-        sent.push(agentIdOf(agent));
+        sent += 1;
       }
     }
+    if (sent > 0) log.warn?.(`[checkAgentHealth] back-online message sent for ${sent} agent(s)`);
     return sent;
   }
 
@@ -229,22 +261,21 @@ export function createAgentHealthCheck({ store, notifier = null, now = () => new
     const agents = await store.queryDocs('lab_agents', AGENT_HEALTH_QUERY, []);
     const plan = planAgentHealth(agents, atMs);
 
-    for (const { agent, updates } of plan.marks) await patchAgent(agent, updates);
-    if (plan.marks.length > 0) {
-      const described = plan.marks.map(
-        ({ agent }) => `${agentIdOf(agent)} (last heartbeat ${agent.lastSeenAt || 'never'})`
+    const lost = await writeMarks(plan.marks);
+    const marked = plan.marks.length - lost.size;
+    if (marked > 0) log.warn?.(`[checkAgentHealth] marked ${marked} agent(s) offline after three missed heartbeats`);
+    if (lost.size > 0) {
+      log.warn?.(
+        `[checkAgentHealth] ${lost.size} agent(s) heartbeated between this run's read and its mark; left as they are`
       );
-      log.warn?.(`[checkAgentHealth] marked offline: ${described.join(', ')}`);
     }
 
-    const notifiedOffline = await tellOwnerOffline(plan.notifyOffline, atMs);
+    const notifiedOffline = await tellOwnerOffline(
+      plan.notifyOffline.filter((agent) => !lost.has(agentIdOf(agent))),
+      atMs
+    );
     const notifiedBack = await tellOwnerBack(plan.notifyBack, atMs);
-    return {
-      markedOffline: plan.marks.length,
-      agentIds: plan.marks.map(({ agent }) => agentIdOf(agent)),
-      notifiedOffline,
-      notifiedBack,
-    };
+    return { markedOffline: marked, heartbeatWon: lost.size, notifiedOffline, notifiedBack };
   }
   return { run };
 }

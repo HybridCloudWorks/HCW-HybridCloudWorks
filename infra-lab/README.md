@@ -121,7 +121,7 @@ and use the new `template_id`.
 Open https://app.terraform.io/app/hcw/workspaces/new and choose:
 
 - **Version control workflow**, GitHub, repository
-  `HybridCloudWorks/HCW-HybridCloudWorks`.
+  `saulpatinojr/HCW-HybridCloudWorks`.
 - Name **`hcw-lab`**. `infra-lab/backend.tf` names it, so the spelling
   must match.
 - Under **Advanced options**, set Terraform working directory to

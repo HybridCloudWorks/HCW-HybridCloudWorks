@@ -141,6 +141,20 @@ describe('isAgentOnline', () => {
     expect(declared, 'AGENT_DOWN_STATUSES not found in functions/src/lib/labs.js').toBeTruthy();
     expect(JSON.parse(declared.replace(/'/g, '"'))).toEqual([...AGENT_DOWN_STATUSES]);
   });
+
+  it('is offline once deactivated, as the server rule is (review of #1018)', () => {
+    expect(
+      isAgentOnline({ active: false, status: 'idle', lastSeenAt: new Date(now - 1000) }, now)
+    ).toBe(false);
+    expect(
+      isAgentOnline({ active: true, status: 'idle', lastSeenAt: new Date(now - 1000) }, now)
+    ).toBe(true);
+    const server = readFileSync(
+      join(process.cwd(), '..', 'functions', 'src', 'lib', 'labs.js'),
+      'utf8'
+    );
+    expect(server).toContain('if (agent?.active === false) return false;');
+  });
 });
 
 describe('the Labs Hub uses the shared rules', () => {

@@ -101,6 +101,7 @@ function lab({ active = true } = {}) {
   return {
     sent,
     log,
+    store,
     doc: () => store.box('lab_agents').get('vps-1'),
     at(ms) {
       clock = ms;
@@ -142,7 +143,7 @@ describe('the lab agent outage messages (#1009)', () => {
     expect(host.sent).toHaveLength(0);
 
     host.at(T0 + 5 * MIN);
-    expect(await host.runTimer()).toMatchObject({ notifiedOffline: ['vps-1'] });
+    expect(await host.runTimer()).toMatchObject({ notifiedOffline: 1 });
     expect(host.sent).toHaveLength(1);
     expect(host.sent[0]).toMatch(/^\u{1F534} Lab agent offline \(1\)/u);
     expect(host.sent[0]).toContain('vps-1 (vps-hostinger-01): offline since 2026-10-08T04:30:00.000Z (5 min)');
@@ -151,7 +152,7 @@ describe('the lab agent outage messages (#1009)', () => {
     // Repeated runs, past the notifier's cooldown too: still one message.
     for (const minutes of [10, 15, 20, 25]) {
       host.at(T0 + minutes * MIN);
-      expect(await host.runTimer()).toMatchObject({ markedOffline: 0, notifiedOffline: [] });
+      expect(await host.runTimer()).toMatchObject({ markedOffline: 0, notifiedOffline: 0 });
     }
     expect(host.sent).toHaveLength(1);
 
@@ -173,12 +174,12 @@ describe('the lab agent outage messages (#1009)', () => {
     await host.heartbeat('idle');
 
     host.at(T0 + 3 * MIN);
-    expect(await host.runTimer()).toMatchObject({ markedOffline: 1, notifiedOffline: [] });
+    expect(await host.runTimer()).toMatchObject({ markedOffline: 1, notifiedOffline: 0 });
     expect(host.doc()).toMatchObject({ status: 'offline', offlineSince: new Date(T0).toISOString() });
-    expect(host.log.warn).toHaveBeenCalledWith(expect.stringMatching(/marked offline: vps-1/));
+    expect(host.log.warn).toHaveBeenCalledWith(expect.stringMatching(/marked 1 agent\(s\) offline/));
 
     host.at(T0 + 8 * MIN);
-    expect(await host.runTimer()).toMatchObject({ markedOffline: 0, notifiedOffline: ['vps-1'] });
+    expect(await host.runTimer()).toMatchObject({ markedOffline: 0, notifiedOffline: 1 });
     host.at(T0 + 13 * MIN);
     await host.runTimer();
     expect(host.sent).toHaveLength(1);
@@ -224,17 +225,39 @@ describe('the lab agent outage messages (#1009)', () => {
 
     host.at(T0 + 30 * MIN);
     await host.heartbeat('idle');
-    expect(await host.runTimer()).toMatchObject({ notifiedBack: ['vps-1'] });
+    expect(await host.runTimer()).toMatchObject({ notifiedBack: 1 });
     expect(host.sent).toHaveLength(4);
     // Measured to the heartbeat that ended it, not to the run that said so.
     expect(host.sent[3]).toMatch(/^ℹ️ Lab agent back online after 7 min/);
     expect(host.doc()).toMatchObject({ offlineNotifiedAt: null, backOnlineAt: null });
   });
 
+  it('lets a heartbeat that lands between the timer\'s read and its mark win: no false offline, no message (review of #1018)', async () => {
+    const host = lab();
+    host.at(T0);
+    await host.heartbeat('idle');
+
+    // Ten minutes silent, so the run decides to mark it and to announce it;
+    // the agent heartbeats after the read and before the mark.
+    host.at(T0 + 10 * MIN);
+    const read = host.store.queryDocs;
+    host.store.queryDocs = async (...args) => {
+      const rows = await read(...args);
+      await host.heartbeat('idle');
+      return rows;
+    };
+    expect(await host.runTimer()).toMatchObject({ markedOffline: 0, heartbeatWon: 1, notifiedOffline: 0 });
+    expect(host.doc()).toMatchObject({ status: 'idle', lastSeenAt: new Date(T0 + 10 * MIN).toISOString() });
+    expect(host.sent).toEqual([]);
+    expect(host.log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/1 agent\(s\) heartbeated between this run's read and its mark/)
+    );
+  });
+
   it('marks an agent the registry has deactivated, and never announces it', async () => {
     const host = lab({ active: false });
     host.at(T0 + 30 * MIN);
-    expect(await host.runTimer()).toMatchObject({ markedOffline: 1, notifiedOffline: [] });
+    expect(await host.runTimer()).toMatchObject({ markedOffline: 1, notifiedOffline: 0 });
     host.at(T0 + 60 * MIN);
     await host.runTimer();
     expect(host.sent).toEqual([]);

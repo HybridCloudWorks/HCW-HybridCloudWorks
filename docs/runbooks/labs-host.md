@@ -57,20 +57,20 @@ clipboard: copy it from the server's page in hPanel
 (https://hpanel.hostinger.com/vps, then **Manage**), then, PowerShell:
 
 ```powershell
-gh variable set LAB_SSH_HOST -R HybridCloudWorks/HCW-HybridCloudWorks -b (Get-Clipboard -Raw).Trim()
+gh variable set LAB_SSH_HOST -R saulpatinojr/HCW-HybridCloudWorks -b (Get-Clipboard -Raw).Trim()
 ```
 
 Once the record exists, switch the variable to the name, PowerShell:
 
 ```powershell
-gh variable set LAB_SSH_HOST -R HybridCloudWorks/HCW-HybridCloudWorks -b lab.hybridcloudworks.com
+gh variable set LAB_SSH_HOST -R saulpatinojr/HCW-HybridCloudWorks -b lab.hybridcloudworks.com
 ```
 
 Success for either is this printing the value; run the script again on each
 desktop afterwards so its block picks the value up:
 
 ```powershell
-gh variable get LAB_SSH_HOST -R HybridCloudWorks/HCW-HybridCloudWorks
+gh variable get LAB_SSH_HOST -R saulpatinojr/HCW-HybridCloudWorks
 ```
 
 ### Run it on a machine with the repository
@@ -97,7 +97,7 @@ PowerShell. This saves a copy of the script from `main` to Downloads, then
 runs that copy:
 
 ```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/scripts/lab/Connect-Lab.ps1 -OutFile $HOME\Downloads\Connect-Lab.ps1; pwsh -NoProfile -File $HOME\Downloads\Connect-Lab.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/saulpatinojr/HCW-HybridCloudWorks/main/scripts/lab/Connect-Lab.ps1 -OutFile $HOME\Downloads\Connect-Lab.ps1; pwsh -NoProfile -File $HOME\Downloads\Connect-Lab.ps1
 ```
 
 It is saved rather than piped to `iex` so that what runs is a file you can
@@ -533,7 +533,7 @@ one change, `azurerm_function_app_flex_consumption.hcw`, also adds
 check, PowerShell:
 
 ```powershell
-gh workflow run tfc-plan-check.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+gh workflow run tfc-plan-check.yml --repo saulpatinojr/HCW-HybridCloudWorks --ref main
 ```
 
 Its summary reads expected, with two `DECLARED` lines for those two settings.
@@ -555,11 +555,11 @@ Create it, and copy the **Site Key** it shows (it starts with `0x4`). With the
 site key on the clipboard, PowerShell:
 
 ```powershell
-gh variable set VITE_TURNSTILE_SITE_KEY --repo HybridCloudWorks/HCW-HybridCloudWorks --body (Get-Clipboard)
+gh variable set VITE_TURNSTILE_SITE_KEY --repo saulpatinojr/HCW-HybridCloudWorks --body (Get-Clipboard)
 ```
 
 ```powershell
-gh variable get VITE_TURNSTILE_SITE_KEY --repo HybridCloudWorks/HCW-HybridCloudWorks
+gh variable get VITE_TURNSTILE_SITE_KEY --repo saulpatinojr/HCW-HybridCloudWorks
 ```
 
 Success is the second line printing the same `0x4…` value. Keep the widget's
@@ -570,11 +570,11 @@ page open: step 4 needs its **Secret Key**.
 unfinished, so run it after the apply:
 
 ```powershell
-gh workflow run deploy-functions.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+gh workflow run deploy-functions.yml --repo saulpatinojr/HCW-HybridCloudWorks --ref main
 ```
 
 ```powershell
-gh workflow run deploy-azure-frontend.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+gh workflow run deploy-azure-frontend.yml --repo saulpatinojr/HCW-HybridCloudWorks --ref main
 ```
 
 Success is both runs green at
@@ -1314,7 +1314,7 @@ fix is installed.
 **For a 48-hour advisory, start the weekly run now.** PowerShell:
 
 ```powershell
-gh workflow run lab-supply-chain.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+gh workflow run lab-supply-chain.yml --repo saulpatinojr/HCW-HybridCloudWorks --ref main
 ```
 
 Success is no output and exit code 0. About five minutes later the pull
@@ -1322,7 +1322,7 @@ request is open or updated; this lists it, and a successful result is one
 row whose branch is `chore/lab-pins-host`:
 
 ```powershell
-gh pr list --repo HybridCloudWorks/HCW-HybridCloudWorks --head chore/lab-pins-host
+gh pr list --repo saulpatinojr/HCW-HybridCloudWorks --head chore/lab-pins-host
 ```
 
 No row, and the run's summary saying the `containerd.io (carries runc)` row

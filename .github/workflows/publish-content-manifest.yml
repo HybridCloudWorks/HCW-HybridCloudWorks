@@ -72,7 +72,7 @@ concurrency:
 # `contents: write` inherited the ability to push past every check.
 #
 # THERE IS NO SUCH BYPASS AND THE ARGUMENT WAS BUILT ON A GUESS. Reading
-# /repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114 returns
+# /repos/saulpatinojr/HCW-HybridCloudWorks/rulesets/20680114 returns
 # `enforcement: active`, no `bypass_actors` at all, and the rules `deletion`,
 # `non_fast_forward`, `pull_request` and `required_status_checks`. The
 # `pull_request` rule refuses a direct push to main from anyone, this token

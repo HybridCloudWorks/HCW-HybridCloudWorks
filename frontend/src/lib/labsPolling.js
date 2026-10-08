@@ -74,7 +74,9 @@ export const AGENT_DOWN_STATUSES = Object.freeze(['stopping', 'offline']);
  * Whether an agent has heartbeated recently enough to be considered online,
  * and that heartbeat did not announce its own shutdown: the `offline`
  * heartbeat writes `lastSeenAt` too, so freshness alone showed a stopped
- * agent as connected for 90 seconds (#1009). The server's rule is the same
+ * agent as connected for 90 seconds (#1009). Nor is a deactivated agent
+ * online: the guard refuses it at once, while its last heartbeat stays fresh
+ * for 90 seconds (review of #1018). The server's rule is the same
  * (`isAgentOnline` in `functions/src/lib/labs.js`).
  *
  * `now` is passed in rather than read from the clock so the caller controls
@@ -83,11 +85,12 @@ export const AGENT_DOWN_STATUSES = Object.freeze(['stopping', 'offline']);
  * stopped growing, and the dashboard went on reporting "connected" for
  * precisely as long as nothing was reachable.
  *
- * @param {{lastSeenAt?: unknown, status?: unknown}} agent
+ * @param {{lastSeenAt?: unknown, status?: unknown, active?: unknown}} agent
  * @param {number} now - epoch ms
  * @returns {boolean}
  */
 export function isAgentOnline(agent, now) {
+  if (agent?.active === false) return false;
   if (AGENT_DOWN_STATUSES.includes(agent?.status)) return false;
   const lastSeen = toMillis(agent?.lastSeenAt);
   return lastSeen > 0 && now - lastSeen < STALE_AFTER_MS;

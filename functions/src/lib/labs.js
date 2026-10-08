@@ -116,14 +116,23 @@ export const AGENT_DOWN_STATUSES = Object.freeze(['stopping', 'offline']);
  * Fresh AND not announcing its own shutdown. The `offline` heartbeat writes
  * `lastSeenAt` like any other, so freshness alone read an agent that had just
  * said goodbye as online, and held the public door open, for the 90 seconds
- * after it stopped (#1009). A caller must therefore read `status` as well as
- * `lastSeenAt`; a record without either is offline.
+ * after it stopped (#1009). And not deactivated: the agent guard refuses
+ * `active: false` at once (auth/require-agent.js), so for the 90 seconds its
+ * last heartbeat stayed fresh the rule read a revoked runner as online and the
+ * public door queued work it could not claim (review of #1018). A record
+ * with no `active` at all is refused by the guard too, but it can never
+ * heartbeat past it, so its freshness lapses on its own; explicit `false` is
+ * the case with a fresh heartbeat behind it.
  *
- * @param {{ lastSeenAt?: unknown, status?: unknown } | null | undefined} agent
+ * A caller must therefore read `status` and `active` as well as `lastSeenAt`;
+ * a record without `lastSeenAt` is offline.
+ *
+ * @param {{ lastSeenAt?: unknown, status?: unknown, active?: unknown } | null | undefined} agent
  *   `lastSeenAt` is an ISO string, a Date, or an object with toMillis()
  * @param {number} nowMs
  */
 export function isAgentOnline(agent, nowMs) {
+  if (agent?.active === false) return false;
   if (AGENT_DOWN_STATUSES.includes(agent?.status)) return false;
   const lastSeenMs = toMs(agent?.lastSeenAt);
   return lastSeenMs > 0 && nowMs - lastSeenMs < AGENT_STALE_AFTER_MS;

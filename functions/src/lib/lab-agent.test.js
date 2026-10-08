@@ -237,7 +237,9 @@ describe('heartbeatAgent', () => {
       offlineSince: NOW.toISOString(),
     });
     expect(notifier.notifyTelegram).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/vps-1 reported its own shutdown and is marked offline/));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/an agent reported its own shutdown and is marked offline/));
+    // Content-free: the ingested line never carries the document id.
+    for (const [line] of warn.mock.calls) expect(line).not.toContain('vps-1');
 
     // Already offline: a repeated offline heartbeat is not a new outage.
     const s1 = emptyStore();
@@ -262,6 +264,13 @@ describe('heartbeatAgent', () => {
     await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline', activeJobs: 2 }), context);
     expect(store.patchDoc.mock.calls[0][2]).toMatchObject({ status: 'offline', activeJobs: 2, offlineSince: NOW.toISOString() });
 
+    // `stopping` while jobs drain stays `stopping`: as `busy` it read online
+    // and held the public door open for work nobody would claim (#1018).
+    const s1 = emptyStore();
+    await createLabAgentHandlers({ guard: allowGuard({ status: 'busy' }), store: s1, now: () => NOW, notifier })
+      .heartbeatAgent(req({ agentId: 'vps-1', status: 'stopping', activeJobs: 1 }), context);
+    expect(s1.patchDoc.mock.calls[0][2]).toMatchObject({ status: 'stopping', activeJobs: 1 });
+
     const s2 = emptyStore();
     await createLabAgentHandlers({ guard: allowGuard({ status: 'idle' }), store: s2, now: () => NOW, notifier })
       .heartbeatAgent(req({ agentId: 'vps-1', status: 'idle', activeJobs: 1 }), context);
@@ -280,7 +289,8 @@ describe('heartbeatAgent', () => {
     expect(store.patchDoc).toHaveBeenCalledTimes(1);
     expect(store.patchDoc.mock.calls[0][2]).not.toHaveProperty('backOnlineAt');
     // The transition is still on the record, at a level host.json ingests.
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/vps-1 back online after 1 min$/));
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/an agent is back online after 1 min$/));
+    for (const [line] of warn.mock.calls) expect(line).not.toContain('vps-1');
   });
 
   it('sends one "back online after N min" on the first normal heartbeat after an outage the owner was told about, and clears the debt', async () => {

@@ -112,14 +112,14 @@ describe('mintInstallationToken', () => {
     const result = await mintInstallationToken({
       appId: '1',
       privateKey,
-      owner: 'HybridCloudWorks',
+      owner: 'saulpatinojr',
       repo: 'HCW-HybridCloudWorks',
       nowSeconds: 1_767_225_600,
       fetchImpl,
     });
 
     expect(result.token).toBe('ghs_abc');
-    expect(fetchImpl.calls[0].url).toContain('/repos/HybridCloudWorks/HCW-HybridCloudWorks/installation');
+    expect(fetchImpl.calls[0].url).toContain('/repos/saulpatinojr/HCW-HybridCloudWorks/installation');
     expect(fetchImpl.calls[1].url).toContain('/app/installations/7/access_tokens');
   });
 
@@ -131,7 +131,7 @@ describe('mintInstallationToken', () => {
     await mintInstallationToken({
       appId: '1',
       privateKey,
-      owner: 'HybridCloudWorks',
+      owner: 'saulpatinojr',
       repo: 'HCW-HybridCloudWorks',
       fetchImpl,
     });
@@ -151,7 +151,7 @@ describe('mintInstallationToken', () => {
     await mintInstallationToken({
       appId: '1',
       privateKey,
-      owner: 'HybridCloudWorks',
+      owner: 'saulpatinojr',
       repo: 'HCW-HybridCloudWorks',
       fetchImpl,
       permissions,

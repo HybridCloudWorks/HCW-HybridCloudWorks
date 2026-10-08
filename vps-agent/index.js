@@ -74,8 +74,9 @@ const config = {
 };
 
 // Every line goes through this, never console.*: the error and warning lines
-// carry the syslog priority that gets them collected (lib/log.js, #1009).
-const log = createLogger({ agentId: config.agentId });
+// carry the syslog priority that gets them collected (lib/log.js, #1009), and
+// what they may say is content-free, so a failure goes through log.fault.
+const log = createLogger();
 
 const missing = [
   ['LABS_AGENT_API_BASE', config.apiBase],
@@ -103,7 +104,10 @@ let shuttingDown = false;
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────────
 
-async function sendHeartbeat(status = 'idle') {
+// Once shutdown begins every heartbeat says `stopping`, the interval's and a
+// finishing job's included: an `idle` or `busy` one during the drain would
+// reopen the public door that `stopping` closed (review of #1018).
+async function sendHeartbeat(status = shuttingDown ? 'stopping' : 'idle') {
   try {
     await api.heartbeat({
       status,
@@ -116,7 +120,7 @@ async function sendHeartbeat(status = 'idle') {
     // which is the correct thing for it to show if the API is unreachable.
     // A warning, not an error: one missed beat is weather; three are an
     // outage the health timer reports on its own.
-    log.warn('heartbeat failed:', err.message);
+    log.fault('warn', 'heartbeat failed', err);
   }
 }
 
@@ -130,7 +134,8 @@ async function executeJob(job) {
   // run the command, so it refuses anything it has no allowlisted recipe for
   // rather than trusting the response.
   if (!capability) {
-    log.error(`refusing job ${job.id}: no local capability for type ${job.type}`);
+    log.error(`refusing a job: no local capability for type ${job.type}`);
+    log.info(`refused job ${job.id} (${job.type})`);
     await api
       .completeJob({
         jobId: job.id,
@@ -138,7 +143,7 @@ async function executeJob(job) {
         exitCode: -1,
         output: `agent has no capability for job type ${job.type}`,
       })
-      .catch((err) => log.error(`could not report refusal for ${job.id}:`, err.message));
+      .catch((err) => log.fault('error', 'could not report a refusal', err, `job ${job.id}`));
     return;
   }
 
@@ -162,7 +167,7 @@ async function executeJob(job) {
     // fault, so it is information.
     log.info(`job ${job.id} -> ${status} (exit ${result.exitCode})`);
   } catch (err) {
-    log.error(`job ${job.id} errored:`, err.message);
+    log.fault('error', 'job errored', err, `job ${job.id}`);
     // Best effort: if this also fails the job's claim lease expires server-side
     // and another agent picks it up, which is why the lease exists.
     await api
@@ -172,7 +177,7 @@ async function executeJob(job) {
         exitCode: -1,
         output: `agent error: ${err.message}`,
       })
-      .catch((reportErr) => log.error(`could not report failure for ${job.id}:`, reportErr.message));
+      .catch((reportErr) => log.fault('error', 'could not report a failure', reportErr, `job ${job.id}`));
   } finally {
     activeJobs -= 1;
     sendHeartbeat();
@@ -201,7 +206,7 @@ async function poll() {
     if (!job) return;
     executeJob(job); // intentionally not awaited — the poll interval continues
   } catch (err) {
-    log.warn('claim failed:', err.message);
+    log.fault('warn', 'claim failed', err);
   } finally {
     // Released in every path. On the path that takes a slot, executeJob
     // reaches `activeJobs += 1` with no await in front of it, so the handoff
@@ -213,7 +218,7 @@ async function poll() {
 }
 
 async function start() {
-  log.info(`agent v${AGENT_VERSION} starting against ${config.apiBase}`);
+  log.info(`agent ${config.agentId} v${AGENT_VERSION} starting against ${config.apiBase}`);
   log.info(
     `capabilities are assigned server-side; local recipes: ${Object.keys(CAPABILITIES).join(', ')}`
   );
@@ -245,6 +250,6 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 start().catch((err) => {
-  log.error('Fatal agent error:', err);
+  log.fault('error', 'fatal agent error', err);
   process.exit(1);
 });

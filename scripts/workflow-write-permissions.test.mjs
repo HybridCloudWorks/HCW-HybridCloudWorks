@@ -9,7 +9,7 @@
  * push to `main` past every required check. That was the stated reason the list
  * existed, and it was wrong.
  *
- * Reading /repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114
+ * Reading /repos/saulpatinojr/HCW-HybridCloudWorks/rulesets/20680114
  * returns `enforcement: active`, NO `bypass_actors`, and the rules `deletion`,
  * `non_fast_forward`, `pull_request`, `required_status_checks`. Nothing is
  * exempt from the `pull_request` rule. A workflow holding `contents: write`
