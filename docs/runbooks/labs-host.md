@@ -793,11 +793,12 @@ sudo /opt/hcw-src/lab-host/bootstrap.sh
 
 Good is a `PLAY RECAP` line for `localhost` with `failed=0`, and before it
 the task **Show what the agent proxy check saw** printing `job`, `listing`
-and `privileged`, each with `ok: true`. Two lines that look like trouble and
-are not: Compose warning that `volume "coder-postgres-data" already exists
-but was not created by Docker Compose` (the carried volume, created by the
-docker role on purpose), and the docker role reporting `changed` on the stop
-and the carry tasks (they run once).
+and `privileged`, each with `ok: true`. The docker role reports `changed`
+on the stop and the carry tasks on the run that switches (they run once), and
+on **Delete the bridges the running daemon no longer owns** when that run left
+the old root's bridges behind. Compose no longer warns that
+`coder-postgres-data` "was not created by Docker Compose": the volume is
+external and the coder role creates it (2026-10-08).
 
 This is also the run that takes the lab images to Docker Hub (#1002,
 #1003), so the template push follows it at once:

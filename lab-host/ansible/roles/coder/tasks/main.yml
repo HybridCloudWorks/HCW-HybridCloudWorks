@@ -131,6 +131,15 @@
     - "{{ coder_postgres_env_file }}"
   when: not coder_enabled | bool
 
+# The Compose file declares it external (lab-host/coder/docker-compose.yml),
+# so it is created here, before `up`. On a host whose docker role carried it
+# into the remapped root it already exists, and this changes nothing.
+- name: Create PostgreSQL's volume, which Compose uses but does not own
+  community.docker.docker_volume:
+    name: coder-postgres-data
+    state: present
+  when: coder_enabled | bool
+
 - name: Start Coder and PostgreSQL
   community.docker.docker_compose_v2:
     project_src: "{{ coder_project_dir }}"

@@ -476,6 +476,17 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: sudo bash roles/docker/tests/hcw-docker-volume-carry.test.sh
 
+      # /usr/local/libexec/hcw-docker-stale-bridges deletes the bridges a
+      # data-root switch leaves in the kernel, whose routes shadowed the live
+      # Coder networks' on 2026-10-08. It deletes interfaces, so it is run as
+      # it ships against stand-ins for docker and ip and a scratch data root
+      # shaped like that host: the bridges the old root recorded go; live
+      # ones, a just-created network, docker0, another program's bridge
+      # named like Docker's and one with a port attached stay. No root needed.
+      - name: hcw-docker-stale-bridges test
+        if: steps.changes.outputs.relevant == 'true'
+        run: bash roles/docker/tests/hcw-docker-stale-bridges.test.sh
+
       # The lab agent's Docker socket proxy is HAProxy with a configuration
       # this repository writes (LAB-5). scripts/lab-host-docker-proxy.test.mjs
       # evaluates its rules; this renders it with this job's ansible-core and

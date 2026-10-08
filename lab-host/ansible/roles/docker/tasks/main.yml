@@ -157,6 +157,40 @@
     enabled: true
     state: started
 
+# A switch of data root leaves the old root's bridges in the kernel, down but
+# with their addresses and routes, and the Coder networks' fixed subnets then
+# had two routes each. The stale one came first, so the host's own traffic to
+# Coder (Docker's port proxy included) went into an empty bridge, and Caddy
+# answered 503 (2026-10-08). Run on every bootstrap, before any later role
+# creates a network: it deletes only a bridge whose network another Docker
+# data root on this host recorded, that the running daemon does not list, and
+# that nothing is attached to (files/hcw-docker-stale-bridges.py).
+- name: Install hcw-docker-stale-bridges, which deletes the bridges another data root left behind
+  ansible.builtin.copy:
+    src: hcw-docker-stale-bridges.py
+    dest: /usr/local/libexec/hcw-docker-stale-bridges
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Delete the bridges the running daemon no longer owns, so their routes cannot shadow its own
+  ansible.builtin.command:
+    argv:
+      - /usr/local/libexec/hcw-docker-stale-bridges
+  register: docker_stale_bridges
+  changed_when: (docker_stale_bridges.stdout | from_json).deleted | length > 0
+  when: not ansible_check_mode
+
+- name: Say which stale bridges were left because something is still attached
+  ansible.builtin.debug:
+    msg: >-
+      These bridges were left behind by another Docker data root but still
+      have an interface attached, so they were kept: {{ (docker_stale_bridges.stdout | from_json).kept_attached | join(', ') }}.
+      See which with ip link show master <bridge>.
+  when:
+    - not ansible_check_mode
+    - (docker_stale_bridges.stdout | from_json).kept_attached | length > 0
+
 - name: Check user-namespace remapping and carry the host's named volumes into the remapped root
   ansible.builtin.include_tasks: userns_carry.yml
   when: docker_daemon_config.get('userns-remap', '') | length > 0
