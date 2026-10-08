@@ -100,6 +100,11 @@ locals {
     # overdue until marked done. Reads one admin_config document and writes
     # its stamps back; nothing else.
     SEND_REMINDERS = "sendReminders — daily 13:00 UTC, says each due reminder from Platform Settings → Reminders on Telegram"
+    # #1010: the Health Hub's pulse. Builds the ops snapshot and reads the lab
+    # agents, AI providers and MCP servers, then writes one admin_config
+    # result document per probe and its own heartbeat. No third-party call.
+    # Until it is armed the hub says the pulse has never reported.
+    HEALTH_PULSE = "healthPulse — every 5 minutes at 2 past, records the Health Hub's server-side checks and the pulse heartbeat"
   }
 
   timer_flags = {

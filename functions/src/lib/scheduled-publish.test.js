@@ -26,7 +26,18 @@ const makeStore = (due = []) => ({
   patchDoc: vi.fn(async () => ({})),
   readDoc: vi.fn(async () => null),
   upsertDoc: vi.fn(async () => ({})),
+  // The day's digest, where every run is recorded (mergeDigest).
+  createDoc: vi.fn(async (_container, doc) => doc),
+  replaceDocIfMatch: vi.fn(async (_container, doc) => doc),
 });
+
+/** The publishingOps block the run wrote onto the day's digest. */
+const recordedRun = (store) => {
+  const [container, doc] = store.createDoc.mock.calls.at(-1);
+  expect(container).toBe('workflow_digests');
+  expect(doc.id).toBe('2026-06-01');
+  return doc.publishingOps;
+};
 
 const makePublish = (impl = async () => ({ contentId: 'a', slug: 's' })) => ({
   processPublishContent: vi.fn(impl),
@@ -68,7 +79,7 @@ describe('buildDueQuery', () => {
 });
 
 describe('runScheduledPublish', () => {
-  it('does nothing, and touches nothing, when nothing is due', async () => {
+  it('publishes nothing and touches no content when nothing is due, and records the run', async () => {
     const store = makeStore([]);
     const publish = makePublish();
     const summary = await run(store, publish);
@@ -76,6 +87,53 @@ describe('runScheduledPublish', () => {
     expect(summary).toEqual({ due: 0, published: 0, skipped: 0, failed: 0, hasMore: false });
     expect(publish.processPublishContent).not.toHaveBeenCalled();
     expect(store.patchDoc).not.toHaveBeenCalled();
+    expect(store.upsertDoc).not.toHaveBeenCalled();
+    // An idle run is still a run: its time is the scheduler's heartbeat.
+    expect(recordedRun(store)).toEqual({
+      lastRunAt: '2026-06-01T12:00:00.000Z',
+      due: 0,
+      published: 0,
+      skipped: 0,
+      failed: 0,
+      hasMore: false,
+      status: 'success',
+    });
+  });
+
+  it('records each run on the day’s digest as the publishingOps every reader expects (#1010)', async () => {
+    // ops-health's lastSchedulerSuccessAt, the Telegram /digest and the Health
+    // Hub all read digest.publishingOps; until #1010 nothing wrote it.
+    const partly = makeStore([{ id: 'c1' }, { id: 'c2' }]);
+    await run(
+      partly,
+      makePublish(async (id) => (id === 'c1' ? { error: 'nope' } : { contentId: id }))
+    );
+    expect(recordedRun(partly)).toMatchObject({ due: 2, published: 1, failed: 1, status: 'degraded' });
+
+    const none = makeStore([{ id: 'c1' }]);
+    await run(none, makePublish(async () => ({ error: 'nope' })));
+    expect(recordedRun(none)).toMatchObject({ due: 1, published: 0, failed: 1, status: 'failed' });
+
+    const raced = makeStore([{ id: 'c1' }]);
+    await run(raced, makePublish(async () => ({ skipped: true })));
+    expect(recordedRun(raced)).toMatchObject({ skipped: 1, status: 'success' });
+  });
+
+  it('records a run that broke as failed, then still fails the invocation', async () => {
+    const store = makeStore([]);
+    store.queryDocs.mockRejectedValue(new Error('query refused'));
+    await expect(run(store, makePublish())).rejects.toThrow('query refused');
+    expect(recordedRun(store)).toMatchObject({ status: 'failed', error: 'query refused' });
+  });
+
+  it('does not fail a run whose record could not be written', async () => {
+    const store = makeStore([{ id: 'c1' }]);
+    store.createDoc.mockRejectedValue(new Error('cosmos down'));
+    await expect(run(store, makePublish())).resolves.toMatchObject({ published: 1 });
+    expect(context.error).toHaveBeenCalledWith(
+      '[publishScheduledContent] could not record the run on the digest:',
+      expect.any(Error)
+    );
   });
 
   it('compares against an ISO instant in UTC', async () => {

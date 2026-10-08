@@ -22,6 +22,7 @@ import './content-workflow-http.js';
 import './draft-http.js';
 import './forge-config-http.js';
 import './gallery-images-http.js';
+import './health-http.js';
 import './image-prompts-http.js';
 import './inspect-jobs.js';
 import './forge-jobs.js';
