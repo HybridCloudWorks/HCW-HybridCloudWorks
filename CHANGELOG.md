@@ -3943,6 +3943,24 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A Docker data-root switch no longer leaves Coder unreachable, and the
+  Coder database volume has one owner.** On the first bootstrap after LAB-5
+  (2026-10-08) the old root's bridges stayed in the kernel, down, on the
+  Coder networks' fixed subnets, and their routes came first. The host's own
+  traffic to Coder, Docker's port proxy on `127.0.0.1:7080` included, went
+  into an empty bridge, so Caddy answered 503 and the site said lab
+  workspaces were unavailable, while Coder and PostgreSQL ran normally and
+  talked to each other. Deleting the two stale bridges brought it back at
+  once.
+  - The docker role now runs `hcw-docker-stale-bridges` on every bootstrap,
+    once the daemon is up. It deletes each Docker-named bridge that no live
+    network owns and that has nothing attached, and names any it leaves.
+    A test runs it against stand-ins for `docker` and `ip`.
+  - `coder-postgres-data` is `external: true` in the Compose file, and the
+    coder role creates it before `up`. Compose had warned on every run after
+    the carry that the volume "was not created by Docker Compose". It used
+    the carried data, all 76 MB of it, but nothing said who owned the
+    volume. Now the role does, and `docker compose down -v` cannot remove it.
 - **The lab host's bootstrap no longer stops at `'ansible_managed' is
   undefined`.** Since ansible-core 2.19, `ansible_managed` exists only for
   the template module. Three copy tasks that LAB-5 added (#987) named it in

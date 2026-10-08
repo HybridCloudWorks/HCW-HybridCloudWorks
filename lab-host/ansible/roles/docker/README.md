@@ -102,6 +102,20 @@ refuses, changes nothing, and says how to start again.
 `tests/hcw-docker-volume-carry.test.sh` runs the helper as it ships against
 a tree shaped like PostgreSQL's (CI, `ansible-lint (lab-host)`).
 
+The old root's networks are not deleted by the switch: their bridge
+interfaces stay in the kernel, down, with their addresses and routes. On
+2026-10-08 that left two routes for each of the Coder networks' fixed subnets
+(172.28.240.0/24, 172.28.241.0/24), the stale one first, so the host's own
+traffic to Coder, Docker's port proxy on `127.0.0.1:7080` included, went into
+an empty bridge and Caddy answered 503. So every run, once the daemon is up
+and before any later role creates a network,
+`/usr/local/libexec/hcw-docker-stale-bridges`
+(`files/hcw-docker-stale-bridges.py`) deletes each Docker-named bridge
+(`br-` and twelve hex digits) that no network on the running daemon owns and
+that has nothing attached. One with an interface still attached is left, and
+the run names it. `tests/hcw-docker-stale-bridges.test.sh` runs it against
+stand-ins for `docker` and `ip` (CI, `ansible-lint (lab-host)`).
+
 ## Variables
 
 | Variable | Default | Purpose |

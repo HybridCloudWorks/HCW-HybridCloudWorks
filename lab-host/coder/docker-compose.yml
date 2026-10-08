@@ -303,5 +303,13 @@ networks:
 volumes:
   # Rebuildable metadata, not data of record (docs/architecture/labs-host.md):
   # the coder role's nightly pg_dump under /var/backups/coder is the only copy.
+  #
+  # External: the coder role creates it (roles/coder/tasks/main.yml), and the
+  # docker role's userns carry may already have (LAB-5). Compose owned it until
+  # 2026-10-08 and warned on every run after the carry that the volume "already
+  # exists but was not created by Docker Compose"; it used the volume, but
+  # nothing said who should create it. Now one thing does, and `docker compose
+  # down -v` can never remove the database.
   coder-postgres-data:
     name: coder-postgres-data
+    external: true
