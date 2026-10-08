@@ -67,7 +67,7 @@ outbound:
 - `vps-agent` polls the Functions API over 443 with its own Entra certificate;
 - the Arc and Azure Monitor agents call Azure over 443;
 - Coder reaches GitHub for OAuth over 443;
-- Docker pulls digest-pinned images from GHCR over 443.
+- Docker pulls digest-pinned images from Docker Hub over 443 (GHCR until 2026-10-08).
 
 No inbound port is opened for the site, for Azure or for lab jobs. The site's
 servers reach the host in one direction only, through a server-side status
@@ -219,37 +219,36 @@ the header comment of `vps-agent/index.js`).
 ## Run the toolchain locally
 
 The same image the host runs jobs in is the image a lab page tells a learner
-to pull: `ghcr.io/hybridcloudworks/hcw-lab` carries terraform, kubeconform,
+to pull: `docker.io/hybridcloudworks/hcw-lab` carries terraform, kubeconform,
 helm, ansible-core, the Azure CLI, kubectl and git, plus a Terraform provider
 mirror and the vendored Azure Verified Modules, so `terraform init` works in
 it with no network. Pull it, then run it with the current directory mounted
-at `/workspace`; both commands drop into `bash` there as `nobody`. The pull
-is anonymous once the owner has made the package public (#674); until then it
-needs `docker login ghcr.io` with a token holding `read:packages`.
+at `/workspace`; both commands drop into `bash` there as `nobody`. The
+repository is public, so the pull needs no sign-in.
 
 PowerShell:
 
 ```powershell
-docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
+docker pull hybridcloudworks/hcw-lab:latest
 ```
 
 ```powershell
-docker run --rm -it -v "${PWD}:/workspace" ghcr.io/hybridcloudworks/hcw-lab:latest
+docker run --rm -it -v "${PWD}:/workspace" hybridcloudworks/hcw-lab:latest
 ```
 
 bash:
 
 ```bash
-docker pull ghcr.io/hybridcloudworks/hcw-lab:latest
+docker pull hybridcloudworks/hcw-lab:latest
 ```
 
 ```bash
-docker run --rm -it -v "$PWD:/workspace" ghcr.io/hybridcloudworks/hcw-lab:latest
+docker run --rm -it -v "$PWD:/workspace" hybridcloudworks/hcw-lab:latest
 ```
 
 A successful run prints a `nobody@<container id>:/workspace$` prompt, and
 `terraform version` there reports the version pinned in
-[`lab-image/versions.env`](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/lab-image/versions.env).
+[`lab-image/versions.env`](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/lab-image/versions.env).
 `lab-image/README.md` in the repository has the digest-pinned form, what
 works offline, and the smoke test.
 

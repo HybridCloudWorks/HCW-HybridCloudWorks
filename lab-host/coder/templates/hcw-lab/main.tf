@@ -56,14 +56,14 @@ provider "docker" {
 }
 
 locals {
-  # ghcr.io/hybridcloudworks/hcw-lab, the `full` target of lab-image/Dockerfile,
+  # docker.io/hybridcloudworks/hcw-lab, the `full` target of lab-image/Dockerfile,
   # published by .github/workflows/publish-lab-image.yml. Pulled by digest;
   # the tag is the commit the workflow built it from and is documentation
   # only (ADR 0032, decision 5: every learner-facing image is digest-pinned
   # where consumed).
   image_tag    = "611086cde7faadcbb52439b42a6a2a60d92ad4dc"
   image_digest = "sha256:306f468a9d9ba645d92c7f3a5ab361ee3d649ab4511b858f5c7a1320740a8e87"
-  image        = "ghcr.io/hybridcloudworks/hcw-lab@${local.image_digest}"
+  image        = "docker.io/hybridcloudworks/hcw-lab@${local.image_digest}"
 
   # The image sets HOME=/tmp/home and owns it as 65534, so a named volume
   # mounted there inherits that ownership on first use (Docker copies the

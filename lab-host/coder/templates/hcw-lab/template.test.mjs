@@ -253,7 +253,7 @@ test('the workspace takes its passwd from the image, not an upload', () => {
 });
 
 test('the workspace image is the hcw-lab digest and Coder itself binds to loopback only', () => {
-  assert.match(mainTf, /ghcr\.io\/hybridcloudworks\/hcw-lab@\$\{local\.image_digest\}/);
+  assert.match(mainTf, /docker\.io\/hybridcloudworks\/hcw-lab@\$\{local\.image_digest\}/);
   assert.match(mainTf, /image_digest\s*=\s*"sha256:[0-9a-f]{64}"/);
   const ports = services.coder.filter((line) => /^\s*-\s*"/.test(line) && /:\d+:\d+"/.test(line));
   assert.equal(ports.length, 1);

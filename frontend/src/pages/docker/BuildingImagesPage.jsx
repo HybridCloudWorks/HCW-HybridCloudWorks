@@ -40,9 +40,9 @@ export const BUILDING_IMAGES_PATH = routes.buildingImages('docker');
 const CANONICAL = `https://hybridcloudworks.com${BUILDING_IMAGES_PATH}`;
 
 /** When the commands were last read against the files they describe. */
-export const CHECKED_ON = Object.freeze({ iso: '2026-10-02', label: '2 October 2026' });
+export const CHECKED_ON = Object.freeze({ iso: '2026-10-08', label: '8 October 2026' });
 
-const REPO = 'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks';
+const REPO = 'https://github.com/saulpatinojr/HCW-HybridCloudWorks';
 
 export const SOURCE_LINKS = Object.freeze({
   dockerfile: `${REPO}/blob/main/lab-image/Dockerfile`,
@@ -54,7 +54,7 @@ export const SOURCE_LINKS = Object.freeze({
 });
 
 /** The published image, as the publish workflow names it. */
-export const GHCR_IMAGE = 'ghcr.io/hybridcloudworks/hcw-lab';
+export const PUBLISHED_IMAGE = 'docker.io/hybridcloudworks/hcw-lab';
 
 /** The local tag the build commands give the `full` target, as the Dockerfile's header does. */
 export const LOCAL_TAG = 'hcw-lab:dev';
@@ -118,13 +118,13 @@ export const COMMANDS = Object.freeze({
     }),
   ]),
   verify: both(
-    `gh attestation verify oci://${GHCR_IMAGE}:latest --repo HybridCloudWorks/HCW-HybridCloudWorks`
+    `gh attestation verify oci://${PUBLISHED_IMAGE}:latest --repo saulpatinojr/HCW-HybridCloudWorks`
   ),
-  pull: both(`docker pull ${GHCR_IMAGE}:latest`),
+  pull: both(`docker pull ${PUBLISHED_IMAGE}:latest`),
 });
 
 const DESCRIPTION =
-  'Building a container image the careful way, with the image behind this site’s browser labs as the worked example: base images pinned by digest, two build targets from one Dockerfile, offline Terraform providers and modules, a non-root user, smoke tests, provenance attestations and publishing to GitHub Container Registry.';
+  'Building a container image the careful way, with the image behind this site’s browser labs as the worked example: base images pinned by digest, two build targets from one Dockerfile, offline Terraform providers and modules, a non-root user, smoke tests, provenance attestations and publishing to Docker Hub.';
 
 function SourceLink({ href, children }) {
   return (
@@ -372,9 +372,9 @@ export default function DockerBuildingImagesPage() {
         </p>
       </GuideSection>
 
-      <GuideSection id="publish" title="Publishing to GitHub Container Registry">
+      <GuideSection id="publish" title="Publishing to Docker Hub">
         <p className={PROSE}>
-          <SourceLink href={SOURCE_LINKS.workflow}>publish-lab-image.yml</SourceLink> has five jobs.
+          <SourceLink href={SOURCE_LINKS.workflow}>publish-lab-image.yml</SourceLink> has four jobs.
           The first two keep validation and publishing apart, so the code a pull request can change
           never runs with a token that can publish.
         </p>
@@ -389,8 +389,9 @@ export default function DockerBuildingImagesPage() {
             main. It builds both targets again, smoke-tests what it built, and pushes those exact
             images with <Code>docker push</Code>, tagged with the commit’s SHA and{' '}
             <Code>latest</Code>. It reads each digest back from the registry, attests it, and writes
-            the digests to the run’s summary. This job alone holds <Code>packages: write</Code>, and
-            it signs in to the registry with the run’s own token, so no password is stored anywhere.
+            the digests to the run’s summary. This job alone can publish, and it signs in through an
+            OIDC connection: Docker exchanges the run’s own short-lived identity token for a Docker
+            token that lasts minutes, so no password or access token is stored anywhere.
           </li>
           <li>
             <strong>Every week</strong> the workflow also rebuilds both targets from main without
@@ -400,12 +401,10 @@ export default function DockerBuildingImagesPage() {
           </li>
         </ul>
         <p className={PROSE}>
-          The result is <Code>{GHCR_IMAGE}</Code>, public, so pulling it needs no sign-in. The third
-          job, <strong>publish-dockerhub</strong>, runs after <strong>publish</strong> when Docker
-          Hub publishing is switched on, and copies the same images there by digest, which is where
-          the lab pages’ own <Code>docker run</Code> line pulls from, and the bytes are the same in
-          both. The lab itself runs each image by its digest, never by a tag, so the last two jobs
-          open a pull request that moves those digests to the images just published.
+          The result is <Code>{PUBLISHED_IMAGE}</Code>, public, so pulling it needs no sign-in, and
+          it is the image the lab pages’ own <Code>docker run</Code> line pulls. The lab itself runs
+          each image by its digest, never by a tag, so the last two jobs open a pull request that
+          moves those digests to the images just published.
         </p>
         <Commands commands={COMMANDS.pull} testId="commands-pull" />
       </GuideSection>

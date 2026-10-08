@@ -3943,6 +3943,35 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The lab images publish to Docker Hub only; GHCR is no longer
+  published.** The first publish after the 2026-10-07 transfer failed at the
+  GHCR push with `permission_denied: The requested installation does not
+  exist` (run 37730460748). The repository's token can no longer write the
+  `HybridCloudWorks` organisation's package namespace, and the copy to
+  Docker Hub, which read from GHCR, never ran. Owner decision 2026-10-08:
+  one registry. The changes:
+  - `publish` signs in through the Docker OIDC connection, with a
+    900-second token taken after the builds and smoke tests. It pushes
+    `docker.io/hybridcloudworks/hcw-lab-runner` and `…/hcw-lab` directly,
+    and attests them there.
+  - It no longer holds `packages: write`. `DOCKERHUB_ENABLED` now switches
+    publishing on or off as a whole.
+  - The separate `publish-dockerhub` copy job is gone.
+  - The two consumers now pin `docker.io/hybridcloudworks/…`:
+    `IMAGES.hcwLabRunner` in `vps-agent/lib/capabilities.js` and the Coder
+    template's image. The digests pinned that day were already on Docker
+    Hub byte for byte, so nothing was rebuilt.
+  - `scripts/lib/lab-pin-bumps.mjs` reads and pins the Docker Hub names.
+    `registryOf()` now drops an explicit `docker.io/`, which it had been
+    passing to Docker Hub's API as part of the repository name.
+  - The lab host's `lab_images` role matches `hybridcloudworks/hcw-lab*` and
+    still matches the former `ghcr.io/hybridcloudworks/hcw-lab*`, so images
+    pulled from GHCR leave the host once no pin names them.
+  - The weekly supply-chain scan reads the Docker Hub pins.
+  - The Docker images guide, Docker Desktop guide, lab image README,
+    labs-host architecture page and Docker Hub runbook now describe one
+    registry.
+  - The images already on GHCR stay there, public and no longer updated.
 - **Azure and Docker Hub OIDC trust the repository's new owner after the
   2026-10-07 transfer to the personal account `saulpatinojr`.** The move
   changed the owner half of every OIDC subject GitHub presents, from

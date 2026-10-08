@@ -137,10 +137,9 @@ export const CODER_GITHUB_SIGN_IN_PATH = '/api/v2/users/oauth2/github/callback';
  * `--network none` (ADR 0032 §5 and `vps-agent/lib/capabilities.js`).
  *
  * Docker Hub since 2026-09-29, when `publish-lab-image.yml` first copied the
- * image there through Docker's OIDC connection (#779, #790). The digest is
- * the same one GHCR serves, and so is the provenance attestation, and
- * `ghcr.io/hybridcloudworks/hcw-lab:latest` stays a mirror of it (the lab
- * image README lists both). Docker Hub's short name is the one a learner can
+ * image there through Docker's OIDC connection (#779, #790), and Docker Hub
+ * only since 2026-10-08: the workflow pushes there directly and GHCR is no
+ * longer published. Docker Hub's short name is the one a learner can
  * type, and Docker is the sponsor the labs are pitched to (#678).
  */
 export const LAB_IMAGE = 'hybridcloudworks/hcw-lab:latest';
