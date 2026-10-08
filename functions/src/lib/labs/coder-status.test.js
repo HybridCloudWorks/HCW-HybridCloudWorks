@@ -7,6 +7,7 @@ import {
   CODER_TIMEOUT_MS,
   DEFAULT_CODER_MAX_WORKSPACES,
   MAX_TEMPLATES,
+  SCOPE_REFUSAL_STATUSES,
   TOKEN_RENEW_WARNING_DAYS,
   TOKEN_SCOPE_FOR_EXPIRY,
   createCoderStatusHandlers,
@@ -439,7 +440,7 @@ describe('the status token\'s own expiry (#763)', () => {
     expect(near).toMatchObject({ known: true, daysLeft: TOKEN_RENEW_WARNING_DAYS - 1, renewSoon: true, tokenName: null, scopes: [] });
   });
 
-  it('says why when it cannot: no token, not a key, the scope (403), refused (401), a failure', async () => {
+  it('says why when it cannot: no token, not a key, the scope (403 or 404), refused (401), a failure', async () => {
     expect(await readTokenExpiry({ fetchImpl: vi.fn(), config: readCoderConfig(ENV_NO_TOKEN), context })).toEqual({ known: false, reason: 'unset' });
     expect(await readTokenExpiry({ fetchImpl: vi.fn(), config: readCoderConfig(ENV), context })).toEqual({ known: false, reason: 'shape' });
     const refusedBy = (status) => coderFetch({ [keyPath]: () => ({ ok: false, status, json: async () => ({}) }) });
@@ -451,6 +452,29 @@ describe('the status token\'s own expiry (#763)', () => {
     expect(warn.mock.calls[0][0]).not.toContain('AbCdEf1234');
     expect(await readTokenExpiry({ fetchImpl: coderFetch({ [keyPath]: { expires_at: 'soon' } }), config: config(), context })).toEqual({ known: false, reason: 'shape' });
   });
+
+  // Coder v2.38.0's apiKeyByID goes through httpapi.Is404Error, which answers
+  // an unauthorized read as not found, so the live token (no api_key:read)
+  // read its own record as 404 and the check said nothing useful (#1009).
+  it.each([[403], [404]])(
+    'reads %i on the token\'s own record as the missing api_key:read scope, and says to re-issue the token with it',
+    async (status) => {
+      const warn = vi.fn();
+      const fetchImpl = coderFetch({ [keyPath]: () => ({ ok: false, status, json: async () => ({}) }) });
+      expect(await readTokenExpiry({ fetchImpl, config: config(), context: { warn } })).toEqual({
+        known: false,
+        reason: 'scope',
+        scope: TOKEN_SCOPE_FOR_EXPIRY,
+      });
+      expect(SCOPE_REFUSAL_STATUSES).toContain(status);
+      expect(warn).toHaveBeenCalledTimes(1);
+      const [line] = warn.mock.calls[0];
+      expect(line).toContain(`(${status})`);
+      expect(line).toMatch(/re-issue the token with api_key:read added/);
+      // The status, never the path: the path carries the key id.
+      expect(line).not.toContain('AbCdEf1234');
+    }
+  );
 
   it('GET cms/labs/coder-token: editor only, unconfigured without a URL, the token read otherwise, never cached', async () => {
     const denied = { status: 403, headers: {}, body: '{}' };

@@ -11,10 +11,13 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  API_PATH_PREFIX,
   CONTRACT_DOC_PATHS,
   RAW_ORIGIN,
   RAW_PATH_PREFIX,
   REPO_DRAFT_ID_NAMESPACE,
+  REPO_DRAFT_ID_REPOSITORY,
+  REPO_OWNER,
   blobUrlFor,
   buildRepoDraftData,
   checkRepoDraftPath,
@@ -44,7 +47,7 @@ const LAB_FENCE = '```landing-zone\nlz=mg,policy,mgmt,hub&corp=0&online=0\n```';
 const SOURCE = Object.freeze({
   commitSha: '2fb230c9ac7118c4f87d4cf8031e0571d47e74d8',
   rawUrl:
-    'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-lab-01-landing-zone.md',
+    'https://raw.githubusercontent.com/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/blog-lab-01-landing-zone.md',
   contentSha256: 'a'.repeat(64),
 });
 const FIXED_NOW = () => new Date('2026-09-28T12:00:00.000Z');
@@ -100,10 +103,10 @@ describe('checkRepoDraftPath — the allow-list', () => {
     expect(url.origin).toBe(RAW_ORIGIN);
     expect(url.pathname.startsWith(RAW_PATH_PREFIX)).toBe(true);
     expect(url.href).toBe(
-      'https://raw.githubusercontent.com/HybridCloudWorks/HCW-HybridCloudWorks/main/docs/content/blog-lab-01-landing-zone.md'
+      'https://raw.githubusercontent.com/saulpatinojr/HCW-HybridCloudWorks/main/docs/content/blog-lab-01-landing-zone.md'
     );
     expect(blobUrlFor(LAB_DRAFTS[0])).toBe(
-      'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/blob/main/docs/content/blog-lab-01-landing-zone.md'
+      'https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/docs/content/blog-lab-01-landing-zone.md'
     );
   });
 });
@@ -226,6 +229,23 @@ describe('repoDraftContentId', () => {
 
   it('keeps its namespace — changing it re-keys every imported draft', () => {
     expect(REPO_DRAFT_ID_NAMESPACE).toBe('8bccdb11-a980-4071-bc3a-805c389b371b');
+  });
+
+  it('keeps every id it gave before the repository moved, while it fetches from the new owner (#1009)', () => {
+    // The id this path had under HybridCloudWorks, computed before the move.
+    expect(repoDraftContentId('docs/content/blog-lab-01-landing-zone.md')).toBe(
+      '2ccb2ae7-1eb7-5e70-9817-00d7c3a8019a'
+    );
+    expect(REPO_DRAFT_ID_REPOSITORY).toBe('HybridCloudWorks/HCW-HybridCloudWorks');
+  });
+
+  it('fetches from the owner infra/ names, because a redirect from the old one is refused', () => {
+    const variables = readFileSync(join(process.cwd(), '..', 'infra', 'variables.tf'), 'utf8');
+    const owner = variables.match(/variable\s+"github_org"\s*\{[\s\S]*?default\s*=\s*"([^"]+)"/)?.[1];
+    expect(owner).toBe('saulpatinojr');
+    expect(REPO_OWNER).toBe(owner);
+    expect(RAW_PATH_PREFIX.startsWith(`/${owner}/`)).toBe(true);
+    expect(API_PATH_PREFIX.startsWith(`/repos/${owner}/`)).toBe(true);
   });
 });
 

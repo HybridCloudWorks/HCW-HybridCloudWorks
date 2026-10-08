@@ -18,9 +18,11 @@
  *       Both read the same to a visitor: the card says "not yet provisioned",
  *       and nothing is invented to fill it.
  *   { configured: true, arc, policy, agent, coder, asOf }
- *       arc    { status, lastHeartbeatAt, agentVersion, osName } — always present
- *       policy { compliant, nonCompliant } | null
- *       agent  { online, queued } | null      online: any lab agent heartbeating
+ *       arc    { status, statusSince, agentVersion, osName } — always present
+ *       policy { compliant, nonCompliant, notApplicable } | null
+ *       agent  { online, queued, lastHeartbeatAt } | null
+ *              online: any lab agent heartbeating (lib/labs.js isAgentOnline);
+ *              lastHeartbeatAt: the freshest online agent's, else null
  *       coder  { reachable, running, max } | null
  *
  * NULL MEANS UNKNOWN, NOT ZERO. The three side reads — policy, agent queue,
@@ -38,15 +40,27 @@
  * as a success, so an outage never turns anonymous page loads into a stream
  * of management-plane calls.
  *
- * ABOUT `lastHeartbeatAt`. Azure Resource Manager exposes no heartbeat
- * timestamp on an Arc machine; the row's `properties.lastStatusChange` is the
- * time the agent's status last changed, and the agent's status becomes
- * Disconnected on its own once heartbeats stop. So the field is the moment
- * Azure last saw the machine change state — an honest "as of" for the status
- * beside it, and the closest the management plane offers. The Log Analytics
- * `Heartbeat` table would be exact, and would need a workspace grant this
- * route does not have (ADR 0032 decision 3 keeps the identity's reach to the
- * one resource group).
+ * `arc.statusSince` IS NOT A HEARTBEAT. Azure Resource Manager exposes no
+ * heartbeat timestamp on an Arc machine; the row's
+ * `properties.lastStatusChange` is the time the agent's status last changed,
+ * and the agent's status becomes Disconnected on its own once heartbeats
+ * stop. Until #1009 this field was called `lastHeartbeatAt` and the card
+ * printed it as "Last heartbeat", so a host connected without a break for
+ * three days read "Last heartbeat: 3 days ago". It is the moment the status
+ * beside it began, and is named so. The Log Analytics `Heartbeat` table
+ * would be exact, and would need a workspace grant this route does not have
+ * (ADR 0032 decision 3 keeps the identity's reach to the one resource group).
+ * The heartbeat a visitor can read is the job runner's own:
+ * `agent.lastHeartbeatAt`, from `lab_agents` (lib/lab-agent.js).
+ *
+ * THE POLICY COUNTS ARE OF CHECKS THAT CAN EVALUATE THIS LAB. The group
+ * inherits the subscription's security benchmark as well as holding the
+ * one assignment infra/lab-hybrid.tf makes, and several of those can never
+ * pass here, by design rather than by fault. Counted as non-compliant they
+ * made the card say the host failed checks it could not take. They are
+ * counted apart, as `notApplicable`, each for the reason in
+ * NOT_APPLICABLE_POLICIES, and only while their result is NonCompliant: a
+ * check on the list that does report Compliant evaluated, and is counted so.
  *
  * The response names no host. The machine's `name` is its hostname, and the
  * queries here never project it: status, timestamps, an agent version and an
@@ -60,8 +74,10 @@
  * MachineProperties reference (`lastStatusChange`, `status`, `agentVersion`),
  * and https://learn.microsoft.com/azure/governance/policy/samples/resource-graph-samples
  * (`policyresources`, `microsoft.policyinsights/policystates`,
- * `tostring(properties.complianceState)`). String literals are single-quoted
- * throughout, as KQL requires.
+ * `tostring(properties.complianceState)`, and, read 2026-10-08,
+ * `properties.policyAssignmentName`; `policyDefinitionName` is the policy
+ * state's definition name, the GUID for a built-in). String literals are
+ * single-quoted throughout, as KQL requires.
  *
  * Shaped like cloud-tools/explain/handler.js: each read is a module-scope
  * step over a `deps` object, so the factory below only wires them. One place
@@ -84,12 +100,73 @@ export const ARC_MACHINE_QUERY = [
   '| take 1',
 ].join(' ');
 
-/** Policy state counts for resources in the lab group, one row per compliance state. */
+/**
+ * Policy state counts for resources in the lab group, one row per compliance
+ * state, definition and assignment, so the checks that cannot evaluate here
+ * can be told apart (NOT_APPLICABLE_POLICIES). Both names are lowercased in
+ * the query, so the match below is one comparison.
+ */
 export const POLICY_COMPLIANCE_QUERY = [
   'policyresources',
   `| where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceGroup) =~ '${LAB_RESOURCE_GROUP}'`,
-  '| summarize count() by complianceState = tostring(properties.complianceState)',
+  '| summarize count() by complianceState = tostring(properties.complianceState), policyDefinition = tolower(tostring(properties.policyDefinitionName)), policyAssignment = tolower(tostring(properties.policyAssignmentName))',
 ].join(' ');
+
+/**
+ * The checks that can never pass on this lab. Each matches a built-in
+ * definition (by its name, the GUID, as Learn's built-in reference lists it,
+ * read 2026-10-08) or the one assignment infra/lab-hybrid.tf makes, and the
+ * comment above each is why. Every reason is a decision recorded elsewhere,
+ * so an entry leaves this list when that decision changes, not when the
+ * count looks better. The reasons are comments rather than strings because
+ * this module answers a public route, and nothing here is said to a visitor
+ * beyond the count (lib/public-visitor-copy.test.js).
+ */
+export const NOT_APPLICABLE_POLICIES = Object.freeze([
+  // The Linux security baseline is a machine-configuration audit, and
+  // machine configuration (guest configuration) is off on the Arc agent
+  // (LAB-6, #984; ADR 0032 amendment of 2026-10-07), so nothing on the host
+  // can report it. Leaves this list if #952 turns guest configuration back
+  // on; estate.test.js fails until it does.
+  { assignment: 'audit-linux-baseline-lab-hybrid' },
+  // "Linux machines should meet requirements for the Azure compute security
+  // baseline": the same audit, wherever it is assigned from. With guest
+  // configuration off there is no report to read.
+  { definition: 'fc9b3da7-8347-4380-8e70-0a0361d8dedd' },
+  // "System updates should be installed on your machines (powered by Update
+  // Center)" reads a Defender for Cloud assessment of update data the lab
+  // does not produce: Defender for Servers stays off (ADR 0032, alternatives
+  // considered), and the host patches itself with unattended-upgrades.
+  { definition: 'f85bf3e0-d513-442e-89c3-1784ad63382b' },
+  // "SQL servers on machines should have vulnerability findings resolved"
+  // needs Defender for SQL on machines, which nothing in infra/ turns on, and
+  // the host runs no SQL Server.
+  { definition: '6ba6d016-e7c3-4842-b8f2-4992ebc0d72d' },
+  // "Azure Key Vaults should use private link": the seal-key vault's only
+  // caller is the lab host, outside Azure, which a private endpoint cannot
+  // serve (infra/lab-hybrid.tf; ADR 0031, owner decision 2026-09-14).
+  { definition: 'a6abeaec-4d90-4a02-805f-6b26c4d3fbe9' },
+  // "Azure Key Vault should have firewall enabled or public network access
+  // disabled": the seal-key vault stays open on purpose, because an IP rule
+  // would copy an address infra/ does not own and a drifted rule would leave
+  // Vault unable to unseal; Entra ID and one key-scoped grant gate every
+  // call (infra/lab-hybrid.tf; ADR 0032 amendment of 2026-09-29).
+  { definition: '55615ac9-af46-4a59-874e-391cc3dfb490' },
+]);
+
+const NOT_APPLICABLE_DEFINITIONS = new Set(
+  NOT_APPLICABLE_POLICIES.filter((p) => p.definition).map((p) => p.definition)
+);
+const NOT_APPLICABLE_ASSIGNMENTS = new Set(
+  NOT_APPLICABLE_POLICIES.filter((p) => p.assignment).map((p) => p.assignment)
+);
+
+/** Whether a policy state row belongs to a check that cannot evaluate this lab. */
+export function isNotApplicableHere(row) {
+  const definition = String(row?.policyDefinition ?? '').toLowerCase();
+  const assignment = String(row?.policyAssignment ?? '').toLowerCase();
+  return NOT_APPLICABLE_DEFINITIONS.has(definition) || NOT_APPLICABLE_ASSIGNMENTS.has(assignment);
+}
 
 const UNAVAILABLE = { status: 503, body: { error: 'Labs estate status is unavailable' } };
 const ABSENT = { status: 200, body: { configured: false } };
@@ -102,27 +179,50 @@ const toTextOrNull = (value) =>
   typeof value === 'string' && value.trim() ? value.trim() : null;
 const intOrNull = (value) => (Number.isInteger(value) ? value : null);
 
-/** The card's `arc` block from one Resource Graph row. */
+/** The card's `arc` block from one Resource Graph row. `statusSince` is not a heartbeat (above). */
 export function shapeArcRow(row) {
   return {
     status: toTextOrNull(row?.status),
-    lastHeartbeatAt: toIsoOrNull(row?.lastStatusChange),
+    statusSince: toIsoOrNull(row?.lastStatusChange),
     agentVersion: toTextOrNull(row?.agentVersion),
     osName: toTextOrNull(row?.osName),
   };
 }
 
-/** `{ compliant, nonCompliant }` from the summarize rows; other states are neither. */
+/**
+ * `{ compliant, nonCompliant, notApplicable }` from the summarize rows. A
+ * NonCompliant row of a check on NOT_APPLICABLE_POLICIES is `notApplicable`;
+ * states other than Compliant and NonCompliant are none of the three.
+ */
 export function shapePolicyRows(rows) {
-  const totals = { compliant: 0, nonCompliant: 0 };
+  const totals = { compliant: 0, nonCompliant: 0, notApplicable: 0 };
   for (const row of Array.isArray(rows) ? rows : []) {
     const count = Number(row?.count_);
     if (!Number.isFinite(count)) continue;
     const state = String(row?.complianceState ?? '').toLowerCase();
     if (state === 'compliant') totals.compliant += count;
-    else if (state === 'noncompliant') totals.nonCompliant += count;
+    else if (state === 'noncompliant') {
+      if (isNotApplicableHere(row)) totals.notApplicable += count;
+      else totals.nonCompliant += count;
+    }
   }
   return totals;
+}
+
+/**
+ * The job runner's block: whether any agent is online by the shared rule,
+ * the queue depth, and the freshest online agent's heartbeat. An agent that
+ * is not online contributes no heartbeat, so the row never shows the time of
+ * a goodbye as if it were a sign of life (#1009).
+ */
+export function shapeAgentRows(agents, queued, nowMs) {
+  const online = (Array.isArray(agents) ? agents : []).filter((a) => isAgentOnline(a, nowMs));
+  const freshestMs = Math.max(...online.map((a) => Date.parse(String(a.lastSeenAt))), Number.NEGATIVE_INFINITY);
+  return {
+    online: online.length > 0,
+    queued: Number(queued?.[0]) || 0,
+    lastHeartbeatAt: Number.isFinite(freshestMs) ? new Date(freshestMs).toISOString() : null,
+  };
 }
 
 /** The estate's `coder` block from the status proxy's body; null when unconfigured. */
@@ -171,18 +271,14 @@ async function readArc({ arm }, context) {
 const readPolicy = ({ arm }, context) =>
   sideRead('policy', context, async () => shapePolicyRows(await arm.query(POLICY_COMPLIANCE_QUERY)));
 
-/** The same two reads getLabsSnapshot makes (lib/labs.js), reduced to a boolean and a count. */
+/** The same two reads getLabsSnapshot makes (lib/labs.js), reduced to shapeAgentRows. */
 const readAgent = ({ store, now }, context) =>
   sideRead('agent', context, async () => {
     const [agents, queued] = await Promise.all([
-      store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt FROM c', []),
+      store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status, c.active FROM c', []),
       store.queryDocs('lab_jobs', "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'", []),
     ]);
-    const nowMs = now();
-    return {
-      online: (Array.isArray(agents) ? agents : []).some((a) => isAgentOnline(a?.lastSeenAt, nowMs)),
-      queued: Number(queued?.[0]) || 0,
-    };
+    return shapeAgentRows(agents, queued, now());
   });
 
 const readCoder = ({ coderStatus }, context) =>

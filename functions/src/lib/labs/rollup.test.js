@@ -35,8 +35,8 @@ const connected = (body = {}, over = {}) =>
   estateDoc(
     {
       configured: true,
-      arc: { status: 'Connected', lastHeartbeatAt: '2026-09-24T20:00:00Z', agentVersion: '1.50', osName: 'linux' },
-      policy: { compliant: 3, nonCompliant: 0 },
+      arc: { status: 'Connected', statusSince: '2026-09-24T20:00:00Z', agentVersion: '1.50', osName: 'linux' },
+      policy: { compliant: 3, nonCompliant: 0, notApplicable: 0 },
       agent: { online: true, queued: 0 },
       coder: { reachable: true, running: 2, max: 5 },
       asOf: '2026-09-24T23:54:30.000Z',

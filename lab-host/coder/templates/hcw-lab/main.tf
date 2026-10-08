@@ -72,7 +72,7 @@ locals {
   # image, which is why the persistent directory is not there.
   home       = "/tmp/home"
   lab_root   = "/tmp/home/lab"
-  repo_url   = "https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git"
+  repo_url   = "https://github.com/saulpatinojr/HCW-HybridCloudWorks.git"
   repo_ref   = "main"
   uid        = "65534"
   memory_mib = 2048

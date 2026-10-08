@@ -41,7 +41,15 @@ import { createHash } from 'node:crypto';
 import { slugify } from './publish.js';
 import { normalizeProviderName } from './content-update-validation.js';
 
-export const REPO_OWNER = 'HybridCloudWorks';
+/**
+ * Where the repository lives. It moved from the HybridCloudWorks organisation
+ * to saulpatinojr on 2026-10-07, and every request here refuses a redirect
+ * (`redirect: 'error'`, ./repo-draft-source.js), so the import could not
+ * reach the old address once it only redirected (#1009). The `github_org`
+ * default in infra/variables.tf is the same owner, and repo-draft.test.js
+ * holds the two equal.
+ */
+export const REPO_OWNER = 'saulpatinojr';
 export const REPO_NAME = 'HCW-HybridCloudWorks';
 /** The branch every import reads. A draft on another branch is not reviewable here yet. */
 export const REPO_REF = 'main';
@@ -121,6 +129,15 @@ export function sha256Hex(value) {
 export const REPO_DRAFT_ID_NAMESPACE = '8bccdb11-a980-4071-bc3a-805c389b371b';
 
 /**
+ * The repository as it was named when drafts were first imported, which is
+ * part of every draft's id. Fixed for the namespace's reason: when the
+ * repository moved to saulpatinojr (2026-10-07) the id had to stay what it
+ * was, or a draft imported before the move would be imported again under a
+ * second id. This is an id seed, not an address; REPO_OWNER is the address.
+ */
+export const REPO_DRAFT_ID_REPOSITORY = 'HybridCloudWorks/HCW-HybridCloudWorks';
+
+/**
  * A deterministic, UUID-shaped document id for a repository path (RFC 9562
  * version 5: SHA-1 over the namespace and the name).
  *
@@ -136,7 +153,7 @@ export const REPO_DRAFT_ID_NAMESPACE = '8bccdb11-a980-4071-bc3a-805c389b371b';
  */
 export function repoDraftContentId(path) {
   const namespace = Buffer.from(REPO_DRAFT_ID_NAMESPACE.replace(/-/g, ''), 'hex');
-  const name = Buffer.from(`${REPO_OWNER}/${REPO_NAME}:${path}`, 'utf8');
+  const name = Buffer.from(`${REPO_DRAFT_ID_REPOSITORY}:${path}`, 'utf8');
   const bytes = createHash('sha1').update(namespace).update(name).digest().subarray(0, 16);
   bytes[6] = (bytes[6] & 0x0f) | 0x50; // version 5
   bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC variant

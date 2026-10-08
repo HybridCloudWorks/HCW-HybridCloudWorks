@@ -13,9 +13,15 @@
  *
  * NOTHING HERE IS PRE-RENDERED WITH DATA. The estate arrives through
  * `usePublicData` in an effect, so the build and the first client render both
- * show the loading sentence. The heartbeat age is measured against the
- * server's `asOf` rather than the viewer's clock, so the render is pure and
- * two viewers reading the same snapshot see the same words.
+ * show the loading sentence. Every age is measured against the server's
+ * `asOf` rather than the viewer's clock, so the render is pure and two
+ * viewers reading the same snapshot see the same words.
+ *
+ * TWO TIMES, NAMED FOR WHAT THEY ARE (#1009). "Arc status since" is when
+ * Arc's status last changed, which for a host connected without a break is
+ * days ago; until #1009 it was labelled "Last heartbeat" and a healthy host
+ * read as silent for days. "Job runner heartbeat" is the runner's own, and is
+ * shown only while it is online.
  */
 import React from 'react';
 import { formatLocalDateTime } from '@/lib/cloudPricing';
@@ -23,8 +29,9 @@ import {
   agentWords,
   arcStatusWord,
   capacityWords,
-  heartbeatAgeWords,
   policyWords,
+  runnerHeartbeatWords,
+  sinceWords,
 } from './labsWords';
 import StatusCard, { MUTED } from './StatusCard';
 
@@ -63,30 +70,35 @@ function coderWords(coder) {
 /** The configured host, every fact in words. */
 function EstateFacts({ estate }) {
   const arc = estate.arc ?? {};
-  // The heartbeat age is measured from the server's snapshot time, `asOf`,
-  // which is data, not a clock: a render that read `Date.now()` would be
-  // impure, and the snapshot is what the card is describing anyway — the
-  // sentence under the list says when it was taken, and it is at most a
-  // minute old. An unparseable `asOf` lets the helper fall back to now.
+  // Ages are measured from the server's snapshot time, `asOf`, which is data,
+  // not a clock: a render that read `Date.now()` would be impure, and the
+  // snapshot is what the card is describing anyway — the sentence under the
+  // list says when it was taken, and it is at most a minute old. An
+  // unparseable `asOf` lets the helper fall back to now.
   const snapshotMs = Date.parse(estate.asOf);
   return (
     <>
       <dl className="flex flex-col gap-2" data-testid="estate-facts">
         <Row label="Azure Arc" value={arcStatusWord(arc.status)} testId="estate-arc-status" />
         <Row
-          label="Last heartbeat"
-          value={heartbeatAgeWords(arc.lastHeartbeatAt, snapshotMs)}
-          testId="estate-heartbeat"
+          label="Arc status since"
+          value={sinceWords(arc.statusSince, snapshotMs)}
+          testId="estate-arc-since"
         />
         <Row label="Arc agent" value={arc.agentVersion || 'version unknown'} />
         <Row label="Operating system" value={arc.osName || 'unknown'} />
         <Row label="Policy" value={policyWords(estate.policy)} testId="estate-policy" />
         <Row label="Job runner" value={agentWords(estate.agent)} testId="estate-agent" />
+        <Row
+          label="Job runner heartbeat"
+          value={runnerHeartbeatWords(estate.agent, snapshotMs)}
+          testId="estate-runner-heartbeat"
+        />
         <Row label="Coder" value={coderWords(estate.coder)} testId="estate-coder" />
       </dl>
       {estate.asOf ? (
         <p className={`mt-3 text-xs ${MUTED}`} data-testid="estate-as-of">
-          As of {formatLocalDateTime(estate.asOf)}; the heartbeat age is measured from that moment,
+          As of {formatLocalDateTime(estate.asOf)}; the ages above are measured from that moment,
           and the reading is refreshed about once a minute.
         </p>
       ) : null}
@@ -100,7 +112,7 @@ const CARD = Object.freeze({
   testId: 'labs-estate-card',
   title: 'The Hybrid Lab right now',
   intro:
-    'This card shows what Azure Arc reports for the lab host right now: its connection, its Arc agent and its policy compliance.',
+    "This card shows what Azure Arc reports for the lab host right now: its connection, its Arc agent and its policy compliance, and whether the lab's job runner is answering.",
   errorText: "The lab host's status couldn't be loaded. Please try again later.",
   noticeTestId: 'estate-status',
   notices: NOTICES,

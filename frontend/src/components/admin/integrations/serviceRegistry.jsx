@@ -224,8 +224,10 @@ async function testElevenLabs() {
  * (#763): the token is made with a one-year lifetime and nothing renews it,
  * so the card is the reminder. `renewSoon` (inside the server's warning
  * window) turns the card red with the renewal steps named; an unknown
- * expiry says why — the token predates the `api_key:read` scope that lets
- * it read its own record, or it is not set.
+ * expiry says why — the token lacks the `api_key:read` scope that lets it
+ * read its own record (Coder answers that read 403, or 404 since v2.38), or
+ * it is not set. A token without the scope still serves the card, so that
+ * sentence stays green and names the fix: re-issue it with the scope.
  */
 export function describeTokenExpiry(read) {
   const token = read?.token;
@@ -246,7 +248,7 @@ export function describeTokenExpiry(read) {
     );
   }
   if (token.reason === 'scope') {
-    return ` Status token expiry unknown: add the ${token.scope} scope at the next renewal and the card will show it.`;
+    return ` Status token expiry unknown: Coder will not show the token its own record without the ${token.scope} scope. Re-issue the token with ${token.scope} added — lab-host/README.md, "The status token for the site" — and the card will show its expiry.`;
   }
   if (token.reason === 'unset') return ' No status token is set.';
   return '';

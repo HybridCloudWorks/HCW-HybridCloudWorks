@@ -521,7 +521,7 @@ export const labs = Object.freeze([
       resource('terraform fmt', 'https://developer.hashicorp.com/terraform/cli/commands/fmt'),
       resource(
         'The hcw-lab image',
-        'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-image'
+        'https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-image'
       ),
     ]),
     validation: Object.freeze({
@@ -620,7 +620,7 @@ export const labs = Object.freeze([
       ),
       resource(
         'The lab host playbook',
-        'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-host'
+        'https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-host'
       ),
     ]),
     validation: Object.freeze({

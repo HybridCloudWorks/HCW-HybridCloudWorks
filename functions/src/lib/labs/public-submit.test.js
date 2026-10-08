@@ -288,6 +288,12 @@ describe('fails closed while no agent can run the job', () => {
     ['no agent registered at all', []],
     ['an agent that last heartbeated 91 s ago', [onlineAgent({ lastSeenAt: new Date(NOW - 91_000).toISOString() })]],
     ['an agent that never heartbeated', [onlineAgent({ lastSeenAt: null })]],
+    // The goodbye heartbeat writes lastSeenAt too, so freshness alone held
+    // the door open for 90 s after a stop (#1009).
+    ['an agent whose fresh heartbeat said offline', [onlineAgent({ status: 'offline' })]],
+    ['an agent whose fresh heartbeat said stopping', [onlineAgent({ status: 'stopping' })]],
+    // The guard refuses it at once; its heartbeat stays fresh 90 s (#1018).
+    ['an agent deactivated since its last heartbeat', [onlineAgent({ active: false })]],
     ['an online agent not registered for terraform-validate', [onlineAgent({ capabilities: ['shell-echo'] })]],
     ['an online agent with no capabilities field', [onlineAgent({ capabilities: undefined })]],
   ])('refuses with %s, and neither counts nor queues', async (_label, agents) => {
@@ -300,6 +306,14 @@ describe('fails closed while no agent can run the job', () => {
     expect(store.incrementIf).not.toHaveBeenCalled();
     expect(store.createDoc).not.toHaveBeenCalled();
     expect(store.jobs()).toEqual([]);
+  });
+
+  it('reads each agent\'s status with its heartbeat, because the online rule needs both (#1009)', async () => {
+    const { handlers, store } = build({ store: memStore({ agents: [onlineAgent()] }) });
+    await handlers.submitJob(postRequest(body()), context);
+    const [, sql] = store.queryDocs.mock.calls.find(([container]) => container === 'lab_agents');
+    expect(sql).toMatch(/\bc\.lastSeenAt\b/);
+    expect(sql).toMatch(/\bc\.status\b/);
   });
 
   it('refuses as unavailable, not open, when the lab cannot be read', async () => {

@@ -47,14 +47,14 @@ const ESTATE = {
   configured: true,
   arc: {
     status: 'Connected',
-    lastHeartbeatAt: new Date(NOW - 4 * 60_000).toISOString(),
+    statusSince: new Date(NOW - 4 * 60_000).toISOString(),
     agentVersion: '1.52.02988.2222',
     osName: 'Ubuntu 24.04.3 LTS',
   },
-  policy: { compliant: 12, nonCompliant: 1 },
-  agent: { online: true, queued: 0 },
+  policy: { compliant: 12, nonCompliant: 1, notApplicable: 0 },
+  agent: { online: true, queued: 0, lastHeartbeatAt: new Date(NOW - 10_000).toISOString() },
   coder: { reachable: true, running: 1, max: 5 },
-  // The heartbeat age is measured from this, so "4 minutes ago" is exact.
+  // Every age is measured from this, so "4 minutes ago" is exact.
   asOf: new Date(NOW).toISOString(),
 };
 
@@ -117,7 +117,8 @@ describe('LabsLearnPage', () => {
 
     expect(await screen.findByTestId('estate-facts')).toBeInTheDocument();
     expect(screen.getByTestId('estate-arc-status')).toHaveTextContent('connected');
-    expect(screen.getByTestId('estate-heartbeat')).toHaveTextContent('4 minutes ago');
+    expect(screen.getByTestId('estate-arc-since')).toHaveTextContent('4 minutes ago');
+    expect(screen.getByTestId('estate-runner-heartbeat')).toHaveTextContent('just now');
     expect(screen.getByTestId('estate-coder')).toHaveTextContent('1 of 5 workspaces running');
 
     expect(await screen.findByTestId('coder-templates')).toBeInTheDocument();

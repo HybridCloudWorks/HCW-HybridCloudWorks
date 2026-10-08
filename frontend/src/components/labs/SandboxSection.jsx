@@ -72,7 +72,7 @@ export const FIRST_PROMPT =
 
 /** The recipe directory on GitHub: Dockerfile, AGENTS.md and the README with every command. */
 export const RECIPE_URL =
-  'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-image/sandbox-template';
+  'https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-image/sandbox-template';
 
 export const COST_SENTENCE =
   'Local sandboxes are free. Cloud sandboxes (sbx --cloud) bill your own Docker subscription, cannot mount this folder, and expire after one hour by default.';

@@ -55,7 +55,7 @@ PYTHON_VERSION=3.14.7
 # still includes 24.04's 3.12, or drop 24.04.
 ANSIBLE_CORE_VERSION=2.21.4
 
-HCW_REPO_URL="${HCW_REPO_URL:-https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git}"
+HCW_REPO_URL="${HCW_REPO_URL:-https://github.com/saulpatinojr/HCW-HybridCloudWorks.git}"
 # Which commit the host runs: origin/main unless HCW_REPO_REF says otherwise.
 # After the clone or fetch below it is resolved once to a full sha, that sha is
 # checked out detached and logged, and nothing after that reads the ref again,
@@ -347,7 +347,22 @@ fi
 "${UV_TOOL_BIN_DIR}/ansible-playbook" --version | sed -n '1p;/python version/p'
 
 if [ -d "${HCW_SRC_DIR}/.git" ]; then
-  log "fetching ${HCW_REPO_URL}"
+  # A checkout keeps the origin it was cloned from. One made before the
+  # repository moved to saulpatinojr (2026-10-07) still names the old
+  # organisation, which answers only through GitHub's redirect, and changing
+  # HCW_REPO_URL alone never repointed it while the log line printed the new
+  # URL as if it had (#1009). So the origin is set to HCW_REPO_URL when the two
+  # differ, and the line names the origin the fetch really uses.
+  hcw_current_origin="$(git -C "${HCW_SRC_DIR}" remote get-url origin 2>/dev/null || true)"
+  if [ "$(normalise_url "${hcw_current_origin}")" != "$(normalise_url "${HCW_REPO_URL}")" ]; then
+    log "repointing origin of ${HCW_SRC_DIR} from ${hcw_current_origin:-nothing} to ${HCW_REPO_URL}"
+    if [ -n "${hcw_current_origin}" ]; then
+      git -C "${HCW_SRC_DIR}" remote set-url origin "${HCW_REPO_URL}"
+    else
+      git -C "${HCW_SRC_DIR}" remote add origin "${HCW_REPO_URL}"
+    fi
+  fi
+  log "fetching $(git -C "${HCW_SRC_DIR}" remote get-url origin)"
   git -C "${HCW_SRC_DIR}" fetch --quiet origin
 else
   log "cloning ${HCW_REPO_URL} into ${HCW_SRC_DIR}"

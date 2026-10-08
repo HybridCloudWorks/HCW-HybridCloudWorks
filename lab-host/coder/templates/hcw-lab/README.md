@@ -14,4 +14,4 @@ opened for you.
   work.
 
 Source: `lab-host/coder/templates/hcw-lab` in
-[HybridCloudWorks/HCW-HybridCloudWorks](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks).
+[saulpatinojr/HCW-HybridCloudWorks](https://github.com/saulpatinojr/HCW-HybridCloudWorks).

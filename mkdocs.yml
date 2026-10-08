@@ -10,8 +10,8 @@
 site_name: HybridCloudWorks Engineering
 site_url: https://docs.hybridcloudworks.com/
 site_description: Architecture decisions, runbooks, standards and the engineering record for the HybridCloudWorks website.
-repo_url: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks
-repo_name: HybridCloudWorks/HCW-HybridCloudWorks
+repo_url: https://github.com/saulpatinojr/HCW-HybridCloudWorks
+repo_name: saulpatinojr/HCW-HybridCloudWorks
 edit_uri: edit/main/docs/
 copyright: HybridCloudWorks
 

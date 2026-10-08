@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Use [GitHub private vulnerability reporting](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/security/advisories/new)
+Use [GitHub private vulnerability reporting](https://github.com/saulpatinojr/HCW-HybridCloudWorks/security/advisories/new)
 for anything sensitive. Do **not** open a public issue containing exploit
 details, tokens, endpoints, or tenant identifiers.
 

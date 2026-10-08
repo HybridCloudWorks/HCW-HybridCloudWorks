@@ -36,6 +36,7 @@ import { readFileSync } from 'node:fs';
 import { CAPABILITIES } from './lib/capabilities.js';
 import { runInDocker } from './lib/docker-runner.js';
 import { createApiClient } from './lib/api.js';
+import { createLogger } from './lib/log.js';
 
 const AGENT_VERSION = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8')
@@ -72,6 +73,11 @@ const config = {
   },
 };
 
+// Every line goes through this, never console.*: the error and warning lines
+// carry the syslog priority that gets them collected (lib/log.js, #1009), and
+// what they may say is content-free, so a failure goes through log.fault.
+const log = createLogger();
+
 const missing = [
   ['LABS_AGENT_API_BASE', config.apiBase],
   ['LABS_AGENT_TENANT_ID', config.tenantId],
@@ -81,12 +87,11 @@ const missing = [
 ].filter(([, v]) => !v);
 
 if (missing.length > 0) {
-  console.error(`Missing required configuration: ${missing.map(([k]) => k).join(', ')}`);
+  log.error(`Missing required configuration: ${missing.map(([k]) => k).join(', ')}`);
   process.exit(1);
 }
 
 const api = createApiClient(config);
-const log = (...args) => console.log(new Date().toISOString(), `[${config.agentId}]`, ...args);
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -99,7 +104,10 @@ let shuttingDown = false;
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────────
 
-async function sendHeartbeat(status = 'idle') {
+// Once shutdown begins every heartbeat says `stopping`, the interval's and a
+// finishing job's included: an `idle` or `busy` one during the drain would
+// reopen the public door that `stopping` closed (review of #1018).
+async function sendHeartbeat(status = shuttingDown ? 'stopping' : 'idle') {
   try {
     await api.heartbeat({
       status,
@@ -110,7 +118,9 @@ async function sendHeartbeat(status = 'idle') {
   } catch (err) {
     // Never fatal. A heartbeat gap shows as "offline" in the Labs dashboard,
     // which is the correct thing for it to show if the API is unreachable.
-    log('heartbeat failed:', err.message);
+    // A warning, not an error: one missed beat is weather; three are an
+    // outage the health timer reports on its own.
+    log.fault('warn', 'heartbeat failed', err);
   }
 }
 
@@ -124,7 +134,8 @@ async function executeJob(job) {
   // run the command, so it refuses anything it has no allowlisted recipe for
   // rather than trusting the response.
   if (!capability) {
-    log(`refusing job ${job.id}: no local capability for type ${job.type}`);
+    log.error(`refusing a job: no local capability for type ${job.type}`);
+    log.info(`refused job ${job.id} (${job.type})`);
     await api
       .completeJob({
         jobId: job.id,
@@ -132,12 +143,12 @@ async function executeJob(job) {
         exitCode: -1,
         output: `agent has no capability for job type ${job.type}`,
       })
-      .catch((err) => log(`could not report refusal for ${job.id}:`, err.message));
+      .catch((err) => log.fault('error', 'could not report a refusal', err, `job ${job.id}`));
     return;
   }
 
   activeJobs += 1;
-  log(`running job ${job.id} (${job.type})`);
+  log.info(`running job ${job.id} (${job.type})`);
 
   try {
     // The whole claimed job goes in: its id becomes the container's
@@ -152,9 +163,11 @@ async function executeJob(job) {
       exitCode: result.exitCode,
       output: result.output,
     });
-    log(`job ${job.id} -> ${status} (exit ${result.exitCode})`);
+    // A failed or timed-out job is the learner's result, not the agent's
+    // fault, so it is information.
+    log.info(`job ${job.id} -> ${status} (exit ${result.exitCode})`);
   } catch (err) {
-    log(`job ${job.id} errored:`, err.message);
+    log.fault('error', 'job errored', err, `job ${job.id}`);
     // Best effort: if this also fails the job's claim lease expires server-side
     // and another agent picks it up, which is why the lease exists.
     await api
@@ -164,7 +177,7 @@ async function executeJob(job) {
         exitCode: -1,
         output: `agent error: ${err.message}`,
       })
-      .catch((reportErr) => log(`could not report failure for ${job.id}:`, reportErr.message));
+      .catch((reportErr) => log.fault('error', 'could not report a failure', reportErr, `job ${job.id}`));
   } finally {
     activeJobs -= 1;
     sendHeartbeat();
@@ -193,7 +206,7 @@ async function poll() {
     if (!job) return;
     executeJob(job); // intentionally not awaited — the poll interval continues
   } catch (err) {
-    log('claim failed:', err.message);
+    log.fault('warn', 'claim failed', err);
   } finally {
     // Released in every path. On the path that takes a slot, executeJob
     // reaches `activeJobs += 1` with no await in front of it, so the handoff
@@ -205,8 +218,8 @@ async function poll() {
 }
 
 async function start() {
-  log(`agent v${AGENT_VERSION} starting against ${config.apiBase}`);
-  log(
+  log.info(`agent ${config.agentId} v${AGENT_VERSION} starting against ${config.apiBase}`);
+  log.info(
     `capabilities are assigned server-side; local recipes: ${Object.keys(CAPABILITIES).join(', ')}`
   );
 
@@ -221,7 +234,7 @@ async function start() {
 async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  log(`${signal} received; finishing active jobs (${activeJobs})...`);
+  log.info(`${signal} received; finishing active jobs (${activeJobs})...`);
   await sendHeartbeat('stopping');
 
   const deadline = Date.now() + 60_000;
@@ -237,6 +250,6 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
 
 start().catch((err) => {
-  console.error('Fatal agent error:', err);
+  log.fault('error', 'fatal agent error', err);
   process.exit(1);
 });

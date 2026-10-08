@@ -9,6 +9,12 @@ every step.
 
 ## What runs on the host
 
+What `main` configures. The host runs the commit its last `bootstrap.sh`
+run checked out, and nothing re-runs it on its own (#950), so a merged
+change is on the host only after the owner's next run; which merged changes
+the host has not run yet is
+[Labs host, Applied state](../docs/architecture/labs-host.md#applied-state).
+
 | Role | Installs | Where |
 | --- | --- | --- |
 | `hardening` | `hcwadmin` key-only login with passwordless sudo, sshd drop-in (`PasswordAuthentication no`, `PermitRootLogin no`, `KbdInteractiveAuthentication no`), ufw deny-in/allow-out with TCP 22, 80, 443, unattended-upgrades rebooting at 04:30, fail2ban sshd jail | `/etc/ssh/sshd_config.d/00-hcw-hardening.conf`, `/etc/sudoers.d/90-hcw-admin`, `/etc/apt/apt.conf.d/52hcw-unattended-upgrades`, `/etc/fail2ban/jail.d/hcw-sshd.local` |
@@ -58,7 +64,10 @@ before ufw's.
 ## Container-runtime privilege separation (LAB-5)
 
 Two Docker daemons and three ways in, kept apart (estate review
-2026-10-06, finding LAB-5; ADR 0032, amendment of 2026-10-07):
+2026-10-06, finding LAB-5; ADR 0032, amendment of 2026-10-07). Merged
+2026-10-07 (#987); the 2026-10-08 review found the host had not run it yet
+([Labs host, Applied state](../docs/architecture/labs-host.md#applied-state)),
+so what follows is the host from its next `bootstrap.sh` run:
 
 - **The host daemon remaps user namespaces.** `userns-remap: default`, so
   a job container's root, and Coder's server's and PostgreSQL's, is an
@@ -183,6 +192,19 @@ sudo /opt/hcw-src/lab-host/bootstrap.sh
 A successful run ends with a `PLAY RECAP` line for `localhost` showing
 `failed=0` and `unreachable=0`. On a host that is already configured,
 `changed=0` is the normal result; anything else names the task that changed.
+
+**Then push the Coder template at once** ("Publishing the template",
+below). `lab_images` removes the images the checked-out commit no longer
+names, and after the move to Docker Hub (#1002, #1003) that includes the
+GHCR images Coder's active template version still names, until the push
+publishes the version that names Docker Hub. The runbook has the two steps
+in order: [After a merge](../docs/runbooks/labs-host.md#after-a-merge-the-playbook-then-the-template-at-once).
+
+A checkout cloned before the repository moved to saulpatinojr (2026-10-07)
+is repointed by the run: `bootstrap.sh` sets `/opt/hcw-src`'s origin to
+`HCW_REPO_URL` when they differ and logs the address it fetches from, and
+the `labs_agent` role's git task does the same for the agent's checkout
+(#1009).
 
 To see what a run would change without changing it, pass the playbook flags
 through (bash, on the host):
@@ -699,8 +721,12 @@ belonged to another user:
   expires: `Status token expires on <day> (<n> days)`, red inside the last
   30 days with the renewal steps named. Coder documents the scope as "View
   API keys"; it reads key metadata, never a secret. A token made without it
-  (the 2026-09-28 one) is refused that read with 403, and the card says
-  `expiry unknown: add the api_key:read scope at the next renewal`.
+  (the 2026-09-28 one) is refused that read, and Coder v2.38 says so with
+  **404**, not 403: its `apiKeyByID` handler answers an unauthorized read as
+  not found (`httpapi.Is404Error`). Both codes mean the scope (#1009), and
+  the card says `Status token expiry unknown: … Re-issue the token with
+  api_key:read added`. Re-issuing is the steps below, with the scope on the
+  `coder tokens create` line as written there.
 
 | `hcw-status`'s role, and the token's scope | The three calls | Change a template | Delete a template | Stop a workspace |
 | --- | --- | --- | --- | --- |

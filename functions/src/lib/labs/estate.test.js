@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CACHE_CONTAINER } from '../cloud-tools/history.js';
@@ -6,8 +9,11 @@ import {
   ESTATE_CACHE_ID,
   ESTATE_CACHE_SECONDS,
   LAB_RESOURCE_GROUP,
+  NOT_APPLICABLE_POLICIES,
   POLICY_COMPLIANCE_QUERY,
   createEstateHandlers,
+  isNotApplicableHere,
+  shapeAgentRows,
   shapeArcRow,
   shapePolicyRows,
 } from './estate.js';
@@ -70,7 +76,7 @@ describe('the KQL', () => {
       "resources | where type =~ 'microsoft.hybridcompute/machines' and resourceGroup =~ 'rg-lab-hybrid-prod-cus' | project status = tostring(properties.status), lastStatusChange = tostring(properties.lastStatusChange), agentVersion = tostring(properties.agentVersion), osName = tostring(properties.osName) | take 1"
     );
     expect(POLICY_COMPLIANCE_QUERY).toBe(
-      "policyresources | where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceGroup) =~ 'rg-lab-hybrid-prod-cus' | summarize count() by complianceState = tostring(properties.complianceState)"
+      "policyresources | where type =~ 'microsoft.policyinsights/policystates' and tostring(properties.resourceGroup) =~ 'rg-lab-hybrid-prod-cus' | summarize count() by complianceState = tostring(properties.complianceState), policyDefinition = tolower(tostring(properties.policyDefinitionName)), policyAssignment = tolower(tostring(properties.policyAssignmentName))"
     );
     expect(LAB_RESOURCE_GROUP).toBe('rg-lab-hybrid-prod-cus');
     expect(ARC_MACHINE_QUERY).not.toContain('"');
@@ -79,26 +85,112 @@ describe('the KQL', () => {
   });
 });
 
-describe('shapeArcRow / shapePolicyRows', () => {
-  it('normalises the timestamp and blanks to null', () => {
+describe('shapeArcRow / shapePolicyRows / shapeAgentRows', () => {
+  it('normalises the timestamp and blanks to null, and calls Arc\'s status change what it is (#1009)', () => {
     expect(shapeArcRow(MACHINE_ROW)).toEqual({
       status: 'Connected',
-      lastHeartbeatAt: '2026-09-25T11:52:10.123Z',
+      statusSince: '2026-09-25T11:52:10.123Z',
       agentVersion: '1.52.02690.2014',
       osName: 'ubuntu',
     });
     expect(shapeArcRow({ status: '', lastStatusChange: 'never', agentVersion: null })).toEqual({
       status: null,
-      lastHeartbeatAt: null,
+      statusSince: null,
       agentVersion: null,
       osName: null,
     });
+    // Not a heartbeat, so not named like one.
+    expect(shapeArcRow(MACHINE_ROW)).not.toHaveProperty('lastHeartbeatAt');
   });
 
   it('counts compliant and non-compliant, ignores other states, and is zeros for no rows', () => {
-    expect(shapePolicyRows(POLICY_ROWS)).toEqual({ compliant: 4, nonCompliant: 1 });
-    expect(shapePolicyRows([])).toEqual({ compliant: 0, nonCompliant: 0 });
-    expect(shapePolicyRows([{ complianceState: 'Compliant', count_: 'lots' }])).toEqual({ compliant: 0, nonCompliant: 0 });
+    expect(shapePolicyRows(POLICY_ROWS)).toEqual({ compliant: 4, nonCompliant: 1, notApplicable: 0 });
+    expect(shapePolicyRows([])).toEqual({ compliant: 0, nonCompliant: 0, notApplicable: 0 });
+    expect(shapePolicyRows([{ complianceState: 'Compliant', count_: 'lots' }])).toEqual({
+      compliant: 0,
+      nonCompliant: 0,
+      notApplicable: 0,
+    });
+  });
+
+  it('counts a check that can never pass here as not applicable, not as a failure (#1009)', () => {
+    const failing = (over) => ({ complianceState: 'NonCompliant', count_: 1, ...over });
+    const rows = [
+      { complianceState: 'Compliant', count_: 3, policyDefinition: 'aaaaaaaa-0000-4000-8000-000000000001' },
+      failing({ policyDefinition: 'bbbbbbbb-0000-4000-8000-000000000002' }),
+      failing({ policyAssignment: 'audit-linux-baseline-lab-hybrid', policyDefinition: 'fc9b3da7-8347-4380-8e70-0a0361d8dedd' }),
+      failing({ policyDefinition: 'fc9b3da7-8347-4380-8e70-0a0361d8dedd', policyAssignment: 'some-inherited-benchmark' }),
+      failing({ policyDefinition: 'f85bf3e0-d513-442e-89c3-1784ad63382b' }),
+      failing({ policyDefinition: '6ba6d016-e7c3-4842-b8f2-4992ebc0d72d' }),
+      failing({ policyDefinition: 'a6abeaec-4d90-4a02-805f-6b26c4d3fbe9' }),
+      failing({ policyDefinition: '55615ac9-af46-4a59-874e-391cc3dfb490', count_: 2 }),
+    ];
+    expect(shapePolicyRows(rows)).toEqual({ compliant: 3, nonCompliant: 1, notApplicable: 7 });
+    // One that does report Compliant evaluated, and is counted as passing.
+    expect(
+      shapePolicyRows([{ complianceState: 'Compliant', count_: 1, policyAssignment: 'audit-linux-baseline-lab-hybrid' }])
+    ).toEqual({ compliant: 1, nonCompliant: 0, notApplicable: 0 });
+    // Matched without regard to case, as Resource Graph spells names either way.
+    expect(isNotApplicableHere({ policyAssignment: 'Audit-Linux-Baseline-Lab-Hybrid' })).toBe(true);
+    expect(isNotApplicableHere({})).toBe(false);
+  });
+
+  it('matches each not-applicable check by one lowercase name, a definition GUID or the assignment, with its reason beside it', () => {
+    expect(NOT_APPLICABLE_POLICIES).toHaveLength(6);
+    for (const entry of NOT_APPLICABLE_POLICIES) {
+      expect(Object.keys(entry)).toHaveLength(1);
+      if (entry.definition) expect(entry.definition).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      else expect(entry.assignment).toMatch(/^[a-z0-9-]+$/);
+    }
+    // The reasons are comments (the module answers a public route); each
+    // entry must still have one directly above it.
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'estate.js'), 'utf8');
+    for (const entry of NOT_APPLICABLE_POLICIES) {
+      const [key, value] = Object.entries(entry)[0];
+      expect(source, `${value} has no comment above it`).toMatch(
+        new RegExp(`//[^\\n]*\\n  \\{ ${key}: '${value}' \\}`)
+      );
+    }
+  });
+
+  it('holds the baseline as not applicable only while the arc role turns guest configuration off, and names the assignment infra/ makes', () => {
+    // The reason is a decision recorded in code; if #952 turns guest
+    // configuration back on, this fails until the baseline leaves the list.
+    const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
+    const onboard = readFileSync(join(repo, 'lab-host', 'ansible', 'roles', 'arc', 'tasks', 'onboard.yml'), 'utf8');
+    expect(onboard).toMatch(/- set\s+- guestconfiguration\.enabled\s+- "false"/);
+    const hcl = readFileSync(join(repo, 'infra', 'lab-hybrid.tf'), 'utf8');
+    const assignment = NOT_APPLICABLE_POLICIES.find((p) => p.assignment).assignment;
+    expect(hcl).toContain(`name                 = "${assignment}"`);
+    expect(hcl).toContain('policyDefinitions/fc9b3da7-8347-4380-8e70-0a0361d8dedd');
+  });
+
+  it('reports the freshest ONLINE agent\'s heartbeat, never a goodbye or a stale one (#1009)', () => {
+    const ago = (ms) => new Date(NOW - ms).toISOString();
+    expect(
+      shapeAgentRows(
+        [
+          { status: 'idle', lastSeenAt: ago(20_000) },
+          { status: 'busy', lastSeenAt: ago(5_000) },
+          { status: 'offline', lastSeenAt: ago(1_000) },
+          { status: 'idle', lastSeenAt: ago(120_000) },
+        ],
+        [2],
+        NOW
+      )
+    ).toEqual({ online: true, queued: 2, lastHeartbeatAt: ago(5_000) });
+    expect(shapeAgentRows([{ status: 'offline', lastSeenAt: ago(1_000) }], [0], NOW)).toEqual({
+      online: false,
+      queued: 0,
+      lastHeartbeatAt: null,
+    });
+    expect(shapeAgentRows([], [], NOW)).toEqual({ online: false, queued: 0, lastHeartbeatAt: null });
+    // Deactivated since its last heartbeat: the guard already refuses it (#1018).
+    expect(shapeAgentRows([{ active: false, status: 'idle', lastSeenAt: ago(1_000) }], [0], NOW)).toEqual({
+      online: false,
+      queued: 0,
+      lastHeartbeatAt: null,
+    });
   });
 });
 
@@ -159,16 +251,16 @@ describe('GET /api/public/labs/estate', () => {
       configured: true,
       arc: {
         status: 'Connected',
-        lastHeartbeatAt: '2026-09-25T11:52:10.123Z',
+        statusSince: '2026-09-25T11:52:10.123Z',
         agentVersion: '1.52.02690.2014',
         osName: 'ubuntu',
       },
-      policy: { compliant: 4, nonCompliant: 1 },
-      agent: { online: true, queued: 3 },
+      policy: { compliant: 4, nonCompliant: 1, notApplicable: 0 },
+      agent: { online: true, queued: 3, lastHeartbeatAt: new Date(NOW - 10_000).toISOString() },
       coder: { reachable: true, running: 1, max: 5 },
       asOf: new Date(NOW).toISOString(),
     });
-    expect(store.queryDocs).toHaveBeenCalledWith('lab_agents', 'SELECT TOP 200 c.lastSeenAt FROM c', []);
+    expect(store.queryDocs).toHaveBeenCalledWith('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status, c.active FROM c', []);
     expect(store.queryDocs).toHaveBeenCalledWith(
       'lab_jobs',
       "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'",
@@ -183,8 +275,21 @@ describe('GET /api/public/labs/estate', () => {
       ),
     });
     const res = await handlers({ store }).getEstate(request(), context);
-    expect(body(res).agent).toEqual({ online: false, queued: 0 });
+    expect(body(res).agent).toEqual({ online: false, queued: 0, lastHeartbeatAt: null });
   });
+
+  it.each([['offline'], ['stopping']])(
+    'agent is offline the moment its heartbeat says %s, fresh or not (#1009)',
+    async (status) => {
+      const store = makeStore({
+        queryDocs: vi.fn(async (container) =>
+          container === 'lab_agents' ? [{ status, lastSeenAt: new Date(NOW - 5_000).toISOString() }] : [0]
+        ),
+      });
+      const res = await handlers({ store }).getEstate(request(), context);
+      expect(body(res).agent).toEqual({ online: false, queued: 0, lastHeartbeatAt: null });
+    }
+  );
 
   it('a failed side read is null, never zero: policy, agent and Coder each on their own', async () => {
     const policyDown = armFor({
@@ -195,7 +300,11 @@ describe('GET /api/public/labs/estate', () => {
     });
     let res = await handlers({ arm: policyDown }).getEstate(request(), context);
     expect(body(res).policy).toBeNull();
-    expect(body(res).agent).toEqual({ online: true, queued: 3 });
+    expect(body(res).agent).toEqual({
+      online: true,
+      queued: 3,
+      lastHeartbeatAt: new Date(NOW - 10_000).toISOString(),
+    });
 
     const storeDown = makeStore({
       queryDocs: vi.fn(async () => {
@@ -204,7 +313,7 @@ describe('GET /api/public/labs/estate', () => {
     });
     res = await handlers({ store: storeDown }).getEstate(request(), context);
     expect(body(res).agent).toBeNull();
-    expect(body(res).policy).toEqual({ compliant: 4, nonCompliant: 1 });
+    expect(body(res).policy).toEqual({ compliant: 4, nonCompliant: 1, notApplicable: 0 });
 
     res = await handlers({
       coderStatus: {
@@ -229,7 +338,7 @@ describe('GET /api/public/labs/estate', () => {
   it('no policy rows at all is honest zeros, because Resource Graph answered', async () => {
     const arm = armFor({ [ARC_MACHINE_QUERY]: [MACHINE_ROW], [POLICY_COMPLIANCE_QUERY]: [] });
     const res = await handlers({ arm }).getEstate(request(), context);
-    expect(body(res).policy).toEqual({ compliant: 0, nonCompliant: 0 });
+    expect(body(res).policy).toEqual({ compliant: 0, nonCompliant: 0, notApplicable: 0 });
   });
 
   it('never carries a hostname, address or secret', async () => {
@@ -240,7 +349,7 @@ describe('GET /api/public/labs/estate', () => {
     const res = await handlers({ arm }).getEstate(request(), context);
     expect(res.body).not.toContain('vps-hcw-lab-01');
     expect(res.body).not.toContain('/subscriptions/');
-    expect(Object.keys(body(res).arc)).toEqual(['status', 'lastHeartbeatAt', 'agentVersion', 'osName']);
+    expect(Object.keys(body(res).arc)).toEqual(['status', 'statusSince', 'agentVersion', 'osName']);
   });
 
   it('cache hit: serves the stored answer — including a stored 503 — and calls nothing', async () => {

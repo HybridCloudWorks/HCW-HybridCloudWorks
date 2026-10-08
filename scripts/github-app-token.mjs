@@ -6,7 +6,7 @@
  * T-726: `publish-content-manifest.yml` used to commit straight to `main`. The
  * ruleset refuses that — `pull_request` is one of its rules and it has no
  * bypass actors, verified 2026-08-31 against
- * /repos/HybridCloudWorks/HCW-HybridCloudWorks/rulesets/20680114 — so the push
+ * /repos/saulpatinojr/HCW-HybridCloudWorks/rulesets/20680114 — so the push
  * had been failing since the ruleset was updated on 2026-08-25, unnoticed
  * because the manifest had not changed in that window. An App fixes it by
  * opening a pull request instead, and the checks run precisely because the pull

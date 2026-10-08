@@ -52,7 +52,7 @@ import { dirname, join } from 'node:path';
 const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
 const GROUP_VARS = join(REPO, 'lab-host', 'ansible', 'group_vars', 'all.yml');
 const USER_AGENT =
-  'HCW-HybridCloudWorks lab-pins-upstream (+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks)';
+  'HCW-HybridCloudWorks lab-pins-upstream (+https://github.com/saulpatinojr/HCW-HybridCloudWorks)';
 
 // ── Version arithmetic ─────────────────────────────────────────────────────
 

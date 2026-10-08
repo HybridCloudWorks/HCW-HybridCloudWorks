@@ -2,7 +2,7 @@
 
 One row per finding the security scanners reported on `main` at `357114f4`
 (after #565), with the verdict, the evidence, and what resolves it. Issue
-[#567](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/567).
+[#567](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/567).
 
 A suppression in a scanner's own file, or in an inline comment, points back to
 the section of this page it belongs to. **A new suppression needs a new row

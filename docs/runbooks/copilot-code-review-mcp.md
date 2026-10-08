@@ -5,7 +5,7 @@
 > App's key is stored, the setup workflow's manual dispatch signed in (run 2,
 > green), and the five servers are pasted into repository settings. The owner
 > steps were tracked in
-> [issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369),
+> [issue #369](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/369),
 > which was closed the same day. `.github/copilot-mcp.json` remains the
 > reviewed source of record: GitHub does not read it from the repository, so
 > any change to it is a pull request and then the paste in step 5 again.
@@ -306,7 +306,7 @@ Repository administrator, Azure Owner on the application subscription (for
 the apply approval), and `gh` and `az` signed in. Do the steps in this
 order — the paste is last because two servers depend on what comes before.
 The same list, as checkboxes, is
-[issue #369](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/369).
+[issue #369](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/369).
 
 **Steps 1 to 3 need the pull request merged first.** The workspace plans
 from `main`, the client-id output exists only after that apply, and
@@ -345,7 +345,7 @@ It is a variable, not a secret — the value is printed on purpose.
 ### 2b. Mirror the four identifiers into the Agents store
 
 Done 2026-09-06 as
-[issue #381](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/381);
+[issue #381](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/381);
 kept here for a rotation, which has to change both copies. Copilot's own runner reads only Agents secrets (see
 [the Azure server](#the-azure-server-read-only-federated-no-secret)), so the
 four identifiers the workflow reads — three for the Azure login, one for the
@@ -355,13 +355,13 @@ variables hold, and the later line copies each to the clipboard in turn for
 the paste.
 
 ```powershell
-gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks | Select-String 'COPILOT_REVIEW_CLIENT_ID|^TENANT_ID|^SUBSCRIPTION_ID|COPILOT_REVIEW_APP_ID'
+gh variable list --repo saulpatinojr/HCW-HybridCloudWorks | Select-String 'COPILOT_REVIEW_CLIENT_ID|^TENANT_ID|^SUBSCRIPTION_ID|COPILOT_REVIEW_APP_ID'
 ```
 
 Then, in the repository, **Settings → Secrets and variables → Agents →
 Secrets → New repository secret**, four times (the Agents tab sits beside
 the Actions tab at
-<https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions>);
+<https://github.com/saulpatinojr/HCW-HybridCloudWorks/settings/secrets/actions>);
 `gh secret set` cannot write this store:
 
 | Agents secret | Value: the repository variable |
@@ -374,7 +374,7 @@ the Actions tab at
 To copy one value without retyping it, PowerShell:
 
 ```powershell
-gh variable get COPILOT_REVIEW_CLIENT_ID --repo HybridCloudWorks/HCW-HybridCloudWorks | Set-Clipboard
+gh variable get COPILOT_REVIEW_CLIENT_ID --repo saulpatinojr/HCW-HybridCloudWorks | Set-Clipboard
 ```
 
 and the same with `TENANT_ID`, `SUBSCRIPTION_ID` and `COPILOT_REVIEW_APP_ID`
@@ -389,7 +389,7 @@ key), and the next review session's log showing `azure/login` with a
 PowerShell:
 
 ```powershell
-gh workflow run copilot-setup-steps.yml --repo HybridCloudWorks/HCW-HybridCloudWorks; Start-Sleep -Seconds 20; gh run list --repo HybridCloudWorks/HCW-HybridCloudWorks --workflow copilot-setup-steps.yml --limit 1
+gh workflow run copilot-setup-steps.yml --repo saulpatinojr/HCW-HybridCloudWorks; Start-Sleep -Seconds 20; gh run list --repo saulpatinojr/HCW-HybridCloudWorks --workflow copilot-setup-steps.yml --limit 1
 ```
 
 **Success looks like:** the run is `completed success` and its single step,
@@ -427,10 +427,10 @@ No personal access token is created at any point in this step.
    line. PowerShell:
 
     ```powershell
-    $appId = (gh api /orgs/HybridCloudWorks/installations | ConvertFrom-Json).installations | Where-Object app_slug -eq 'hcw-copilot-review-reader' | Select-Object -ExpandProperty app_id; gh variable set COPILOT_REVIEW_APP_ID --repo HybridCloudWorks/HCW-HybridCloudWorks --body $appId
+    $appId = (gh api /orgs/HybridCloudWorks/installations | ConvertFrom-Json).installations | Where-Object app_slug -eq 'hcw-copilot-review-reader' | Select-Object -ExpandProperty app_id; gh variable set COPILOT_REVIEW_APP_ID --repo saulpatinojr/HCW-HybridCloudWorks --body $appId
     ```
 
-    **Success looks like:** `gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks`
+    **Success looks like:** `gh variable list --repo saulpatinojr/HCW-HybridCloudWorks`
     shows `COPILOT_REVIEW_APP_ID` with the same integer the App page shows.
     If the first half returns nothing, the App is not yet installed on the
     organisation (step 3) — the variable would then be set empty, so check
@@ -443,13 +443,13 @@ No personal access token is created at any point in this step.
    including the `BEGIN` and `END` lines. In the repository, **Settings →
    Secrets and variables → Agents → Secrets → New repository secret** (the
    Agents tab sits beside the Actions tab at
-   <https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/secrets/actions>).
+   <https://github.com/saulpatinojr/HCW-HybridCloudWorks/settings/secrets/actions>).
    `gh secret set` cannot write this store, so this one is a browser step.
    Then delete the downloaded `.pem`; the secret is its home now.
 
 **Success looks like:** the App listed at
 <https://github.com/organizations/HybridCloudWorks/settings/installations>
-as installed on one repository; `gh variable list --repo HybridCloudWorks/HCW-HybridCloudWorks`
+as installed on one repository; `gh variable list --repo saulpatinojr/HCW-HybridCloudWorks`
 shows `COPILOT_REVIEW_APP_ID`; and the secret appears under Agents with that
 exact name. Both names are load-bearing: the workflow reads them verbatim and
 reports "not configured" while either is missing.
@@ -472,7 +472,7 @@ reports "not configured" while either is missing.
 2. Open the repository's Copilot MCP settings. The page is reached from
    **Settings → Code, planning, and automation → Copilot → MCP servers**;
    the deep link that has carried this configuration is
-   <https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/settings/copilot/coding_agent>
+   <https://github.com/saulpatinojr/HCW-HybridCloudWorks/settings/copilot/coding_agent>
    (GitHub moved the setting to a shared "MCP servers" page and says
    existing configurations were migrated; if that URL lands elsewhere, use
    the menu path).

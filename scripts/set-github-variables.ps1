@@ -49,7 +49,7 @@
   (they are public identifiers); secret values never are.
 
 .PARAMETER Repository
-  GitHub repository, owner/name. Default: HybridCloudWorks/HCW-HybridCloudWorks.
+  GitHub repository, owner/name. Default: saulpatinojr/HCW-HybridCloudWorks.
 
 .PARAMETER Organization
   HCP Terraform organization, for the wave-2 state read. Read from
@@ -90,7 +90,7 @@
 #>
 [CmdletBinding(SupportsShouldProcess = $true)]
 param(
-  [string] $Repository = 'HybridCloudWorks/HCW-HybridCloudWorks',
+  [string] $Repository = 'saulpatinojr/HCW-HybridCloudWorks',
   # Read from infra/backend.tf when omitted — one place names the workspace,
   # so the wave-2 state read cannot target a different one than Terraform uses.
   [string] $Organization,

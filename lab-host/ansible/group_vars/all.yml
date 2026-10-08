@@ -231,7 +231,7 @@ coder_sandbox_enabled: "{{ coder_enabled }}"
 # string, so a moved commit reinstalls either way.
 labs_agent_user: hcw-labs-agent
 labs_agent_home: /opt/hcw-labs-agent
-labs_agent_repo_url: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks.git
+labs_agent_repo_url: https://github.com/saulpatinojr/HCW-HybridCloudWorks.git
 labs_agent_repo_ref: "{{ lookup('ansible.builtin.pipe', 'git -C ' ~ (playbook_dir | quote) ~ ' rev-parse --verify HEAD') }}"
 # Node.js 26, the newest release line (owner direction 2026-09-26; it becomes
 # LTS on 2026-10-28). NodeSource publishes one codename-independent suite,

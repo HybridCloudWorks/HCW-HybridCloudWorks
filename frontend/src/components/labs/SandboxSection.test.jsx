@@ -75,7 +75,7 @@ describe('SandboxSection', () => {
     const link = screen.getByTestId('sandbox-recipe-link');
     expect(link).toHaveAttribute('href', RECIPE_URL);
     expect(RECIPE_URL).toBe(
-      'https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-image/sandbox-template'
+      'https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-image/sandbox-template'
     );
     expect(link).toHaveAttribute('target', '_blank');
     expect(link.getAttribute('rel')).toMatch(/noopener/);

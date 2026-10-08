@@ -52,6 +52,7 @@ export const SOURCE_DISPLAY_NAMES = Object.freeze({
   workflow_alerts: 'the workflow alert monitor',
   seed: 'the content seeder',
   lab_agent_offline: 'the lab agent watch',
+  lab_agent_online: 'the lab agent watch',
 });
 
 export function formatTelegramText({ title, message, severity, source }) {

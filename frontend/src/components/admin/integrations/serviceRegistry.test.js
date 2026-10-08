@@ -205,13 +205,14 @@ describe('the service registry', () => {
         /expires on 2026-10-20 \(15 days\): renew it/
       );
 
-      // A token made before the api_key:read scope: still green, says what to add.
+      // A token without the api_key:read scope (Coder answers its own-record
+      // read 403, or 404 since v2.38): still green, says to re-issue it.
       getJSON.mockResolvedValueOnce(healthy).mockResolvedValueOnce({
         configured: true,
         token: { known: false, reason: 'scope', scope: 'api_key:read' },
       });
       await expect(runnerFor('hybrid-lab')()).resolves.toMatch(
-        /expiry unknown: add the api_key:read scope/
+        /expiry unknown: .*Re-issue the token with api_key:read added/
       );
 
       // Expired or revoked: red.

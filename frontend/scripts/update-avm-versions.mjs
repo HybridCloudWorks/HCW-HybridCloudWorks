@@ -85,7 +85,7 @@ export const PINS_FILE = path.join(frontendRoot, 'src', 'lib', 'landingZone', 'a
 export const VERSIONS_ENV_FILE = path.join(repoRoot, 'lab-image', 'versions.env');
 
 const USER_AGENT =
-  'HCW-HybridCloudWorks update-avm-versions (+https://github.com/HybridCloudWorks/HCW-HybridCloudWorks)';
+  'HCW-HybridCloudWorks update-avm-versions (+https://github.com/saulpatinojr/HCW-HybridCloudWorks)';
 
 // --- fetching ---------------------------------------------------------------
 

@@ -5,7 +5,7 @@
 # the failure notifier (LAB-2), so a report that stopped working is not silence.
 [Unit]
 Description=Report held packages that apt could upgrade, to syslog
-Documentation=https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/tree/main/lab-host/ansible/roles/hardening
+Documentation=https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-host/ansible/roles/hardening
 After=apt-daily.service
 OnFailure=hcw-unit-failed@%n.service
 

@@ -5,9 +5,10 @@
  * to touch it.
  *
  * TWO HOSTS, FIXED HERE AND NOWHERE ELSE. `raw.githubusercontent.com` for the
- * file at `HybridCloudWorks/HCW-HybridCloudWorks/main/<path>`, and
- * `api.github.com` under `repos/HybridCloudWorks/HCW-HybridCloudWorks/` for
- * the directory listing and the commit. The repository is public, so no
+ * file at `<REPO_OWNER>/<REPO_NAME>/main/<path>`, and `api.github.com` under
+ * `repos/<REPO_OWNER>/<REPO_NAME>/` for the directory listing and the commit
+ * (both names in ./repo-draft.js; the owner is saulpatinojr since the
+ * repository moved on 2026-10-07). The repository is public, so no
  * token is sent. Every URL is built from constants and a path that passed
  * checkRepoDraftPath (./repo-draft.js), and is checked again by isPinnedUrl
  * immediately before the request, so a caller chooses which allow-listed file

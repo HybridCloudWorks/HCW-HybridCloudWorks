@@ -19,7 +19,7 @@ the changelog.
 
 The board: https://github.com/orgs/HybridCloudWorks/projects/1 — every open
 issue, with a Priority (`P1 now` / `P2 next` / `P3 later` / `Gated`). The
-issues list behind it: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues
+issues list behind it: https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues
 
 | Label | Meaning |
 | --- | --- |
@@ -29,11 +29,11 @@ issues list behind it: https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/
 
 | Item | Issue |
 | --- | --- |
-| Audio pipeline parent: every component shipped and verified 2026-09-09; the three remaining secrets (`ELEVENLABS-API-KEY`, `RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID`) wait on the ElevenLabs and RSS.com Max purchases, owner-gated | [#432](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/432) |
-| The Hybrid Lab host: the Hostinger VPS as the on-premises half of a hybrid estate (Terraform via the Hostinger provider, Ansible, Azure Arc, live status page); seven sub-issues #660–#666, ADR 0032 is #660 | [#656](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/656) |
-| Landing Zone Builder: an interactive page that assembles an Azure landing zone component by component and emits AVM-based Terraform; seven sub-issues #667–#673 | [#657](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/657) |
-| `hcw-lab` image and the Docker agentic sandbox: one digest-pinned toolchain image for the lab pages, Coder and `vps-agent`, plus a sandbox recipe; five sub-issues #674–#678 | [#658](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/658) |
-| Browser labs on Coder: Docker Compose on the lab host, GitHub OAuth as the learner boundary, a status proxy and `/education/labs`; five sub-issues #679–#683 | [#659](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/issues/659) |
+| Audio pipeline parent: every component shipped and verified 2026-09-09; the three remaining secrets (`ELEVENLABS-API-KEY`, `RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID`) wait on the ElevenLabs and RSS.com Max purchases, owner-gated | [#432](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/432) |
+| The Hybrid Lab host: the Hostinger VPS as the on-premises half of a hybrid estate (Terraform via the Hostinger provider, Ansible, Azure Arc, live status page); seven sub-issues #660–#666, ADR 0032 is #660 | [#656](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/656) |
+| Landing Zone Builder: an interactive page that assembles an Azure landing zone component by component and emits AVM-based Terraform; seven sub-issues #667–#673 | [#657](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/657) |
+| `hcw-lab` image and the Docker agentic sandbox: one digest-pinned toolchain image for the lab pages, Coder and `vps-agent`, plus a sandbox recipe; five sub-issues #674–#678 | [#658](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/658) |
+| Browser labs on Coder: Docker Compose on the lab host, GitHub OAuth as the learner boundary, a status proxy and `/education/labs`; five sub-issues #679–#683 | [#659](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/659) |
 
 This table lists parent issues only; their sub-issues are on the board and
 under each parent's "Sub-issues" section. It is refreshed in the pull request

@@ -25,7 +25,13 @@ const json = (status, body) => ({
   body: JSON.stringify(body),
 });
 
-import { AGENT_OFFLINE_SOURCE } from './timers/agent-health.js';
+import { AGENT_DOWN_STATUSES } from './labs.js';
+import {
+  BACK_ONLINE_SENT,
+  OFFLINE_NOTIFY_AFTER_MS,
+  outageMinutes,
+  tellOwnerAgentBack,
+} from './timers/agent-health.js';
 
 /**
  * Statuses a completing agent may report.
@@ -167,6 +173,83 @@ async function claimLabJob(ctx, request, context) {
 }
 
 /**
+ * A shutdown the agent announces itself, and the first normal heartbeat
+ * after one.
+ *
+ * A `systemctl stop` sends SIGTERM and the agent heartbeats `stopping`, then
+ * `offline` (vps-agent/index.js). That heartbeat marks it offline here, at
+ * once, so the online rule (lib/labs.js) closes the public door without
+ * waiting for the 90 s of silence the health timer measures. It does NOT
+ * tell the owner any more: until 2026-10-08 it sent a critical "Lab agent
+ * offline" on the spot, and that morning's 04:30 reboot, back in 43 seconds,
+ * left the owner with a red alert and no word that it was over (#1009). The
+ * health timer now says "offline" once an outage has lasted
+ * OFFLINE_NOTIFY_AFTER_MS, and records that it did on the agent's document
+ * (`offlineNotifiedAt`).
+ *
+ * The first normal heartbeat after such an outage owes the owner its end:
+ * it stamps `backOnlineAt`, sends "Lab agent back online after N min", and
+ * clears both fields once the message has gone. When it does not go (the
+ * notifier's cooldown, Telegram down) the fields stay, and the health timer
+ * sends it on its next run (lib/timers/agent-health.js). Best effort either
+ * way: the heartbeat is recorded whether or not a message goes.
+ *
+ * An agent that drops again while the owner is still owed the end of an
+ * outage keeps that outage's start (`offlineSince`), and the unsent "back
+ * online" is cancelled: to the owner it is one outage.
+ */
+function outageUpdates(agent, updates) {
+  const goingOffline = updates.status === 'offline' && agent.status !== 'offline';
+  const comingBack = agent.status === 'offline' && !AGENT_DOWN_STATUSES.includes(updates.status);
+  const owesBack = comingBack && Boolean(agent.offlineNotifiedAt);
+  const extra = {};
+  if (goingOffline) {
+    if (!(agent.offlineNotifiedAt && agent.offlineSince)) extra.offlineSince = updates.lastSeenAt;
+    if (agent.backOnlineAt) extra.backOnlineAt = null;
+  }
+  if (owesBack) extra.backOnlineAt = updates.lastSeenAt;
+  return { goingOffline, comingBack, owesBack, extra };
+}
+
+/**
+ * The warn lines a transition writes, and the "back online" it may owe.
+ *
+ * Content-free: Warning is the level host.json ingests, so these name the
+ * transition and never the agent's document id. The registry holds one agent
+ * per host, and the owner's message, which is not telemetry, names it.
+ */
+async function reportOutage({ store, notifier }, context, agent, outage, atMs) {
+  const id = agent.agentId;
+  if (outage.goingOffline) {
+    context.warn?.(
+      `heartbeatAgent: an agent reported its own shutdown and is marked offline; the owner is told only if it stays offline ${OFFLINE_NOTIFY_AFTER_MS / 60_000} minutes`
+    );
+  }
+  if (!outage.comingBack) return;
+  const minutes = outageMinutes(agent.offlineSince, atMs);
+  context.warn?.(
+    `heartbeatAgent: an agent is back online${minutes ? ` after ${minutes} min` : ''}${outage.owesBack ? '; the owner was told it was offline' : ''}`
+  );
+  if (!outage.owesBack) return;
+  const sent = await tellOwnerAgentBack({
+    notifier,
+    agent,
+    backAtMs: atMs,
+    log: context,
+    label: 'heartbeatAgent:',
+  });
+  if (!sent) return;
+  try {
+    await store.patchDoc('lab_agents', id, BACK_ONLINE_SENT, { partitionKey: id });
+    context.warn?.('heartbeatAgent: back-online message sent');
+  } catch (err) {
+    // The message went; the next health run would send it again, which is
+    // the lesser fault than claiming here that it did not.
+    context.warn?.(`heartbeatAgent: back-online message sent, but clearing the debt failed: ${err?.message}`);
+  }
+}
+
+/**
  * Record liveness for this agent.
  *
  * Writes `lastSeenAt`. The stub agent wrote `lastPing` while `labs.js:188`
@@ -179,30 +262,6 @@ async function claimLabJob(ctx, request, context) {
  * the registry's authorization inputs, and an endpoint the VPS can reach
  * must not be able to grant the VPS new job types or rebind its identity.
  */
-/**
- * The owner is told on Telegram when an agent announces its own shutdown.
- * A `systemctl stop` sends SIGTERM and the agent heartbeats `stopping` then
- * `offline` itself (vps-agent/index.js), so the five-minute health timer
- * never sees a stale agent to mark and its notification never fires — the
- * owner's first test of LAB-2 on 2026-10-06 produced no message for exactly
- * this reason. Same source as the timer, so the cooldown makes a stop
- * followed by the timer's own mark one message, not two. Best effort: the
- * heartbeat is recorded whether or not the message goes.
- */
-async function tellOwnerAgentStopped(notifier, agent, at, context) {
-  if (!notifier?.notifyTelegram) return;
-  try {
-    await notifier.notifyTelegram({
-      title: 'Lab agent offline (1)',
-      message: `${agent.agentId} (${agent.hostname || 'host unknown'}) reported its own shutdown at ${at}. Public lab submission fails closed until it is back.`,
-      severity: 'critical',
-      source: AGENT_OFFLINE_SOURCE,
-    });
-  } catch (error) {
-    context.warn?.(`heartbeatAgent: owner notification failed: ${error?.message || error}`);
-  }
-}
-
 async function heartbeatAgent({ guard, store, now, notifier }, request, context) {
   const parsed = await authenticatedAgentBody(guard, request);
   if (parsed.error) return parsed.error;
@@ -219,23 +278,27 @@ async function heartbeatAgent({ guard, store, now, notifier }, request, context)
   // would wipe the stored hostname and version on every heartbeat — and
   // would route each one through the read-modify-write path, turning a
   // 30-second poll into two round trips instead of one.
-  // `offline` is terminal and wins over the job-derived `busy`: the agent
-  // sends `offline` with activeJobs > 0 when its shutdown deadline expires
-  // with work still running, and that is exactly the moment to say so.
+  // Both shutdown statuses win over the job-derived `busy`. The agent sends
+  // `stopping` while it drains its jobs and `offline` with activeJobs > 0
+  // when its shutdown deadline expires with work still running; rewriting
+  // either to `busy` read a departing agent as online and let the public
+  // door queue work its poller will never claim (review of #1018).
   let effective = status;
-  if (status !== 'offline' && activeJobs > 0) effective = 'busy';
+  if (!AGENT_DOWN_STATUSES.includes(status) && activeJobs > 0) effective = 'busy';
+  const at = now();
   const updates = {
     status: effective,
     activeJobs,
-    lastSeenAt: now().toISOString(),
+    lastSeenAt: at.toISOString(),
   };
   if (typeof body.hostname === 'string') updates.hostname = body.hostname.slice(0, 255);
   if (typeof body.version === 'string') updates.version = body.version.slice(0, 64);
 
-  // The transition the health timer would otherwise have recorded: the
-  // record said the agent was up, and this heartbeat says it has gone.
-  const goingOffline = updates.status === 'offline' && agent.status !== 'offline';
-  if (goingOffline) updates.offlineSince = updates.lastSeenAt;
+  // The transitions the health timer would otherwise have to find: the
+  // record said the agent was up and this heartbeat says it has gone, or
+  // the record said offline and this one is normal.
+  const outage = outageUpdates(agent, updates);
+  Object.assign(updates, outage.extra);
 
   try {
     await store.patchDoc('lab_agents', agent.agentId, updates, {
@@ -246,14 +309,13 @@ async function heartbeatAgent({ guard, store, now, notifier }, request, context)
     return json(500, { ok: false, error: 'Failed to record heartbeat' });
   }
 
-  if (goingOffline) {
-    await tellOwnerAgentStopped(
-      notifier,
-      { ...agent, hostname: updates.hostname ?? agent.hostname },
-      updates.lastSeenAt,
-      context
-    );
-  }
+  await reportOutage(
+    { store, notifier },
+    context,
+    { ...agent, hostname: updates.hostname ?? agent.hostname },
+    outage,
+    at.getTime()
+  );
 
   return json(200, { ok: true });
 }
