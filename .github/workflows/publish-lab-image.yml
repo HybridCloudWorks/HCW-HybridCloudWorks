@@ -481,13 +481,14 @@ jobs:
   # The Docker side trusts one subject, this repository's `main` in GitHub's
   # immutable-identifier form:
   #   repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
-  # The owner half changed on 2026-10-07, when the repository moved from the
-  # HybridCloudWorks organisation (312844660) to the personal account; the
-  # connection's rule in Docker Home has to be edited to match by hand.
   # which is what `publish` already runs on (push to main, or a dispatch from
   # main). The job declares no environment on purpose: an environment subject
   # carries no ref, so it would match a dispatch from any branch unless a
   # deployment-branch rule outside this file held (Required-Inputs §4.4).
+  #
+  # The owner half changed on 2026-10-07, when the repository moved from the
+  # HybridCloudWorks organisation (312844660) to the personal account; the
+  # connection's rule in Docker Home has to be edited to match by hand.
   #
   # `id-token: write` is for the Docker token exchange and for Sigstore;
   # `attestations: write` stores the provenance. Nothing here writes to GHCR,

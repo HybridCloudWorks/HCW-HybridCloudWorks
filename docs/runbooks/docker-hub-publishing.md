@@ -2,7 +2,7 @@
 
 > **Status: live since 2026-09-29 (#779, closed).** The owner created the
 > OIDC connection and set both repository variables, and run
-> [36516945081](https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/runs/36516945081)
+> [36516945081](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/runs/36516945081)
 > published both images:
 > - `hybridcloudworks/hcw-lab` and `hybridcloudworks/hcw-lab-runner` on
 >   Docker Hub carry the same digests as GHCR;
@@ -146,10 +146,10 @@ from the page replaces whatever the clipboard held. It refuses anything that
 is not a UUID and sets `DOCKERHUB_CONNECTION`:
 
 ```powershell
-$id = (Read-Host 'Docker OIDC connection ID').Trim(); if ($id -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { gh variable set DOCKERHUB_CONNECTION --repo HybridCloudWorks/HCW-HybridCloudWorks --body $id } else { "That is not a connection ID (a UUID). It was: $id" }
+$id = (Read-Host 'Docker OIDC connection ID').Trim(); if ($id -match '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$') { gh variable set DOCKERHUB_CONNECTION --repo saulpatinojr/HCW-HybridCloudWorks --body $id } else { "That is not a connection ID (a UUID). It was: $id" }
 ```
 
-Success prints `✓ Created variable DOCKERHUB_CONNECTION for HybridCloudWorks/HCW-HybridCloudWorks`
+Success prints `✓ Created variable DOCKERHUB_CONNECTION for saulpatinojr/HCW-HybridCloudWorks`
 (`Updated` if it existed). A variable, not a secret, because it is an
 identifier: GitHub shows it in logs, which is what makes a wrong one
 diagnosable.
@@ -157,14 +157,14 @@ diagnosable.
 ## 3. Turn the job on
 
 ```powershell
-gh variable set DOCKERHUB_ENABLED --repo HybridCloudWorks/HCW-HybridCloudWorks --body true
+gh variable set DOCKERHUB_ENABLED --repo saulpatinojr/HCW-HybridCloudWorks --body true
 ```
 
 Set the ID first and this second, so no run ever sees the switch on without
 an ID. To read both back:
 
 ```powershell
-gh variable get DOCKERHUB_CONNECTION --repo HybridCloudWorks/HCW-HybridCloudWorks; gh variable get DOCKERHUB_ENABLED --repo HybridCloudWorks/HCW-HybridCloudWorks
+gh variable get DOCKERHUB_CONNECTION --repo saulpatinojr/HCW-HybridCloudWorks; gh variable get DOCKERHUB_ENABLED --repo saulpatinojr/HCW-HybridCloudWorks
 ```
 
 It prints the UUID, then `true`.
@@ -252,7 +252,10 @@ keeps its ID and its resources. Only the rule needs changing.
    in step 1. It must match exactly: there is no wildcard, and the old rule
    should not stay beside the new one, because nothing can present it any
    more.
-3. Save. Nothing in step 2 or 3 changes.
+3. Save. The repository variables from steps 2 and 3 travel with the
+   repository and keep their values (`DOCKERHUB_CONNECTION` and
+   `DOCKERHUB_ENABLED` were both present after the 2026-10-07 move). Their
+   commands above name the current owner.
 4. Publish (step 4) and check "What success looks like".
 
 `EXPECTED_RULE` in `publish-lab-image.yml` holds the same string, and
@@ -270,7 +273,7 @@ Done once already: on 2026-10-07 the repository moved from the
 Either of these stops Docker Hub publishing without touching GHCR:
 
 ```powershell
-gh variable set DOCKERHUB_ENABLED --repo HybridCloudWorks/HCW-HybridCloudWorks --body false
+gh variable set DOCKERHUB_ENABLED --repo saulpatinojr/HCW-HybridCloudWorks --body false
 ```
 
 In Docker Home, **Deactivate** on the connection's row pauses it too, but
@@ -302,7 +305,7 @@ $r = docker buildx imagetools inspect ghcr.io/hybridcloudworks/hcw-lab-runner:la
 ```
 
 Success prints `pushing sha256:… to docker.io/hybridcloudworks/hcw-lab:latest`
-for each. `gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks`
+for each. `gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks`
 (without `--bundle-from-oci`) then succeeds, because GitHub's attestation
 API looks the image up by digest and finds the GHCR attestation. No
 attestation is stored on Docker Hub itself until the workflow publishes

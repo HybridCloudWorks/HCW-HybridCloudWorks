@@ -3957,12 +3957,17 @@ This project has not cut a tagged release; entries are grouped under
   them. `publish-lab-image.yml`'s `EXPECTED_RULE`, the Docker Hub runbook's
   rule and its commands move with it. The runbook gains "After a repository
   transfer", because the connection's rule in Docker Home is edited by hand.
-  `scripts/oidc-subjects.test.mjs` gains a check comparing the owner, owner
-  ID and repository ID in `infra/oidc.tf`, and the Docker rule, with the
+  New `scripts/check-oidc-owner.mjs` compares the owner, owner ID and
+  repository ID in `infra/oidc.tf`, and the Docker rule, with the
   `GITHUB_REPOSITORY`, `GITHUB_REPOSITORY_OWNER_ID` and
   `GITHUB_REPOSITORY_ID` of the run itself. The existing cross-reference
   could not catch this, because every file moved out of date together.
-  A future transfer fails a pull request rather than the first deploy.
+  It has no dependencies, and the scripts row in `ci.yml` runs it on every
+  pull request, outside the path filter. A transfer changes no file, so the
+  pull request that has to catch one may be docs-only. The test suite
+  imports the same functions and asserts that the step stays outside the
+  filter. A future transfer fails a pull request rather than the first
+  deploy.
 - **`bootstrap-terraform-oidc.ps1` takes the three deployment targets from
   the naming convention and asks nothing.** On 2026-10-07 the picker listed
   all forty-six subscriptions the owner's sign-in could see, forty-three of
