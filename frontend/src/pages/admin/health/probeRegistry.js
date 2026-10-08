@@ -4,13 +4,19 @@
  * knowing which page happens to carry a test (ADR 0033 §1 Platform, §8).
  *
  * Every entry is `{ id, label, hub, covers, impact, action, href, kind, safe }`
- * plus the function that answers it, and every answer is one shape:
+ * plus the function that answers it (and, optionally, `freshForMs`: how long
+ * its result stays evidence, when that is shorter than its kind's window),
+ * and every answer is one shape:
  *
- *   { status, summary, detail?, checkedAt }
+ *   { status, summary, detail?, checkedAt, checkedBy? }
  *
  * where `status` is lib/status.js's vocabulary — healthy / degraded /
- * misconfigured / unavailable / unknown — so a probe here reads like a card
- * on the Integrations page and a row on the Overview tab.
+ * critical / offline / unknown — so a probe here reads like a card on the
+ * Integrations page and a row on the Overview tab.
+ *
+ * Every id here has an entry in the server's closed catalogue
+ * (functions/src/lib/health/probe-catalogue.js), which decides who may record
+ * its result; statusParity.test.js fails when the two lists drift.
  *
  * Three kinds, by where the answer comes from:
  *
@@ -39,9 +45,18 @@
  * one address.
  */
 
-import { SYSTEM_STATUS } from '@/lib/status';
+import {
+  PULSE_INTERVAL_MS,
+  applyFreshness,
+  describeAge,
+  describeWindow,
+  freshnessWindow,
+  pulseStatus,
+  toSystemStatus,
+} from '@/lib/status';
 import { SERVICES } from '@/components/admin/integrations/serviceRegistry';
 import { HUBS, result } from './probeKit';
+import { newestResult } from './probeStore';
 import { PIPELINE_PROBES } from './probeGroups/pipeline';
 import { CREATIVE_PROBES } from './probeGroups/creative';
 import { AMPLIFY_PROBES } from './probeGroups/amplify';
@@ -74,27 +89,58 @@ export function probesByHub(probes = PROBES) {
 }
 
 /**
- * The result to show for one probe: a stored live result, or the evaluation
- * of the page's state for snapshot and session kinds. Never null — a probe
- * with nothing to say says unknown.
+ * The result to show for one probe (#1011). Two candidates:
+ *
+ *   - this page's own: a live result this tab ran, or the evaluation of the
+ *     page's state for snapshot and session kinds;
+ *   - the stored one: the last result anyone recorded — this browser
+ *     earlier, another session, or the server's pulse.
+ *
+ * The newer by `checkedAt` wins; one that has not run (no time) never hides
+ * one that has. The winner is then judged against its freshness window at
+ * `now` (lib/status.js): past it, it is unknown and `stale`, keeping its last
+ * value and time. Never null — a probe with nothing to say says unknown.
  */
-export function resolveProbe(probe, ctx, liveResults = {}) {
+export function resolveProbe(probe, ctx, liveResults = {}, stored = {}, now = Date.now()) {
   const notYet = (summary) => result('unknown', summary, { checkedAt: null });
-  if (probe.kind === 'live') return liveResults[probe.id] ?? notYet('Not tested yet.');
-  return probe.evaluate(ctx) ?? notYet('Not evaluated.');
+  const local = probe.kind === 'live' ? (liveResults[probe.id] ?? null) : probe.evaluate(ctx);
+  const chosen =
+    newestResult(local, stored?.[probe.id]) ??
+    notYet(probe.kind === 'live' ? 'Not tested yet.' : 'Not evaluated.');
+  return applyFreshness(chosen, freshnessWindow(probe, chosen), now);
+}
+
+/** Who a result came from, as a reader says it. */
+export const checkedByLabel = (r) => {
+  if (r?.checkedBy === 'pulse') return 'the pulse';
+  if (r?.stored) return 'an admin';
+  return 'this session';
+};
+
+/** One status word for a resolved result, saying when a stale result last held. */
+function statusWords(r) {
+  const { label } = toSystemStatus(r.status);
+  if (!r.stale) return label;
+  return `${label} (stale: last ${toSystemStatus(r.lastStatus).label}, older than its ${describeWindow(r.windowMs)} window)`;
+}
+
+/** The pulse as a report line. */
+export function pulseReportLine(pulse, now = Date.now()) {
+  const status = toSystemStatus(pulseStatus(pulse, now)).label;
+  if (!pulse) return `- Pulse: ${status} — it has never reported.`;
+  const every = describeWindow(pulse.intervalMs ?? PULSE_INTERVAL_MS);
+  return `- Pulse: ${status} — every ${every}, last beat ${pulse.lastBeatAt} (${describeAge(pulse.lastBeatAt, now)}).`;
 }
 
 /** The Markdown lines the Report tab adds for the registry. */
-export function probeReportLines(probes, resolve) {
-  const lines = ['### Probe registry', ''];
+export function probeReportLines(probes, resolve, { pulse, now = Date.now() } = {}) {
+  const lines = ['### Probe registry', '', pulseReportLine(pulse, now), ''];
   for (const group of probesByHub(probes)) {
     lines.push(`#### ${group.label}`);
     for (const probe of group.probes) {
       const r = resolve(probe);
-      const label = SYSTEM_STATUS[r.status]?.label ?? 'Unknown';
-      lines.push(
-        `- ${probe.label}: ${label}${r.checkedAt ? ` (${r.checkedAt})` : ''} — ${r.summary}`
-      );
+      const when = r.checkedAt ? ` (${r.checkedAt}, by ${checkedByLabel(r)})` : '';
+      lines.push(`- ${probe.label}: ${statusWords(r)}${when} — ${r.summary}`);
     }
     lines.push('');
   }

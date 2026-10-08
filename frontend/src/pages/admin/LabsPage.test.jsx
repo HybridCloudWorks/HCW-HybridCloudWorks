@@ -227,7 +227,7 @@ describe('the Concepts panel on the Dashboard (ADR 0033)', () => {
     );
   });
 
-  it('reads the Agent as degraded for a stale fleet and unavailable for none', async () => {
+  it('reads the Agent as degraded for a stale fleet and offline for none', async () => {
     postJSON.mockResolvedValue(
       snapshot({ agents: [{ id: 'vps-1', agentId: 'vps-1', lastSeenAt: LONG_AGO }] })
     );
@@ -248,7 +248,7 @@ describe('the Concepts panel on the Dashboard (ADR 0033)', () => {
     await waitFor(() =>
       expect(none.closest('[data-concept]').querySelector('[data-status]')).toHaveAttribute(
         'data-status',
-        'unavailable'
+        'offline'
       )
     );
     expect(screen.getByText('No agent has ever connected')).toBeInTheDocument();

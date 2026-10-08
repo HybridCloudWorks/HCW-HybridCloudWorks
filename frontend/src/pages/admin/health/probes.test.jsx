@@ -241,7 +241,7 @@ describe('evaluateLabsProbe', () => {
       'lab_jobs/job-1 final status: unknown — the closing read returned no status'
     );
     expect(report).toContain(
-      'Authenticated no-op path: Unavailable (final lab_jobs/job-1 state unknown'
+      'Authenticated no-op path: Critical (final lab_jobs/job-1 state unknown'
     );
     expect(report).not.toContain('still "queued"');
     expect(report).not.toContain('final status: null');
@@ -267,7 +267,7 @@ describe('evaluateLabsProbe', () => {
     expect(report).toContain(
       'lab_jobs/job-1 final status: read failed (getLabJob timed out after 20s) — state unknown'
     );
-    expect(report).toContain('Authenticated no-op path: Unavailable (final getLabJob read failed');
+    expect(report).toContain('Authenticated no-op path: Critical (final getLabJob read failed');
     expect(report).not.toContain('still "queued"');
   });
 });
@@ -372,11 +372,11 @@ describe('buildReport', () => {
       '- Result: Unknown (could not compare: aud matches the API audience; admin App Role present in roles; delegated scope present in scp; token version matches)'
     );
     expect(report).not.toContain('- Result: Healthy');
-    expect(report).not.toContain('- Result: Unavailable');
+    expect(report).not.toContain('- Result: Critical');
     expect(report).toContain('- getAuthExpectations: Authentication required');
     expectNoSecrets(report);
 
-    // A real failure still outranks an unknown: Unavailable names what failed.
+    // A real failure still outranks an unknown: Critical names what failed.
     const mixed = evaluateIdentity(
       summarizeToken(CLAIMS, null),
       summarizeAdminStatus({ ...ADMIN_STATUS, isAdmin: false }, OID)
@@ -404,7 +404,7 @@ describe('buildReport', () => {
       adminHttp: 200,
     });
     expect(report).toContain('isAdmin false');
-    expect(report).toContain('- Result: Unavailable');
+    expect(report).toContain('- Result: Critical');
     expect(report).toContain(
       'Authenticated no-op path: Unknown (NOT RUN — press "Run authenticated probe")'
     );

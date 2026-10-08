@@ -285,6 +285,8 @@ export function decorateEntries(entries, { serviceCards, results, secretsKnown }
 /** Whether a status key from integrationView.js reads as connected, not, or unknown. */
 export function connectionOf(statusKey) {
   if (statusKey === 'ok' || statusKey === 'link-only') return 'connected';
-  if (statusKey === 'broken' || statusKey === 'not-configured') return 'not-connected';
+  if (statusKey === 'broken' || statusKey === 'offline' || statusKey === 'not-configured') {
+    return 'not-connected';
+  }
   return 'unknown';
 }

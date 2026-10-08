@@ -99,8 +99,8 @@ describe('the grid', () => {
     await waitFor(() => expect(tileNames()[0]).toBe('telegram'));
     expect(tileNames()[1]).toBe('resend');
     // The shared vocabulary (ADR 0033 §2), not this page's own words.
-    expect(within(tile('telegram')).getByText('Unavailable')).toBeTruthy();
-    expect(within(tile('resend')).getByText('Misconfigured')).toBeTruthy();
+    expect(within(tile('telegram')).getByText('Critical')).toBeTruthy();
+    expect(within(tile('resend')).getByText('Critical')).toBeTruthy();
   });
 
   it('reads the recorded last verdicts and sorts a service that last failed first (ADR 0033)', async () => {
@@ -122,7 +122,7 @@ describe('the grid', () => {
     });
     render(<Harness />);
     await waitFor(() => expect(tileNames()[0]).toBe('linkie'));
-    expect(within(tile('linkie')).getByText('Unavailable')).toBeTruthy();
+    expect(within(tile('linkie')).getByText('Critical')).toBeTruthy();
     expect(within(tile('linkie')).getByText(/Unauthorized/)).toBeTruthy();
     expect(within(tile('linkie')).getByText(/last tested/)).toBeTruthy();
     expect(within(tile('publer')).getByText('Healthy')).toBeTruthy();
@@ -231,7 +231,7 @@ describe('Test all', () => {
     fireEvent.click(screen.getByRole('button', { name: /Test all/ }));
 
     await waitFor(() => expect(within(tile('sessionize')).getByText('Healthy')).toBeTruthy());
-    expect(within(tile('telegram')).getByText('Unavailable')).toBeTruthy();
+    expect(within(tile('telegram')).getByText('Critical')).toBeTruthy();
     expect(within(tile('telegram')).getByText(/Unauthorized/)).toBeTruthy();
     expect(tileNames()[0]).toBe('telegram');
   });

@@ -68,12 +68,12 @@ const HELP = [
 /** The speech provider that would run today, as the header's status line. */
 function speechStatus(catalog) {
   if (!catalog) return <StatusBadge system="unknown" size="xs" />;
-  if (catalog.error) return <StatusBadge system="unavailable" size="xs" />;
+  if (catalog.error) return <StatusBadge system="offline" size="xs" />;
   const { speech } = catalog;
   if (speech?.pinError) {
     return (
       <>
-        <StatusBadge system="misconfigured" size="xs" />
+        <StatusBadge system="critical" size="xs" />
         <span className="text-muted-foreground">{speech.pinError}</span>
       </>
     );
@@ -81,7 +81,7 @@ function speechStatus(catalog) {
   if (!speech?.wouldRun) {
     return (
       <>
-        <StatusBadge system="misconfigured" size="xs" />
+        <StatusBadge system="critical" size="xs" />
         <span className="text-muted-foreground">
           No speech provider configured — runs save transcripts only
         </span>

@@ -64,7 +64,7 @@ const PANELS = {
  */
 const HEADER_STATE = Object.freeze({
   [CONNECTION.connected]: { system: 'healthy', text: 'Plaud connected' },
-  [CONNECTION.disconnected]: { system: 'misconfigured', text: 'Plaud disconnected' },
+  [CONNECTION.disconnected]: { system: 'critical', text: 'Plaud disconnected' },
   [CONNECTION.checking]: { system: 'unknown', text: 'Checking Plaud…' },
   [CONNECTION.unknown]: { system: 'unknown', text: 'Plaud status unknown' },
 });

@@ -15,16 +15,28 @@ import { collectIdentity, messageOf, probeUnauthenticated, runLabsProbeSteps } f
 const THREW = 'the probe threw before it could record a result';
 
 /**
+ * When a check finished and how long it took, stamped on its result so the
+ * probe registry can say "checked 3 min ago" and the stored copy can say the
+ * same after a reload (#1011).
+ */
+const finished = (outcome, startedAt) => ({
+  ...outcome,
+  checkedAt: new Date().toISOString(),
+  durationMs: Date.now() - startedAt,
+});
+
+/**
  * Run `probe`, store its result, and turn a throw from outside its own steps
  * into a failed result built by `failed`, so a probe never leaves a stuck
  * spinner with every button disabled.
  */
 async function runProbe(probe, setResult, setBusy, failed) {
   setBusy(true);
+  const startedAt = Date.now();
   try {
-    setResult(await probe());
+    setResult(finished(await probe(), startedAt));
   } catch (err) {
-    setResult(failed(messageOf(err, THREW)));
+    setResult(finished(failed(messageOf(err, THREW)), startedAt));
   } finally {
     setBusy(false);
   }
@@ -52,9 +64,10 @@ export default function useHealthChecks(authReady) {
     identityInFlight.current = true;
     identitySeq.current += 1;
     const seq = identitySeq.current;
+    const startedAt = Date.now();
     try {
       const result = await collectIdentity();
-      if (seq === identitySeq.current) setIdentity(result);
+      if (seq === identitySeq.current) setIdentity(finished(result, startedAt));
     } finally {
       if (seq === identitySeq.current) identityInFlight.current = false;
     }

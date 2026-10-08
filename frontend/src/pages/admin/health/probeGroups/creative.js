@@ -1,7 +1,7 @@
 /** The Creative hub's probes (ADR 0033 §1 Platform, §8): the models, image generation, the forge. */
 import { AI_ENGINE, FORGE, GALLERY, fromService, liveProbe, snapshotProbe } from '../probeKit';
 import { evaluateForge, evaluateOrphanedImages } from '../probeEvaluators';
-import { runAiProviders } from '../probeRunners';
+import { runAiProviders, runMcpServers } from '../probeRunners';
 
 export const CREATIVE_PROBES = [
   liveProbe({
@@ -14,6 +14,16 @@ export const CREATIVE_PROBES = [
     action: 'Reorder or disable a provider on AI Engine; rotate a rejected key on Keys.',
     href: AI_ENGINE,
     run: runAiProviders,
+  }),
+  liveProbe({
+    id: 'mcp-servers',
+    label: 'MCP servers',
+    hub: 'creative',
+    covers: 'Every MCP server switched on in the AI Engine, by its last tool sync.',
+    impact: 'Tools called through MCP fail, and the Recording Hub loses Plaud.',
+    action: 'Sync the server’s tools on AI Engine; reconnect its sign-in if it was refused.',
+    href: AI_ENGINE,
+    run: runMcpServers,
   }),
   fromService('replicate', {
     hub: 'creative',

@@ -59,7 +59,7 @@ function connectionStatus(connected) {
   if (connected === 'unknown') return { system: 'unknown', text: 'Linkie status unknown' };
   return connected
     ? { system: 'healthy', text: 'Linkie connected' }
-    : { system: 'unavailable', text: 'Linkie disconnected' };
+    : { system: 'offline', text: 'Linkie disconnected' };
 }
 
 /** The profile picker, shown only when the key owns more than one. */

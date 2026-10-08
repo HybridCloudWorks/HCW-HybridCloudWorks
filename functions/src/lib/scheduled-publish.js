@@ -35,7 +35,28 @@
  *     like version-history spam accumulating every fifteen minutes.
  */
 
+import { digestDateOf, mergeDigest } from './timers/workflow-records.js';
+
 const DEFAULT_BATCH = 25;
+
+/**
+ * The run's one word, as `workflow_digests/{date}.publishingOps.status`
+ * records it: `success` when nothing failed (a skip is a lost race the next
+ * tick retries, not a failure), `degraded` when some failed and some
+ * published, `failed` when everything due failed.
+ *
+ * That block had three readers and no writer (#1010): the ops snapshot's
+ * `lastSchedulerSuccessAt`, the Telegram bot's /digest, and the Health Hub's
+ * Scheduled publishing probe all read `digest.publishingOps`, which nothing in
+ * this port wrote, so the hub could only ever say "idle". The publisher now
+ * records every run there, nothing due included, which also makes
+ * `lastRunAt` the scheduler's heartbeat: the hub calls the scheduler offline
+ * after three missed fifteen-minute runs.
+ */
+export function publishingStatus(summary) {
+  if (!summary.failed) return 'success';
+  return summary.published > 0 ? 'degraded' : 'failed';
+}
 
 /** One rolling alert document, so repeated failures do not flood the list. */
 export const PUBLISH_ALERT_ID = 'scheduled_publish_failures';
@@ -104,7 +125,9 @@ export function buildPublishFailureAlert({ existing, failures, nowIso }) {
 
 /**
  * @param {object} deps
- * @param {{queryDocs: Function, patchDoc: Function, readDoc: Function, upsertDoc: Function}} deps.store
+ * @param {{queryDocs: Function, patchDoc: Function, readDoc: Function, upsertDoc: Function,
+ *   createDoc: Function, replaceDocIfMatch: Function}} deps.store the last two for the
+ *   digest's run record (timers/workflow-records.js mergeDigest)
  * @param {{processPublishContent: Function}} deps.publish
  * @param {() => Date} [deps.now]
  * @param {number} [deps.batchSize]
@@ -118,7 +141,45 @@ export function createScheduledPublisher({ store, publish, now = () => new Date(
      * @param {{log: Function, error: Function}} context
      */
     async runScheduledPublish(context) {
-      const nowIso = now().toISOString();
+      const at = now();
+      let summary;
+      try {
+        summary = await this.publishDue(at.toISOString(), context);
+      } catch (error) {
+        // The run itself broke (the due query, most likely). Say so where the
+        // hub looks, then let the host record the failure as before.
+        await this.recordRun(at, { due: 0, published: 0, skipped: 0, failed: 0 }, context, error);
+        throw error;
+      }
+      await this.recordRun(at, summary, context);
+      return summary;
+    },
+
+    /**
+     * The run's outcome on the day's digest, as `publishingOps`. Best-effort:
+     * losing the record must not fail a run whose publishes happened.
+     */
+    async recordRun(at, summary, context, error = null) {
+      try {
+        await mergeDigest(store, digestDateOf(at), {
+          publishingOps: {
+            lastRunAt: at.toISOString(),
+            due: summary.due,
+            published: summary.published,
+            skipped: summary.skipped,
+            failed: summary.failed,
+            hasMore: Boolean(summary.hasMore),
+            status: error ? 'failed' : publishingStatus(summary),
+            ...(error ? { error: String(error?.message || error).slice(0, 300) } : {}),
+          },
+        });
+      } catch (recordError) {
+        context.error('[publishScheduledContent] could not record the run on the digest:', recordError);
+      }
+    },
+
+    /** Publish what is due now; the summary of what happened. */
+    async publishDue(nowIso, context) {
       const due = await store.queryDocs('content', buildDueQuery(batchSize), [
         { name: '@now', value: nowIso },
       ]);

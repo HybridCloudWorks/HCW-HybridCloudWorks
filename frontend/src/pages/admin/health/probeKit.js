@@ -5,7 +5,7 @@
  * is a list of facts and nothing else.
  */
 import { getSessionizeSpeakerId } from '@/lib/adminSettings';
-import { toSystemStatus } from '@/lib/status';
+import { classifyFailure, describeAge, toSystemStatus } from '@/lib/status';
 import { serviceById } from '@/components/admin/integrations/serviceRegistry';
 
 export const HUBS = Object.freeze({
@@ -47,34 +47,39 @@ export const result = (status, summary, extra = {}) => ({
   ...extra,
 });
 
-/** A refusal that names a missing setting is misconfigured; anything else is unavailable. */
-export function classifyFailure(message) {
-  return /not configured|is not set|not provisioned|no .* configured/i.test(String(message ?? ''))
-    ? 'misconfigured'
-    : 'unavailable';
-}
+/**
+ * A check that has not run, said as unknown with NO time: it is not evidence,
+ * so a stored result from an earlier check is shown in its place
+ * (probeRegistry.js resolveProbe), rather than "not run" hiding it.
+ */
+export const notRun = (summary) => result('unknown', summary, { checkedAt: null });
 
-export const ago = (iso, now = Date.now()) => {
-  const then = Date.parse(iso ?? '');
-  if (!Number.isFinite(then)) return null;
-  const minutes = Math.round((now - then) / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 48) return `${hours} h ago`;
-  return `${Math.floor(hours / 24)} d ago`;
-};
+/**
+ * Critical or offline for a failed check: the transition rule in
+ * lib/status.js, re-exported so the probe modules keep one import.
+ */
+export { classifyFailure };
+
+/** "12 min ago" — lib/status.js describeAge, under the name the probes use. */
+export const ago = describeAge;
 
 export const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 /** The message an error carries, or the error itself when it has none. */
 export const messageOf = (error) => error?.message || error;
 
-/** The result while the ops-health snapshot is missing: a failed read, or still loading. */
+/**
+ * The result while the ops-health snapshot is missing: a failed read is the
+ * failure's own verdict (offline when nothing answered, critical when the
+ * route refused), and a read still under way is not evidence yet.
+ */
 export const snapshotMissing = (ctx) =>
   ctx?.ops?.error
-    ? result('unavailable', `The ops-health snapshot could not be read: ${ctx.ops.error}`)
-    : result('unknown', 'Waiting for the ops-health snapshot.');
+    ? result(
+        classifyFailure(ctx.ops.error),
+        `The ops-health snapshot could not be read: ${ctx.ops.error}`
+      )
+    : notRun('Waiting for the ops-health snapshot.');
 
 // ── Builders ─────────────────────────────────────────────────────────────────
 
@@ -103,7 +108,9 @@ export function fromService(id, { hub, covers, impact, action, safe = true, cost
         return result('healthy', await service.test(arg));
       } catch (error) {
         const message = error?.message || `${service.name} did not answer.`;
-        return result(classifyFailure(message), message);
+        // The error itself, not just its sentence: the API client keeps the
+        // HTTP status on it, and a 503 is offline whatever the words say.
+        return result(classifyFailure(error?.message ? error : message), message);
       }
     },
   };

@@ -266,6 +266,23 @@ timer('checkAgentHealth', 'CHECK_AGENT_HEALTH', '0 */5 * * * *', (context) =>
   }).run()
 );
 
+// The Health Hub's pulse (#1010): every check the backend can make on its
+// own, recorded with checkedBy 'pulse', then its own heartbeat, so the hub can
+// say when it last looked and turn Offline when it stops looking. Two minutes
+// past each five-minute mark: after checkAgentHealth has marked stale agents,
+// and never in the same second as the publisher or the watchdog. Reads and
+// small writes only; it calls no third party (lib/health/pulse.js).
+timer('healthPulse', 'HEALTH_PULSE', '0 2-59/5 * * * *', async (context) => {
+  const [{ createHealthPulse }, { createOpsHealthHandlers }] = await Promise.all([
+    import('../lib/health/pulse.js'),
+    import('../lib/ops-health.js'),
+  ]);
+  // buildSnapshot is the unguarded builder the Telegram bot already uses: the
+  // pulse is not a user, so it has no token for the HTTP face's role check.
+  const { buildSnapshot } = createOpsHealthHandlers({ guard: null, store });
+  return createHealthPulse({ store, buildSnapshot, log: context }).run();
+});
+
 // ── AI ───────────────────────────────────────────────────────────────────────
 
 // The owner's reminders sheet (Platform Settings → Reminders), said on

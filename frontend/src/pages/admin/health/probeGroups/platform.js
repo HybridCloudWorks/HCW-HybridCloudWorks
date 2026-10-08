@@ -18,12 +18,18 @@ import {
 } from '../probeEvaluators';
 import { runBlob, runUnresolvedSecrets } from '../probeRunners';
 
-/** A probe of this session's identity; its Test re-runs the page's identity check. */
+/**
+ * A probe of this session's identity; its Test re-runs the page's identity
+ * check. Its result is evidence for as long as the token it read: about
+ * ninety minutes, the life of an Entra access token, not the day other
+ * session checks keep (lib/status.js FRESHNESS_MS).
+ */
 const identityProbe = (entry) =>
   sessionProbe({
     hub: 'platform',
     href: IDENTITY,
     safe: true,
+    freshForMs: 90 * 60 * 1000,
     run: (ctx) => ctx.actions.rerunIdentity(),
     ...entry,
   });

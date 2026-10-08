@@ -51,6 +51,19 @@ function memStore(containers = {}, match = () => []) {
       get(c).set(doc.id, doc);
       return doc;
     }),
+    // mergeDigest's write-if-unchanged pair (workflow-records.js).
+    createDoc: vi.fn(async (c, doc) => {
+      if (get(c).has(doc.id)) throw Object.assign(new Error('exists'), { code: 409 });
+      get(c).set(doc.id, doc);
+      return doc;
+    }),
+    replaceDocIfMatch: vi.fn(async (c, doc) => {
+      if (get(c).get(doc.id)?._etag !== doc._etag) {
+        throw Object.assign(new Error('changed'), { code: 412 });
+      }
+      get(c).set(doc.id, doc);
+      return doc;
+    }),
     patchDoc: vi.fn(async (c, id, u) => {
       const next = { ...(get(c).get(id) || { id }), ...u };
       get(c).set(id, next);
@@ -98,6 +111,49 @@ describe('workflow records', () => {
     });
     expect(toMillis('2026-08-21T12:00:00.000Z')).toBe(NOW.getTime());
     expect(toMillis('nope')).toBe(0);
+  });
+
+  it('keeps both timers’ blocks when two merge the same digest in the same second', async () => {
+    // The watchdog and the scheduled publisher both fire at 00, 06, 12 and
+    // 18:00 UTC. A plain read-then-upsert let the second writer erase the
+    // first one's block; the guarded write makes the loser read again.
+    const store = memStore({
+      workflow_digests: [{ id: '2026-08-21', digestDate: '2026-08-21', _etag: 'e1' }],
+    });
+    const realRead = store.readDoc.getMockImplementation();
+    let raced = false;
+    store.readDoc.mockImplementation(async (c, id) => {
+      const doc = await realRead(c, id);
+      if (!raced) {
+        // Another timer lands its block between this read and this write.
+        raced = true;
+        store.data.workflow_digests.set(id, {
+          ...doc,
+          publishingWatchdog: { overdueScheduledCount: 0 },
+          _etag: 'e2',
+        });
+      }
+      return doc;
+    });
+    await mergeDigest(store, '2026-08-21', { publishingOps: { status: 'success' } });
+    expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(2);
+    expect(store.data.workflow_digests.get('2026-08-21')).toMatchObject({
+      publishingWatchdog: { overdueScheduledCount: 0 },
+      publishingOps: { status: 'success' },
+    });
+  });
+
+  it('creates the day’s digest, and gives up loudly when every write loses', async () => {
+    const store = memStore();
+    await mergeDigest(store, '2026-08-22', { linkRot: { broken: 0 } });
+    expect(store.createDoc).toHaveBeenCalledTimes(1);
+    expect(store.data.workflow_digests.get('2026-08-22')).toMatchObject({ linkRot: { broken: 0 } });
+
+    store.replaceDocIfMatch.mockRejectedValue(Object.assign(new Error('changed'), { code: 412 }));
+    await expect(
+      mergeDigest(store, '2026-08-22', { linkRot: { broken: 1 } }, { attempts: 3 })
+    ).rejects.toThrow(/kept changing; linkRot was not written/);
+    expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(3);
   });
 });
 

@@ -199,6 +199,91 @@ test.describe('the collapsed rail on a desktop (AP-F2)', () => {
   });
 });
 
+test.describe('the Health Hub status slot (#1010)', () => {
+  test.skip(({ isMobile }) => isMobile, 'measured at both widths from the desktop project');
+
+  /** Five stored results, one per word, so the badges differ in width. */
+  const minutesAgo = (n) => new Date(Date.now() - n * 60 * 1000).toISOString();
+  const STORED = {
+    success: true,
+    results: {
+      publer: { status: 'healthy', summary: 'Connected.', checkedAt: minutesAgo(3) },
+      'batch-inspect': { status: 'degraded', summary: 'Slow.', checkedAt: minutesAgo(4) },
+      resend: { status: 'critical', summary: 'Refused.', checkedAt: minutesAgo(5) },
+      'lab-agents': {
+        status: 'offline',
+        summary: 'All 1 agents are offline.',
+        checkedAt: minutesAgo(2),
+        checkedBy: 'pulse',
+      },
+    },
+    pulse: { lastBeatAt: minutesAgo(2), intervalMs: 300000, lateAfterMs: 900000 },
+  };
+
+  /** Each probe card's badge, as its distance from the card's top-right corner. */
+  const badgeOffsets = (page) =>
+    page.locator('[data-probe]').evaluateAll((cards) =>
+      cards.map((card) => {
+        const box = card.getBoundingClientRect();
+        const badge = card.querySelector('[data-slot="status"] [data-status]');
+        const mark = badge.getBoundingClientRect();
+        return {
+          id: card.dataset.probe,
+          status: badge.dataset.status,
+          right: Math.round(box.right - mark.right),
+          top: Math.round(mark.top - box.top),
+        };
+      })
+    );
+
+  test('every probe card’s badge sits the same distance from its top-right corner, at 1280 and 390', async ({
+    page,
+    identity,
+  }, testInfo) => {
+    // Fails if: the header row wraps again (flex-wrap), the text block loses
+    // flex-1, or the slot can shrink — a long description then drops the
+    // badge under the text, which moves it down and left on every card but
+    // the one with the shortest sentence (the bug in #1010).
+    identity.answerApi('cms/health/probe-results', STORED);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await identity.signIn('/admin/health');
+    await page.getByRole('tab', { name: 'Checks' }).click();
+    await expect(
+      page.locator('[data-probe="batch-inspect"] [data-status="degraded"]')
+    ).toBeVisible();
+    await expect(page.locator('[data-probe="lab-agents"] [data-status="offline"]')).toBeVisible();
+
+    for (const width of [1280, 390]) {
+      // The same page reflowed: one column at 390, three at 1280.
+      await page.setViewportSize({ width, height: 900 });
+      await expect(page.locator('[data-probe="publer"]')).toBeVisible();
+
+      const offsets = await badgeOffsets(page);
+      expect(offsets.length).toBeGreaterThanOrEqual(38);
+      expect(new Set(offsets.map((o) => o.status))).toEqual(
+        new Set(['healthy', 'degraded', 'critical', 'offline', 'unknown'])
+      );
+      const [first] = offsets;
+      for (const offset of offsets) {
+        expect({ right: offset.right, top: offset.top }, `${offset.id} at ${width}px`).toEqual({
+          right: first.right,
+          top: first.top,
+        });
+      }
+      // The admin column scrolls inside the shell, so a full-page capture
+      // stops at the viewport: grow the viewport to the column's height for
+      // the picture, then measure again at that size.
+      const height = await page.evaluate(
+        () => document.getElementById('admin-main')?.scrollHeight ?? 900
+      );
+      await page.setViewportSize({ width, height: Math.min(height + 120, 16000) });
+      const tall = await badgeOffsets(page);
+      expect(tall.every((o) => o.right === first.right && o.top === first.top)).toBe(true);
+      await page.screenshot({ path: testInfo.outputPath(`health-checks-${width}.png`) });
+    }
+  });
+});
+
 test.describe('the phone shell on a Pixel 5 (AP-F1)', () => {
   test.skip(({ isMobile }) => !isMobile, 'the drawer is the phone shell; mobile-chrome runs it');
 
