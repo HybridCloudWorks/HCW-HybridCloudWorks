@@ -5,7 +5,14 @@
  * math over ISO timestamps.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createLabHandlers, LAB_JOB_TYPES, JOB_STATUSES } from './labs.js';
+import {
+  AGENT_DOWN_STATUSES,
+  AGENT_STALE_AFTER_MS,
+  createLabHandlers,
+  isAgentOnline,
+  LAB_JOB_TYPES,
+  JOB_STATUSES,
+} from './labs.js';
 
 const context = { log: vi.fn(), error: vi.fn() };
 
@@ -137,6 +144,31 @@ describe('enqueueLabJob', () => {
   });
 });
 
+describe('isAgentOnline', () => {
+  const nowMs = Date.parse('2026-10-08T04:30:00.000Z');
+  const ago = (ms) => new Date(nowMs - ms).toISOString();
+
+  it('is fresh AND not saying goodbye: the offline heartbeat writes lastSeenAt too (#1009)', () => {
+    expect(isAgentOnline({ status: 'idle', lastSeenAt: ago(1_000) }, nowMs)).toBe(true);
+    expect(isAgentOnline({ status: 'busy', lastSeenAt: ago(1_000) }, nowMs)).toBe(true);
+    expect(isAgentOnline({ lastSeenAt: ago(1_000) }, nowMs)).toBe(true);
+    for (const status of AGENT_DOWN_STATUSES) {
+      expect(isAgentOnline({ status, lastSeenAt: ago(1_000) }, nowMs)).toBe(false);
+    }
+    expect(AGENT_DOWN_STATUSES).toEqual(['stopping', 'offline']);
+  });
+
+  it('is offline from three missed heartbeats, and for a record with no heartbeat at all', () => {
+    expect(isAgentOnline({ status: 'idle', lastSeenAt: ago(AGENT_STALE_AFTER_MS - 1) }, nowMs)).toBe(true);
+    expect(isAgentOnline({ status: 'idle', lastSeenAt: ago(AGENT_STALE_AFTER_MS) }, nowMs)).toBe(false);
+    expect(isAgentOnline({ status: 'idle' }, nowMs)).toBe(false);
+    expect(isAgentOnline(null, nowMs)).toBe(false);
+    // The old signature passed the timestamp alone; that now reads as no
+    // agent, which fails closed rather than open.
+    expect(isAgentOnline(ago(1_000), nowMs)).toBe(false);
+  });
+});
+
 describe('getLabsSnapshot', () => {
   it('computes agent online state from ISO heartbeats and sorts jobs desc', async () => {
     const store = makeStore({
@@ -151,6 +183,9 @@ describe('getLabsSnapshot', () => {
             },
             { id: 'stale', lastSeenAt: new Date(NOW.getTime() - 120_000).toISOString() },
             { id: 'never' },
+            // Fresh, but the heartbeat said goodbye (#1009).
+            { id: 'stopped', status: 'offline', lastSeenAt: new Date(NOW.getTime() - 5_000).toISOString() },
+            { id: 'stopping', status: 'stopping', lastSeenAt: new Date(NOW.getTime() - 5_000).toISOString() },
           ];
         }
         return [
@@ -163,7 +198,7 @@ describe('getLabsSnapshot', () => {
     const body = JSON.parse((await h.getLabsSnapshot(makeRequest({}), context)).body);
 
     const online = Object.fromEntries(body.agents.map((a) => [a.agentId, a.online]));
-    expect(online).toEqual({ fresh: true, stale: false, never: false });
+    expect(online).toEqual({ fresh: true, stale: false, never: false, stopped: false, stopping: false });
     expect(body.jobs.map((j) => j.id)).toEqual(['new', 'old']);
     expect(body.queueDepth).toBe(3);
     expect(body.jobTypes.map((t) => t.type)).toEqual(Object.keys(LAB_JOB_TYPES));

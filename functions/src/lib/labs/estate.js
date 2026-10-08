@@ -175,12 +175,12 @@ const readPolicy = ({ arm }, context) =>
 const readAgent = ({ store, now }, context) =>
   sideRead('agent', context, async () => {
     const [agents, queued] = await Promise.all([
-      store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt FROM c', []),
+      store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status FROM c', []),
       store.queryDocs('lab_jobs', "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'", []),
     ]);
     const nowMs = now();
     return {
-      online: (Array.isArray(agents) ? agents : []).some((a) => isAgentOnline(a?.lastSeenAt, nowMs)),
+      online: (Array.isArray(agents) ? agents : []).some((a) => isAgentOnline(a, nowMs)),
       queued: Number(queued?.[0]) || 0,
     };
   });

@@ -168,7 +168,7 @@ describe('GET /api/public/labs/estate', () => {
       coder: { reachable: true, running: 1, max: 5 },
       asOf: new Date(NOW).toISOString(),
     });
-    expect(store.queryDocs).toHaveBeenCalledWith('lab_agents', 'SELECT TOP 200 c.lastSeenAt FROM c', []);
+    expect(store.queryDocs).toHaveBeenCalledWith('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status FROM c', []);
     expect(store.queryDocs).toHaveBeenCalledWith(
       'lab_jobs',
       "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'",
@@ -185,6 +185,19 @@ describe('GET /api/public/labs/estate', () => {
     const res = await handlers({ store }).getEstate(request(), context);
     expect(body(res).agent).toEqual({ online: false, queued: 0 });
   });
+
+  it.each([['offline'], ['stopping']])(
+    'agent is offline the moment its heartbeat says %s, fresh or not (#1009)',
+    async (status) => {
+      const store = makeStore({
+        queryDocs: vi.fn(async (container) =>
+          container === 'lab_agents' ? [{ status, lastSeenAt: new Date(NOW - 5_000).toISOString() }] : [0]
+        ),
+      });
+      const res = await handlers({ store }).getEstate(request(), context);
+      expect(body(res).agent).toEqual({ online: false, queued: 0 });
+    }
+  );
 
   it('a failed side read is null, never zero: policy, agent and Coder each on their own', async () => {
     const policyDown = armFor({

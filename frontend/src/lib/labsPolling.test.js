@@ -11,6 +11,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
+  AGENT_DOWN_STATUSES,
   isAgentOnline,
   isTerminalJobStatus,
   jobPollDelay,
@@ -118,6 +119,27 @@ describe('isAgentOnline', () => {
     const agent = { lastSeenAt: new Date(now) };
     expect(isAgentOnline(agent, now + 1000)).toBe(true);
     expect(isAgentOnline(agent, now + STALE_AFTER_MS + 1)).toBe(false);
+  });
+
+  it('is offline the moment a fresh heartbeat says stopping or offline (#1009)', () => {
+    // The goodbye heartbeat writes lastSeenAt too, so freshness alone showed a
+    // stopped agent as connected for 90 seconds.
+    expect(AGENT_DOWN_STATUSES).toEqual(['stopping', 'offline']);
+    for (const status of AGENT_DOWN_STATUSES) {
+      expect(isAgentOnline({ status, lastSeenAt: new Date(now - 1000) }, now)).toBe(false);
+    }
+    expect(isAgentOnline({ status: 'idle', lastSeenAt: new Date(now - 1000) }, now)).toBe(true);
+    expect(isAgentOnline({ status: 'busy', lastSeenAt: new Date(now - 1000) }, now)).toBe(true);
+  });
+
+  it('holds the same down statuses as the server rule', () => {
+    const server = readFileSync(
+      join(process.cwd(), '..', 'functions', 'src', 'lib', 'labs.js'),
+      'utf8'
+    );
+    const declared = server.match(/AGENT_DOWN_STATUSES = Object\.freeze\((\[[^\]]*\])\)/)?.[1];
+    expect(declared, 'AGENT_DOWN_STATUSES not found in functions/src/lib/labs.js').toBeTruthy();
+    expect(JSON.parse(declared.replace(/'/g, '"'))).toEqual([...AGENT_DOWN_STATUSES]);
   });
 });
 

@@ -9,7 +9,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createLabAgentHandlers, AGENT_TERMINAL_STATUSES, OUTPUT_CAP_BYTES } from './lab-agent.js';
-import { AGENT_OFFLINE_SOURCE } from './timers/agent-health.js';
+import { AGENT_ONLINE_SOURCE, BACK_ONLINE_SENT } from './timers/agent-health.js';
 
 const context = { log: vi.fn(), error: vi.fn(), warn: vi.fn() };
 const NOW = new Date('2026-08-10T04:00:00.000Z');
@@ -216,75 +216,130 @@ describe('heartbeatAgent', () => {
     expect(updates).not.toHaveProperty('hostname');
   });
 
-  it('tells the owner once when the agent announces its own shutdown, and stamps offlineSince (LAB-2 follow-up)', async () => {
-    // `systemctl stop` → SIGTERM → the agent heartbeats `offline` itself, so
-    // the health timer never marks it and its message never fires; the
-    // owner's first LAB-2 test on 2026-10-06 was silent for this reason.
+  it('marks a self-announced shutdown offline at once and tells nobody yet (#1009)', async () => {
+    // `systemctl stop` → SIGTERM → the agent heartbeats `offline` itself. Until
+    // 2026-10-08 that sent a critical message on the spot, and a 43-second
+    // reboot left the owner with a red alert and no word it was over. The
+    // health timer now speaks after five minutes offline.
     const notifier = { notifyTelegram: vi.fn(async () => ({ sent: true })) };
     const store = emptyStore();
+    const warn = vi.fn();
     const h = createLabAgentHandlers({
       guard: allowGuard({ status: 'idle', hostname: 'vps-hostinger-01' }),
       store,
       now: () => NOW,
       notifier,
     });
-    const res = await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context);
+    const res = await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), { ...context, warn });
     expect(res.status).toBe(200);
     expect(store.patchDoc.mock.calls[0][2]).toMatchObject({
       status: 'offline',
       offlineSince: NOW.toISOString(),
     });
-    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
-    const call = notifier.notifyTelegram.mock.calls[0][0];
-    expect(call).toMatchObject({ severity: 'critical', source: AGENT_OFFLINE_SOURCE });
-    expect(call.message).toContain('vps-1 (vps-hostinger-01)');
-    expect(call.message).toContain('fails closed');
+    expect(notifier.notifyTelegram).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/vps-1 reported its own shutdown and is marked offline/));
 
-    // Already offline: a repeated offline heartbeat is not a new event.
-    const again = createLabAgentHandlers({
-      guard: allowGuard({ status: 'offline' }),
-      store: emptyStore(),
-      now: () => NOW,
-      notifier,
-    });
-    await again.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context);
-    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+    // Already offline: a repeated offline heartbeat is not a new outage.
+    const s1 = emptyStore();
+    await createLabAgentHandlers({ guard: allowGuard({ status: 'offline' }), store: s1, now: () => NOW, notifier })
+      .heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context);
+    expect(s1.patchDoc.mock.calls[0][2]).not.toHaveProperty('offlineSince');
 
-    // `stopping` and `idle` are not offline; no message and no offlineSince.
+    // `stopping` and `idle` are not offline: no offlineSince.
     for (const status of ['stopping', 'idle']) {
       const s2 = emptyStore();
       await createLabAgentHandlers({ guard: allowGuard({ status: 'idle' }), store: s2, now: () => NOW, notifier })
         .heartbeatAgent(req({ agentId: 'vps-1', status }), context);
       expect(s2.patchDoc.mock.calls[0][2]).not.toHaveProperty('offlineSince');
     }
-    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+    expect(notifier.notifyTelegram).not.toHaveBeenCalled();
   });
 
-  it('lets a terminal offline win over the job-derived busy, so a deadline shutdown with work running is still said', async () => {
+  it('lets a terminal offline win over the job-derived busy, so a deadline shutdown with work running is still recorded', async () => {
     const notifier = { notifyTelegram: vi.fn(async () => ({ sent: true })) };
     const store = emptyStore();
     const h = createLabAgentHandlers({ guard: allowGuard({ status: 'busy' }), store, now: () => NOW, notifier });
     await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline', activeJobs: 2 }), context);
     expect(store.patchDoc.mock.calls[0][2]).toMatchObject({ status: 'offline', activeJobs: 2, offlineSince: NOW.toISOString() });
-    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
 
     const s2 = emptyStore();
     await createLabAgentHandlers({ guard: allowGuard({ status: 'idle' }), store: s2, now: () => NOW, notifier })
       .heartbeatAgent(req({ agentId: 'vps-1', status: 'idle', activeJobs: 1 }), context);
     expect(s2.patchDoc.mock.calls[0][2].status).toBe('busy');
+    expect(notifier.notifyTelegram).not.toHaveBeenCalled();
   });
 
-  it('records the offline heartbeat even when the notifier is absent or throws', async () => {
+  it('says nothing when an agent comes back from an outage nobody was told about (a short reboot)', async () => {
+    const notifier = { notifyTelegram: vi.fn(async () => ({ sent: true })) };
     const store = emptyStore();
-    const silent = createLabAgentHandlers({ guard: allowGuard({ status: 'busy' }), store, now: () => NOW });
-    expect((await silent.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context)).status).toBe(200);
+    const warn = vi.fn();
+    const offlineSince = new Date(NOW.getTime() - 43_000).toISOString();
+    await createLabAgentHandlers({ guard: allowGuard({ status: 'offline', offlineSince }), store, now: () => NOW, notifier })
+      .heartbeatAgent(req({ agentId: 'vps-1', status: 'idle' }), { ...context, warn });
+    expect(notifier.notifyTelegram).not.toHaveBeenCalled();
     expect(store.patchDoc).toHaveBeenCalledTimes(1);
+    expect(store.patchDoc.mock.calls[0][2]).not.toHaveProperty('backOnlineAt');
+    // The transition is still on the record, at a level host.json ingests.
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/vps-1 back online after 1 min$/));
+  });
 
-    const throwing = { notifyTelegram: vi.fn(async () => { throw new Error('telegram down'); }) };
-    const store2 = emptyStore();
-    const loud = createLabAgentHandlers({ guard: allowGuard({ status: 'busy' }), store: store2, now: () => NOW, notifier: throwing });
-    expect((await loud.heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context)).status).toBe(200);
-    expect(store2.patchDoc).toHaveBeenCalledTimes(1);
+  it('sends one "back online after N min" on the first normal heartbeat after an outage the owner was told about, and clears the debt', async () => {
+    const notifier = { notifyTelegram: vi.fn(async () => ({ sent: true })) };
+    const store = emptyStore();
+    const offlineSince = new Date(NOW.getTime() - 12 * 60_000).toISOString();
+    const h = createLabAgentHandlers({
+      guard: allowGuard({
+        status: 'offline',
+        offlineSince,
+        offlineNotifiedAt: new Date(NOW.getTime() - 7 * 60_000).toISOString(),
+        hostname: 'vps-hostinger-01',
+      }),
+      store,
+      now: () => NOW,
+      notifier,
+    });
+    expect((await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'idle' }), context)).status).toBe(200);
+
+    expect(store.patchDoc.mock.calls[0][2]).toMatchObject({ status: 'idle', backOnlineAt: NOW.toISOString() });
+    expect(notifier.notifyTelegram).toHaveBeenCalledTimes(1);
+    const call = notifier.notifyTelegram.mock.calls[0][0];
+    expect(call).toMatchObject({ title: 'Lab agent back online after 12 min', source: AGENT_ONLINE_SOURCE, severity: 'info' });
+    expect(call.message).toContain('vps-1 (vps-hostinger-01)');
+    expect(store.patchDoc.mock.calls[1]).toEqual(['lab_agents', 'vps-1', BACK_ONLINE_SENT, { partitionKey: 'vps-1' }]);
+  });
+
+  it('leaves the debt for the health timer when the back-online message does not go, and still records the heartbeat', async () => {
+    const owed = { status: 'offline', offlineSince: '2026-08-10T03:40:00.000Z', offlineNotifiedAt: '2026-08-10T03:45:00.000Z' };
+    const notifiers = [
+      null,
+      { notifyTelegram: vi.fn(async () => ({ sent: false, reason: 'cooldown' })) },
+      { notifyTelegram: vi.fn(async () => { throw new Error('telegram down'); }) },
+    ];
+    for (const notifier of notifiers) {
+      const store = emptyStore();
+      const h = createLabAgentHandlers({ guard: allowGuard(owed), store, now: () => NOW, notifier });
+      expect((await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'idle' }), context)).status).toBe(200);
+      expect(store.patchDoc).toHaveBeenCalledTimes(1);
+      expect(store.patchDoc.mock.calls[0][2]).toMatchObject({ status: 'idle', backOnlineAt: NOW.toISOString() });
+      expect(store.patchDoc.mock.calls[0][2]).not.toHaveProperty('offlineNotifiedAt');
+    }
+  });
+
+  it('keeps the start of an outage the owner is still owed the end of, and cancels the unsent back-online', async () => {
+    const store = emptyStore();
+    await createLabAgentHandlers({
+      guard: allowGuard({
+        status: 'idle',
+        offlineSince: '2026-08-10T03:40:00.000Z',
+        offlineNotifiedAt: '2026-08-10T03:45:00.000Z',
+        backOnlineAt: '2026-08-10T03:55:00.000Z',
+      }),
+      store,
+      now: () => NOW,
+    }).heartbeatAgent(req({ agentId: 'vps-1', status: 'offline' }), context);
+    const updates = store.patchDoc.mock.calls[0][2];
+    expect(updates).toMatchObject({ status: 'offline', backOnlineAt: null });
+    expect(updates).not.toHaveProperty('offlineSince');
   });
 
   it('refuses to let the agent grant itself capabilities or rebind its identity', async () => {

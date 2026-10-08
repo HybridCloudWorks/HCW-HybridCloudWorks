@@ -102,14 +102,30 @@ const toIsoOrNull = (v) => (toMs(v) ? new Date(toMs(v)).toISOString() : null);
 export const AGENT_STALE_AFTER_MS = 90 * 1000;
 
 /**
- * The snapshot's online rule, exported so the public estate read
- * (lib/labs/estate.js) says "online" by the same clock the admin page does.
+ * The statuses an agent writes about its own shutdown (vps-agent/index.js
+ * heartbeats `stopping`, then `offline`, on SIGTERM). Neither is "online",
+ * however fresh the heartbeat that carried it.
+ */
+export const AGENT_DOWN_STATUSES = Object.freeze(['stopping', 'offline']);
+
+/**
+ * The online rule, exported so the admin snapshot, the public estate read
+ * (lib/labs/estate.js) and the public submit door (lib/labs/public-submit.js)
+ * all say "online" by the same rule.
  *
- * @param {unknown} lastSeenAt - ISO string, Date, or an object with toMillis()
+ * Fresh AND not announcing its own shutdown. The `offline` heartbeat writes
+ * `lastSeenAt` like any other, so freshness alone read an agent that had just
+ * said goodbye as online, and held the public door open, for the 90 seconds
+ * after it stopped (#1009). A caller must therefore read `status` as well as
+ * `lastSeenAt`; a record without either is offline.
+ *
+ * @param {{ lastSeenAt?: unknown, status?: unknown } | null | undefined} agent
+ *   `lastSeenAt` is an ISO string, a Date, or an object with toMillis()
  * @param {number} nowMs
  */
-export function isAgentOnline(lastSeenAt, nowMs) {
-  const lastSeenMs = toMs(lastSeenAt);
+export function isAgentOnline(agent, nowMs) {
+  if (AGENT_DOWN_STATUSES.includes(agent?.status)) return false;
+  const lastSeenMs = toMs(agent?.lastSeenAt);
   return lastSeenMs > 0 && nowMs - lastSeenMs < AGENT_STALE_AFTER_MS;
 }
 
@@ -254,7 +270,7 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
             capabilities: data.capabilities || [],
             status: data.status || 'unknown',
             lastSeenAt: lastSeenMs ? new Date(lastSeenMs).toISOString() : null,
-            online: isAgentOnline(data.lastSeenAt, nowMs),
+            online: isAgentOnline(data, nowMs),
             // The registry half of the document (#740): whether the agent
             // guard admits it, and which service principal it is bound to.
             // The Agents tab's Activate/Deactivate reads the first; the second

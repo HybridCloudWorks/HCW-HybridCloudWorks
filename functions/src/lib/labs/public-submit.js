@@ -66,8 +66,9 @@
  *
  * FAIL CLOSED WHILE NO AGENT IS ONLINE. A job is queued only when a lab
  * agent registered for `terraform-validate` has heartbeated within the
- * admin snapshot's window (`isAgentOnline`, lib/labs.js), so a submission
- * never waits in a queue nobody drains. No agent is 503 LAB_AGENT_OFFLINE; a
+ * admin snapshot's window and has not announced its own shutdown
+ * (`isAgentOnline`, lib/labs.js), so a submission never waits in a queue
+ * nobody drains. No agent is 503 LAB_AGENT_OFFLINE; a
  * failed read of the agents or the queue is 503 LAB_STATUS_UNAVAILABLE,
  * never "open".
  *
@@ -171,14 +172,15 @@ export const PUBLIC_STATUS_CACHE_ID = 'labs:public-submit';
  */
 async function readReadiness({ store, now }) {
   const [agents, queued] = await Promise.all([
-    store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.capabilities FROM c', []),
+    // `status` as well as `lastSeenAt`: the online rule reads both (#1009).
+    store.queryDocs('lab_agents', 'SELECT TOP 200 c.lastSeenAt, c.status, c.capabilities FROM c', []),
     store.queryDocs(LAB_JOBS_CONTAINER, "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'", []),
   ]);
   const count = Number(Array.isArray(queued) ? queued[0] : Number.NaN);
   if (!Number.isFinite(count)) throw new Error('the queued-job count was not a number');
   const nowMs = now();
   const canRun = (agent) =>
-    isAgentOnline(agent?.lastSeenAt, nowMs) &&
+    isAgentOnline(agent, nowMs) &&
     Array.isArray(agent?.capabilities) &&
     agent.capabilities.includes(PUBLIC_LAB_JOB_TYPE);
   return { online: (Array.isArray(agents) ? agents : []).some(canRun), queued: count };

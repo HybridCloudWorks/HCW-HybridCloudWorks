@@ -65,7 +65,17 @@ export const STALE_AFTER_MS = 90 * 1000;
 export { toMillis };
 
 /**
- * Whether an agent has heartbeated recently enough to be considered online.
+ * The statuses an agent heartbeats about its own shutdown. Must match
+ * `AGENT_DOWN_STATUSES` in `functions/src/lib/labs.js`.
+ */
+export const AGENT_DOWN_STATUSES = Object.freeze(['stopping', 'offline']);
+
+/**
+ * Whether an agent has heartbeated recently enough to be considered online,
+ * and that heartbeat did not announce its own shutdown: the `offline`
+ * heartbeat writes `lastSeenAt` too, so freshness alone showed a stopped
+ * agent as connected for 90 seconds (#1009). The server's rule is the same
+ * (`isAgentOnline` in `functions/src/lib/labs.js`).
  *
  * `now` is passed in rather than read from the clock so the caller controls
  * where it comes from. That is the whole point of T-309: when `now` advanced
@@ -73,11 +83,12 @@ export { toMillis };
  * stopped growing, and the dashboard went on reporting "connected" for
  * precisely as long as nothing was reachable.
  *
- * @param {{lastSeenAt?: unknown}} agent
+ * @param {{lastSeenAt?: unknown, status?: unknown}} agent
  * @param {number} now - epoch ms
  * @returns {boolean}
  */
 export function isAgentOnline(agent, now) {
+  if (AGENT_DOWN_STATUSES.includes(agent?.status)) return false;
   const lastSeen = toMillis(agent?.lastSeenAt);
   return lastSeen > 0 && now - lastSeen < STALE_AFTER_MS;
 }
