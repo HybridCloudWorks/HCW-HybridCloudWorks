@@ -43,11 +43,13 @@
 
 # Created at boot by systemd-tmpfiles, so the proxy finds it whenever Docker
 # starts it, and the agent's unit can test for the socket inside it.
+# "# Ansible managed" written out, not the variable, which a copy task does
+# not have (roles/coder_sandbox/tasks/main.yml says why).
 - name: Have systemd-tmpfiles create the proxy's socket directory at every boot
   ansible.builtin.copy:
     dest: /etc/tmpfiles.d/hcw-labs-agent-docker.conf
     content: |
-      # {{ ansible_managed }}
+      # Ansible managed
       d {{ labs_agent_docker_proxy_socket_dir }} 0750 root {{ labs_agent_group }} -
     owner: root
     group: root

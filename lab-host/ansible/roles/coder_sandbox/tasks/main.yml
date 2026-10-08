@@ -146,11 +146,17 @@
     group: root
     mode: "0755"
 
+# "# Ansible managed" is written out in a copy task's content, not the
+# ansible_managed variable: since ansible-core 2.19 that variable exists only
+# for the template module, and naming it here failed the first run after
+# LAB-5 merged (2026-10-08). The text is what the templates render, so the
+# files read the same either way. scripts/lab-host-ansible-managed.test.mjs
+# keeps it out of every task file.
 - name: Delegate the cpu, cpuset, io, memory and pids controllers to user managers
   ansible.builtin.copy:
     dest: /etc/systemd/system/user@.service.d/delegate.conf
     content: |
-      # {{ ansible_managed }}
+      # Ansible managed
       # The coder_sandbox role's rootless Docker sets CPU limits on workspaces (LAB-5).
       [Service]
       Delegate=cpu cpuset io memory pids
@@ -166,7 +172,7 @@
   ansible.builtin.copy:
     dest: /etc/tmpfiles.d/hcw-coder-docker.conf
     content: |
-      # {{ ansible_managed }}
+      # Ansible managed
       d {{ coder_sandbox_socket_dir }} 0750 {{ coder_sandbox_user }} {{ coder_sandbox_user }} -
     owner: root
     group: root
