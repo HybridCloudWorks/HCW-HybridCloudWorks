@@ -113,43 +113,45 @@ export const POLICY_COMPLIANCE_QUERY = [
 ].join(' ');
 
 /**
- * The checks that can never pass on this lab, and why. Each matches a built-in
+ * The checks that can never pass on this lab. Each matches a built-in
  * definition (by its name, the GUID, as Learn's built-in reference lists it,
- * read 2026-10-08) or the one assignment infra/lab-hybrid.tf makes. Each
- * reason is a decision recorded elsewhere, so a row leaves this list when
- * that decision changes, not when the count looks better.
+ * read 2026-10-08) or the one assignment infra/lab-hybrid.tf makes, and the
+ * comment above each is why. Every reason is a decision recorded elsewhere,
+ * so an entry leaves this list when that decision changes, not when the
+ * count looks better. The reasons are comments rather than strings because
+ * this module answers a public route, and nothing here is said to a visitor
+ * beyond the count (lib/public-visitor-copy.test.js).
  */
 export const NOT_APPLICABLE_POLICIES = Object.freeze([
-  {
-    assignment: 'audit-linux-baseline-lab-hybrid',
-    reason:
-      'The Linux security baseline is a machine-configuration audit, and machine configuration (guest configuration) is off on the Arc agent (LAB-6, #984; ADR 0032 amendment of 2026-10-07), so nothing on the host can report it. Leaves this list if #952 turns guest configuration back on.',
-  },
-  {
-    definition: 'fc9b3da7-8347-4380-8e70-0a0361d8dedd',
-    reason:
-      '"Linux machines should meet requirements for the Azure compute security baseline", the same audit as above wherever it is assigned from: with guest configuration off there is no report to read.',
-  },
-  {
-    definition: 'f85bf3e0-d513-442e-89c3-1784ad63382b',
-    reason:
-      '"System updates should be installed on your machines (powered by Update Center)" reads a Defender for Cloud assessment of update data the lab does not produce: Defender for Servers stays off (ADR 0032, alternatives considered) and the host patches itself with unattended-upgrades.',
-  },
-  {
-    definition: '6ba6d016-e7c3-4842-b8f2-4992ebc0d72d',
-    reason:
-      '"SQL servers on machines should have vulnerability findings resolved" needs Defender for SQL on machines, which nothing in infra/ turns on, and the host runs no SQL Server.',
-  },
-  {
-    definition: 'a6abeaec-4d90-4a02-805f-6b26c4d3fbe9',
-    reason:
-      '"Azure Key Vaults should use private link": the seal-key vault\'s only caller is the lab host, outside Azure, which a private endpoint cannot serve (infra/lab-hybrid.tf; ADR 0031, owner decision 2026-09-14).',
-  },
-  {
-    definition: '55615ac9-af46-4a59-874e-391cc3dfb490',
-    reason:
-      '"Azure Key Vault should have firewall enabled or public network access disabled": the seal-key vault stays open on purpose, because an IP rule would copy an address infra/ does not own and a drifted rule would leave Vault unable to unseal; Entra ID and one key-scoped grant gate every call (infra/lab-hybrid.tf; ADR 0032 amendment of 2026-09-29).',
-  },
+  // The Linux security baseline is a machine-configuration audit, and
+  // machine configuration (guest configuration) is off on the Arc agent
+  // (LAB-6, #984; ADR 0032 amendment of 2026-10-07), so nothing on the host
+  // can report it. Leaves this list if #952 turns guest configuration back
+  // on; estate.test.js fails until it does.
+  { assignment: 'audit-linux-baseline-lab-hybrid' },
+  // "Linux machines should meet requirements for the Azure compute security
+  // baseline": the same audit, wherever it is assigned from. With guest
+  // configuration off there is no report to read.
+  { definition: 'fc9b3da7-8347-4380-8e70-0a0361d8dedd' },
+  // "System updates should be installed on your machines (powered by Update
+  // Center)" reads a Defender for Cloud assessment of update data the lab
+  // does not produce: Defender for Servers stays off (ADR 0032, alternatives
+  // considered), and the host patches itself with unattended-upgrades.
+  { definition: 'f85bf3e0-d513-442e-89c3-1784ad63382b' },
+  // "SQL servers on machines should have vulnerability findings resolved"
+  // needs Defender for SQL on machines, which nothing in infra/ turns on, and
+  // the host runs no SQL Server.
+  { definition: '6ba6d016-e7c3-4842-b8f2-4992ebc0d72d' },
+  // "Azure Key Vaults should use private link": the seal-key vault's only
+  // caller is the lab host, outside Azure, which a private endpoint cannot
+  // serve (infra/lab-hybrid.tf; ADR 0031, owner decision 2026-09-14).
+  { definition: 'a6abeaec-4d90-4a02-805f-6b26c4d3fbe9' },
+  // "Azure Key Vault should have firewall enabled or public network access
+  // disabled": the seal-key vault stays open on purpose, because an IP rule
+  // would copy an address infra/ does not own and a drifted rule would leave
+  // Vault unable to unseal; Entra ID and one key-scoped grant gate every
+  // call (infra/lab-hybrid.tf; ADR 0032 amendment of 2026-09-29).
+  { definition: '55615ac9-af46-4a59-874e-391cc3dfb490' },
 ]);
 
 const NOT_APPLICABLE_DEFINITIONS = new Set(

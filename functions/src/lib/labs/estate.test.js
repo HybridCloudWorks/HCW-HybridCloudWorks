@@ -135,11 +135,21 @@ describe('shapeArcRow / shapePolicyRows / shapeAgentRows', () => {
     expect(isNotApplicableHere({})).toBe(false);
   });
 
-  it('gives every not-applicable check a reason, and only GUID-shaped definitions', () => {
+  it('matches each not-applicable check by one lowercase name, a definition GUID or the assignment, with its reason beside it', () => {
+    expect(NOT_APPLICABLE_POLICIES).toHaveLength(6);
     for (const entry of NOT_APPLICABLE_POLICIES) {
-      expect(entry.reason.length).toBeGreaterThan(40);
-      expect(Boolean(entry.definition) !== Boolean(entry.assignment)).toBe(true);
+      expect(Object.keys(entry)).toHaveLength(1);
       if (entry.definition) expect(entry.definition).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      else expect(entry.assignment).toMatch(/^[a-z0-9-]+$/);
+    }
+    // The reasons are comments (the module answers a public route); each
+    // entry must still have one directly above it.
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'estate.js'), 'utf8');
+    for (const entry of NOT_APPLICABLE_POLICIES) {
+      const [key, value] = Object.entries(entry)[0];
+      expect(source, `${value} has no comment above it`).toMatch(
+        new RegExp(`//[^\\n]*\\n  \\{ ${key}: '${value}' \\}`)
+      );
     }
   });
 
