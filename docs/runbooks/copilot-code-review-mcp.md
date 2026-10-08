@@ -102,7 +102,7 @@ of which holds on its own:
 2. **There is no stored credential to leak.** `copilot-setup-steps.yml` runs
    `azure/login` under OIDC in the `copilot` environment; the identity's
    federated credential trusts exactly the subject
-   `repo:HybridCloudWorks/HCW-HybridCloudWorks:environment:copilot` (in both
+   `repo:saulpatinojr/HCW-HybridCloudWorks:environment:copilot` (in both
    the name and immutable-ID forms, like every credential in this estate).
    No ref-form credential exists on it, so no branch-triggered workflow can
    assume it by accident. The three values the workflow needs

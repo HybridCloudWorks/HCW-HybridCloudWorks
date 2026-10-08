@@ -3943,6 +3943,26 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **Azure and Docker Hub OIDC trust the repository's new owner after the
+  2026-10-07 transfer to the personal account `saulpatinojr`.** The move
+  changed the owner half of every OIDC subject GitHub presents, from
+  `HybridCloudWorks@312844660` to `saulpatinojr@34853639`, while the
+  repository ID `1268997852` stayed. From the next scheduled run every
+  `azure/login` failed with AADSTS700213, first visible as Monitor Functions
+  Registered and Monitor Unresolved Secrets turning red. Deploys would have
+  failed the same way. `github_org` now defaults to `saulpatinojr`, and
+  `github_immutable_prefix` in `infra/oidc.tf` carries the new owner ID, so
+  the apply replaces the six federated credentials on the three identities
+  in place; the old-owner subjects are not kept, since nothing can present
+  them. `publish-lab-image.yml`'s `EXPECTED_RULE`, the Docker Hub runbook's
+  rule and its commands move with it. The runbook gains "After a repository
+  transfer", because the connection's rule in Docker Home is edited by hand.
+  `scripts/oidc-subjects.test.mjs` gains a check comparing the owner, owner
+  ID and repository ID in `infra/oidc.tf`, and the Docker rule, with the
+  `GITHUB_REPOSITORY`, `GITHUB_REPOSITORY_OWNER_ID` and
+  `GITHUB_REPOSITORY_ID` of the run itself. The existing cross-reference
+  could not catch this, because every file moved out of date together.
+  A future transfer fails a pull request rather than the first deploy.
 - **`bootstrap-terraform-oidc.ps1` takes the three deployment targets from
   the naming convention and asks nothing.** On 2026-10-07 the picker listed
   all forty-six subscriptions the owner's sign-in could see, forty-three of

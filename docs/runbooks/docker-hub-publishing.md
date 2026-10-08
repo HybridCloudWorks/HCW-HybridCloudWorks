@@ -13,6 +13,12 @@
 > Every later push to `main` that rebuilds the image publishes to both. Steps
 > 1 to 3 below are what was done once, and what to repeat if the connection
 > is ever recreated.
+>
+> **The rule changed on 2026-10-07.** The repository moved from the
+> `HybridCloudWorks` organisation to the personal account `saulpatinojr`,
+> which changes the owner half of every OIDC subject. The connection keeps
+> its ID and resources; only its rule needs editing, to the value in step 1.
+> See "After a repository transfer" below.
 
 The lab images, `hcw-lab` and `hcw-lab-runner`, are published to GHCR on
 every push to `main` that changes them. This page turns on the second
@@ -61,7 +67,7 @@ Docker Hub job, against the same two digests.
 | The exact on-screen labels for resources and scopes. | NOT VERIFIED: the form is behind sign-in, and Docker's pages describe the fields without naming the controls |
 | `docker/login-action` added Docker Hub OIDC in v4.5.0. This repository pins v4.6.0 (`dbcb8138…`). The workflow grants `id-token: write`, passes the organisation name as `username`, omits `password`, and sets `DOCKERHUB_OIDC_CONNECTIONID`. | VERIFIED: [v4.5.0 release notes](https://github.com/docker/login-action/releases/tag/v4.5.0); the [README at v4.6.0](https://github.com/docker/login-action/blob/v4.6.0/README.md#docker-hub) |
 | The exchange: the action requests a GitHub ID token with the audience `https://identity.docker.com`, then posts it to `https://identity.docker.com/oauth/token` as an RFC 8693 token exchange (`grant_type=urn:ietf:params:oauth:grant-type:token-exchange`, `subject_token_type=urn:ietf:params:oauth:token-type:id_token`, plus `connection_id` and `expires_in`). It masks the returned access token and runs `docker login` with it. `expires_in` defaults to 300 seconds; the environment variable `DOCKERHUB_OIDC_EXPIREIN` accepts 300 to 3600. | VERIFIED: [`src/dockerhub.ts` at v4.6.0](https://github.com/docker/login-action/blob/v4.6.0/src/dockerhub.ts). `DOCKERHUB_OIDC_EXPIREIN` is in the source, not the README, and the workflow does not set it |
-| This repository's OIDC subject uses GitHub's immutable-identifier form: `repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main` on `main`. | VERIFIED: `GET /repos/HybridCloudWorks/HCW-HybridCloudWorks/actions/oidc/customization/sub` returned `use_immutable_subject: true` and that prefix on 2026-09-28; `infra/oidc.tf` records the same subject from a real token (2026-08-20). Docker's rulesets page notes the same change |
+| This repository's OIDC subject uses GitHub's immutable-identifier form: `repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main` on `main`. | VERIFIED: `GET /repos/saulpatinojr/HCW-HybridCloudWorks/actions/oidc/customization/sub` returned `use_immutable_subject: true` and that prefix on 2026-10-08, and the failing Azure logins after the transfer presented the same subject. Before 2026-10-07 the owner half was `HybridCloudWorks@312844660` (same call, 2026-09-28). Docker's rulesets page notes the immutable form |
 | A single-image copy keeps its digest only with `--prefer-index=false`. | VERIFIED by measurement, 2026-09-28, buildx v0.37.1 (the runner's version): `ghcr.io/hybridcloudworks/hcw-lab-runner@sha256:c02d87ac…` copied to a local registry kept `sha256:c02d87ac…`. Without the flag, buildx wraps the image in a new manifest list with a new digest. [imagetools create reference](https://docs.docker.com/reference/cli/docker/buildx/imagetools/create/) |
 | The copy does not carry GHCR's attestation across. | VERIFIED by the same measurement: the destination had no attestation tag afterwards |
 | `actions/attest` pushes to Docker Hub when the subject name uses `docker.io` as its registry part. | VERIFIED: [actions/attest README](https://github.com/actions/attest#container-image), "When pushing to Docker Hub, please use "docker.io" as the registry portion of the image name." |
@@ -99,7 +105,7 @@ values. Add no second ruleset.
 | --- | --- |
 | Name or description, if the form offers one (optional) | `github-hcw-publish-lab-image` |
 | Ruleset label | `publish-lab-image-main` |
-| Rule (subject claim) | `repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main` |
+| Rule (subject claim) | `repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main` |
 | Resources | Docker Hub repositories `hybridcloudworks/hcw-lab` and `hybridcloudworks/hcw-lab-runner`, those two only, not all repositories |
 | Scopes | Read and write (push) on both. The job reads each repository back after writing to it |
 
@@ -111,9 +117,9 @@ it grants nothing.
 Why this subject, and only this one:
 
 - **The immutable form, because it is the one GitHub presents.** The subject
-  carries the organisation's and repository's numeric IDs, so a future
-  organisation or repository that takes the name `HybridCloudWorks` cannot
-  match it. The name form, `repo:HybridCloudWorks/HCW-HybridCloudWorks:ref:refs/heads/main`,
+  carries the owner's and repository's numeric IDs, so a future account or
+  repository that takes the name `saulpatinojr` or `HCW-HybridCloudWorks`
+  cannot match it. The name form, `repo:saulpatinojr/HCW-HybridCloudWorks:ref:refs/heads/main`,
   is not what this repository's tokens carry, and adding it would only widen
   the connection.
 - **`ref:refs/heads/main`, not an environment.** The job runs only on a push
@@ -122,8 +128,8 @@ Why this subject, and only this one:
   any branch unless a deployment-branch rule held
   ([Required inputs](../standards/required-inputs.md), §4.4). A pull request
   presents `:pull_request` and matches nothing here.
-- **No wildcard.** A wildcard such as `repo:HybridCloudWorks@312844660/*`
-  would admit every repository in the organisation.
+- **No wildcard.** A wildcard such as `repo:saulpatinojr@34853639/*`
+  would admit every repository the account owns.
 
 Every workflow on `main` presents this same subject, so a job elsewhere in
 the repository could also exchange a token if it named the connection ID.
@@ -171,18 +177,18 @@ rebuilds, smoke-tests and republishes GHCR as well, which is what the
 workflow always does:
 
 ```powershell
-gh workflow run publish-lab-image.yml --repo HybridCloudWorks/HCW-HybridCloudWorks --ref main
+gh workflow run publish-lab-image.yml --repo saulpatinojr/HCW-HybridCloudWorks --ref main
 ```
 
 A few seconds later, once the run has appeared, follow it. This prints each
 job as it finishes, and exits non-zero if the run fails:
 
 ```powershell
-gh run watch (gh run list --repo HybridCloudWorks/HCW-HybridCloudWorks --workflow publish-lab-image.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId') --repo HybridCloudWorks/HCW-HybridCloudWorks --exit-status
+gh run watch (gh run list --repo saulpatinojr/HCW-HybridCloudWorks --workflow publish-lab-image.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId') --repo saulpatinojr/HCW-HybridCloudWorks --exit-status
 ```
 
 The run is also listed at
-<https://github.com/HybridCloudWorks/HCW-HybridCloudWorks/actions/workflows/publish-lab-image.yml>.
+<https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/publish-lab-image.yml>.
 
 ## What success looks like
 
@@ -213,7 +219,7 @@ The run is also listed at
   `.github/workflows/publish-lab-image.yml@refs/heads/main`:
 
   ```powershell
-  gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo HybridCloudWorks/HCW-HybridCloudWorks --bundle-from-oci
+  gh attestation verify oci://docker.io/hybridcloudworks/hcw-lab:latest --repo saulpatinojr/HCW-HybridCloudWorks --bundle-from-oci
   ```
 
   The same command against `ghcr.io/hybridcloudworks/hcw-lab:latest`
@@ -231,6 +237,33 @@ The run is also listed at
 | A copy or attest step fails as unauthorized several minutes after the login succeeded | The Docker token expired (300 seconds by default) | Re-run the failed job. If it keeps happening, the job needs `DOCKERHUB_OIDC_EXPIREIN` (300 to 3600) on the login step, a pull request |
 | A copy step: `… is sha256:X on Docker Hub, but sha256:Y on GHCR.` | Something other than this job wrote the tag between the copy and the read-back | Do not re-run blindly: find what else pushes to `hybridcloudworks/hcw-lab*` |
 | **Create connection** refused, or an upgrade prompt in step 1 | The organisation's subscription does not include OIDC connections | "Before you start" |
+
+## After a repository transfer
+
+The subject names the GitHub account that owns the repository, with its
+numeric ID. Moving the repository to another account replaces both, even
+though the repository's own ID stays the same. The Docker organisation
+`hybridcloudworks` and its two repositories do not move, so the connection
+keeps its ID and its resources. Only the rule needs changing.
+
+1. Open the connection in Docker Home (step 1 gives the route) and select
+   **Edit**.
+2. In the ruleset `publish-lab-image-main`, replace the rule with the value
+   in step 1. It must match exactly: there is no wildcard, and the old rule
+   should not stay beside the new one, because nothing can present it any
+   more.
+3. Save. Nothing in step 2 or 3 changes.
+4. Publish (step 4) and check "What success looks like".
+
+`EXPECTED_RULE` in `publish-lab-image.yml` holds the same string, and
+`scripts/oidc-subjects.test.mjs` checks it against `infra/oidc.tf` and
+against the repository CI runs in. A transfer therefore fails a pull request
+before it fails a publish. It cannot reach Docker Home, so this edit stays a
+manual step.
+
+Done once already: on 2026-10-07 the repository moved from the
+`HybridCloudWorks` organisation (owner ID `312844660`) to the personal account
+`saulpatinojr` (`34853639`).
 
 ## Turning it off
 
@@ -294,3 +327,11 @@ federation means zero long-lived cloud credentials in GitHub").
   mirror of the same digest.
 - **#779:** closed on 2026-09-29, after the three checks under "What success
   looks like" passed.
+- **2026-10-07, repository transfer:** the rule in step 1, `EXPECTED_RULE`
+  and the commands in step 4 moved to the `saulpatinojr` owner. The
+  connection's rule in Docker Home is edited by hand, as in "After a
+  repository transfer". Images attested before the move were signed by the
+  workflow under its old owner. Whether `gh attestation verify --repo
+  saulpatinojr/HCW-HybridCloudWorks` accepts those is NOT VERIFIED. The
+  first publish after the move gives a `latest` that was signed under the
+  new owner.

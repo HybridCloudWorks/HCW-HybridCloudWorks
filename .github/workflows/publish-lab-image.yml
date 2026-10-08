@@ -480,7 +480,10 @@ jobs:
   #
   # The Docker side trusts one subject, this repository's `main` in GitHub's
   # immutable-identifier form:
-  #   repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+  #   repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+  # The owner half changed on 2026-10-07, when the repository moved from the
+  # HybridCloudWorks organisation (312844660) to the personal account; the
+  # connection's rule in Docker Home has to be edited to match by hand.
   # which is what `publish` already runs on (push to main, or a dispatch from
   # main). The job declares no environment on purpose: an environment subject
   # carries no ref, so it would match a dispatch from any branch unless a
@@ -551,7 +554,7 @@ jobs:
       - name: Explain a refused Docker token exchange
         if: failure() && steps.dockerhub-login.outcome == 'failure'
         env:
-          EXPECTED_RULE: repo:HybridCloudWorks@312844660/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
+          EXPECTED_RULE: repo:saulpatinojr@34853639/HCW-HybridCloudWorks@1268997852:ref:refs/heads/main
         run: |
           set -euo pipefail
           response="$(curl -fsS -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=https://identity.docker.com")"

@@ -253,3 +253,62 @@ describe('OIDC federated credentials cover every Azure login', () => {
     expect(missing).toEqual([]);
   });
 });
+
+/**
+ * The owner and the two numeric IDs every subject above is built from, checked
+ * against the repository CI is actually running in.
+ *
+ * The cross-reference above proves that workflows and credentials agree with
+ * EACH OTHER. It cannot see both of them going stale together, and that is
+ * what a transfer does: on 2026-10-07 the repository moved from the
+ * HybridCloudWorks organisation (owner ID 312844660) to the personal account
+ * saulpatinojr (34853639). Every file stayed consistent, every test stayed
+ * green, and every azure/login failed with AADSTS700213 from the next scheduled
+ * run, because GitHub now presented an owner nothing trusted.
+ *
+ * GitHub hands every job the values it composes the subject from
+ * (GITHUB_REPOSITORY, GITHUB_REPOSITORY_OWNER_ID, GITHUB_REPOSITORY_ID), so CI
+ * can compare them with oidc.tf directly. Off Actions there is nothing to
+ * compare with and that case is skipped. A push CI run inside a fork fails it,
+ * correctly: a fork's tokens match none of these credentials either. A pull
+ * request from a fork runs in this repository's context and passes.
+ */
+describe('OIDC subjects name the repository CI runs in', () => {
+  const hcl = readFileSync(join(REPO, 'infra', 'oidc.tf'), 'utf8');
+  const variables = readFileSync(join(REPO, 'infra', 'variables.tf'), 'utf8');
+  const lab = readFileSync(join(WORKFLOWS, 'publish-lab-image.yml'), 'utf8');
+
+  const prefix = hcl.match(
+    /github_immutable_prefix\s*=\s*"repo:\$\{var\.github_org\}@(\d+)\/\$\{var\.github_repo\}@(\d+)"/
+  );
+  const defaultOf = (name) =>
+    variables.match(new RegExp(String.raw`variable\s+"${name}"\s*\{[\s\S]*?default\s*=\s*"([^"]+)"`))?.[1];
+  const owner = defaultOf('github_org');
+  const repo = defaultOf('github_repo');
+  const mainSubject = prefix && `repo:${owner}@${prefix[1]}/${repo}@${prefix[2]}:ref:refs/heads/main`;
+
+  it('composes the immutable prefix from github_org, github_repo and two literal IDs', () => {
+    expect(prefix, 'github_immutable_prefix in infra/oidc.tf changed shape').not.toBeNull();
+    expect(owner).toBeTruthy();
+    expect(repo).toBeTruthy();
+  });
+
+  it("the Docker Hub rule publish-lab-image.yml explains a refusal with is main's subject", () => {
+    // Docker Home holds the real rule, out of reach of any test. This is the
+    // copy the workflow prints beside a refused exchange, and the runbook's
+    // rule; if it drifts from oidc.tf the diagnosis points the owner at the
+    // wrong string.
+    expect(lab.match(/^\s*EXPECTED_RULE:\s*(\S+)/m)?.[1]).toBe(mainSubject);
+  });
+
+  const inActions = process.env.GITHUB_ACTIONS === 'true' && Boolean(process.env.GITHUB_REPOSITORY_OWNER_ID);
+  it.skipIf(!inActions)('matches the owner, owner ID and repository ID GitHub reports for this run', () => {
+    const [runOwner, runRepo] = (process.env.GITHUB_REPOSITORY ?? '').split('/');
+    expect({ owner, ownerId: prefix?.[1], repo, repoId: prefix?.[2] }).toEqual({
+      owner: runOwner,
+      ownerId: process.env.GITHUB_REPOSITORY_OWNER_ID,
+      repo: runRepo,
+      repoId: process.env.GITHUB_REPOSITORY_ID,
+    });
+  });
+});
