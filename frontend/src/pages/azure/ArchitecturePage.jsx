@@ -89,7 +89,7 @@ export default function ArchitecturePage() {
         {/* Sidebar */}
         <aside className="xl:col-span-3 flex flex-col gap-6 order-2 xl:order-1">
           <div className="glass-panel rounded-xl p-5 sticky top-24">
-            <h3 className="text-sm font-bold text-white uppercase tracking-wider mb-4 flex items-center gap-2">
+            <h3 className="text-sm font-bold uppercase tracking-wider mb-4 flex items-center gap-2">
               <span className="material-symbols-outlined text-primary text-[18px]">search</span>
               Find Blueprints
             </h3>
@@ -107,7 +107,7 @@ export default function ArchitecturePage() {
             <div className="h-px bg-border-dark mb-6"></div>
             <div className="space-y-6">
               <div>
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
+                <h4 className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3">
                   Workload Type
                 </h4>
                 <div className="space-y-2">
@@ -126,7 +126,7 @@ export default function ArchitecturePage() {
                 </div>
               </div>
               <div>
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">
+                <h4 className="text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-3">
                   Use Case
                 </h4>
                 <div className="space-y-2">
@@ -164,7 +164,7 @@ export default function ArchitecturePage() {
           <div className="flex flex-col gap-2 relative">
             <div className="absolute -top-10 -left-10 w-64 h-64 bg-primary/5 rounded-full blur-3xl pointer-events-none"></div>
             <div className="flex flex-wrap items-baseline gap-4 relative z-10">
-              <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight text-white">
+              <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-tight ">
                 Architectural <span className="text-primary">Patterns</span> & Designs
               </h1>
             </div>
@@ -180,7 +180,7 @@ export default function ArchitecturePage() {
           {/* Blueprint Gallery */}
           <div>
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
+              <h3 className="text-xl font-bold flex items-center gap-2">
                 <span className="w-1 h-6 bg-primary rounded-full"></span>
                 Blueprint Gallery
               </h3>
@@ -233,7 +233,7 @@ export default function ArchitecturePage() {
                         <span>{blueprint.cost}</span>
                       </div>
                     </div>
-                    <h3 className="text-white font-bold text-lg mb-2 group-hover:text-primary transition-colors">
+                    <h3 className="font-bold text-lg mb-2 group-hover:text-primary transition-colors">
                       {blueprint.title}
                     </h3>
                     <p className="text-slate-400 text-sm mb-4">{blueprint.description}</p>

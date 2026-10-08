@@ -105,7 +105,7 @@ export default function ArchitecturePage() {
         <aside className="xl:col-span-3 order-2 xl:order-1 h-fit xl:sticky xl:top-28">
           <div className="bg-slate-800/40 backdrop-blur-md border border-slate-700 rounded-2xl p-6 hover:shadow-[0_0_25px_rgba(var(--primary-rgb,234,67,53),0.15)] hover:border-primary/50 transition-all duration-300">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <h3 className="text-lg font-bold flex items-center gap-2">
                 <span className="text-primary text-[20px] material-symbols-outlined">
                   filter_alt
                 </span>
@@ -160,7 +160,7 @@ export default function ArchitecturePage() {
                       {featuredArch.category} • Featured
                     </span>
                   </div>
-                  <h2 className="text-3xl font-bold text-white mb-4">{featuredArch.title}</h2>
+                  <h2 className="text-3xl font-bold mb-4">{featuredArch.title}</h2>
                   <p className="text-slate-300 mb-6">{featuredArch.description}</p>
                   <div className="grid grid-cols-3 gap-4 mb-6">
                     <div className="bg-slate-900/50 rounded-lg p-3">
@@ -204,7 +204,7 @@ export default function ArchitecturePage() {
 
           {/* Architecture Gallery Grid */}
           <section>
-            <h3 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+            <h3 className="text-2xl font-bold mb-6 flex items-center gap-2">
               <span className="text-primary text-[24px] material-symbols-outlined">
                 dashboard_customize
               </span>
@@ -239,7 +239,7 @@ export default function ArchitecturePage() {
                           {arch.category}
                         </span>
                       </div>
-                      <h3 className="text-lg font-bold text-white mb-2 line-clamp-2 group-hover:text-primary transition-colors">
+                      <h3 className="text-lg font-bold mb-2 line-clamp-2 group-hover:text-primary transition-colors">
                         {arch.title}
                       </h3>
                       <p className="text-sm text-slate-400 mb-4 line-clamp-2 flex-grow">

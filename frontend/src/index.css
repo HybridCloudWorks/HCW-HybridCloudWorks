@@ -1319,17 +1319,39 @@
   --accent-dark: #188368;
 }
 
-body {
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    sans-serif;
-  color: var(--medium-gray);
-  line-height: 1.7;
-  background-color: var(--background-gray);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/*
+ * ELEMENT DEFAULTS LIVE IN `@layer base`, NEVER UNLAYERED.
+ *
+ * Tailwind 4 puts every utility in `@layer utilities`, and a rule outside any
+ * layer beats every layered rule whatever its specificity. So an unlayered
+ * `p { margin-bottom: 1rem }` was not a default: it overrode `mb-0`, `mb-2`,
+ * `leading-tight` and the line height `text-xs` carries on every <p> in the
+ * app, and the unlayered heading rule overrode every `text-*` colour and
+ * `font-*` weight on every <h1>-<h6>, typography's `prose` included. In
+ * `@layer base`, after Tailwind's preflight, these still style an element
+ * that sets nothing, and a utility on the element wins, as it reads.
+ *
+ * This block, the heading and paragraph rules and the header/footer chrome
+ * below are the file's element-type defaults; each sits where it always did,
+ * so its order inside the base layer is unchanged (this body rule still
+ * follows, and so still wins over, the `bg-background text-foreground` one
+ * above). What stays unlayered on purpose is the provider-theme layer
+ * (`:is(.theme-*) header`, `footer`, `a:where(...)`): those are overrides
+ * that a page inside a theme is meant to get over its own utilities (#174).
+ */
+@layer base {
+  body {
+    font-family:
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      sans-serif;
+    color: var(--medium-gray);
+    line-height: 1.7;
+    background-color: var(--background-gray);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
 }
 
 /* Theme-specific primary fonts: when a section is wrapped in a provider theme class,
@@ -1391,21 +1413,28 @@ body {
  * intentionally strips heading sizes for this reason; do not add them
  * back globally. If a heading looks too small, add a `text-*` utility
  * on that specific element.
+ *
+ * In `@layer base` (see the note above `body`): a default, so a `text-*`
+ * colour or a `font-*` weight on the heading wins over it.
  */
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  color: var(--dark-gray);
-  font-weight: 600;
-}
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    color: var(--dark-gray);
+    font-weight: 600;
+  }
 
-/* Body text improvements */
-p {
-  line-height: 1.7;
-  margin-bottom: 1rem;
+  /* Body text. A default, so `mb-*`, `my-*`, `leading-*` and the line height
+     a `text-*` size carries all win over it on the paragraph that sets them;
+     a paragraph that sets none keeps this spacing. */
+  p {
+    line-height: 1.7;
+    margin-bottom: 1rem;
+  }
 }
 
 /* V2 Dark Glassmorphism Design System */
@@ -1439,18 +1468,23 @@ p {
 }
 
 /* Glassmorphic header/footer — tokenized via --header-bg/--header-blur,
-   overridden per .theme-{provider} and per color scheme. */
-header,
-footer {
-  background: var(--header-bg);
-  -webkit-backdrop-filter: blur(var(--header-blur));
-  backdrop-filter: blur(var(--header-blur));
-  border-bottom: 1px solid var(--hcw-border-light);
-}
+   overridden per .theme-{provider} and per color scheme. In `@layer base`
+   (see the note above `body`), so a `border-*` or `bg-*` utility on the
+   element wins; the provider-theme rules above stay unlayered and still win
+   inside a theme. */
+@layer base {
+  header,
+  footer {
+    background: var(--header-bg);
+    -webkit-backdrop-filter: blur(var(--header-blur));
+    backdrop-filter: blur(var(--header-blur));
+    border-bottom: 1px solid var(--hcw-border-light);
+  }
 
-footer {
-  border-top: 1px solid var(--hcw-border-light);
-  border-bottom: none;
+  footer {
+    border-top: 1px solid var(--hcw-border-light);
+    border-bottom: none;
+  }
 }
 
 /* ============================================================

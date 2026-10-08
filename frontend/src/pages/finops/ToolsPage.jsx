@@ -214,7 +214,7 @@ export default function ToolsPage() {
           </div>
           <div className="mt-12 mb-12 p-6 rounded-2xl border border-slate-800 bg-slate-900/30">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <h3 className="text-lg font-bold flex items-center gap-2">
                 <span className="material-symbols-outlined text-slate-400">monitoring</span>
                 Your API Usage
               </h3>

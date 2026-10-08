@@ -3943,6 +3943,36 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The element defaults in `index.css` sit in `@layer base`, so a utility on
+  a paragraph or heading now applies.** The `p` rule (`margin-bottom: 1rem;
+  line-height: 1.7`), the `h1`–`h6` rule (`color: var(--dark-gray);
+  font-weight: 600`), the `body` rule and the `header, footer` chrome were
+  outside any layer, and unlayered CSS beats every rule in Tailwind's
+  `@layer utilities` whatever its specificity: no `mb-*`, `leading-*` or
+  `text-xs` line height could change a `<p>`, and no `text-*` colour or
+  `font-*` weight a heading, typography's `prose` included. Each keeps its
+  place and its values, so an element that sets nothing renders as before.
+  The provider-theme overrides (`:is(.theme-*) header`, `footer`, `a`) stay
+  unlayered on purpose.
+  - Measured on the built site before and after, at 1280 px in both themes:
+    the home page, an Azure blog post and `/education/labs` change only where
+    an element's own utilities now apply. Headings take their `font-bold` and
+    written colour, `text-sm` and `text-xs` paragraphs their own line height
+    (`/education/labs` is 108 px shorter), and the article body typography's
+    spacing and `prose-p:leading-[1.8]`. axe `color-contrast` over 84 routes
+    in both themes: the same 48 violations before and after.
+  - 46 headings on 16 public pages had depended on the old colour. The
+    dark-first pages (the AWS, Azure, GCP and FinOps architecture pages, the
+    podcast page and episode player, GitHub tools and workflows, FinOps
+    tools) set `text-white` on headings that sit on light surfaces in light
+    mode, which the forced colour had hidden: against the painted background
+    they read 1.0 to 2.6:1 once it moved. They drop `text-white` and keep
+    the heading colour they always rendered with. The muted `text-slate-400`
+    eyebrows on the architecture and education pages gain `text-slate-600`
+    for light mode, and the home page's hover-panel eyebrows
+    `dark:text-slate-400`.
+  - `ProviderStrip` and the Docker pages drop the `!m-0`, `!leading-6` and
+    `!mb-0` the old rule had forced on them.
 - **Replicate MCP and Hostinger MCP sign in with OAuth Connect instead of
   sitting red on the AI Engine.** On 2026-10-08 both cards read "Error":
   Replicate's hosted server (`https://mcp.replicate.com/sse`) answers the

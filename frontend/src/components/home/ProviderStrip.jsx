@@ -169,15 +169,15 @@ function ProviderGuideFrame({ active }) {
   const label = active ? websiteLinkLabel(active) : null;
   return (
     // max-w-[42rem], not max-w-2xl: this theme redefines --container-2xl as
-    // 1400px. The paragraphs carry !m-0 and !leading-6 because index.css
-    // styles every `p` outside a layer, which beats a plain utility.
+    // 1400px. The paragraphs set m-0 and leading-6 over the `p` default in
+    // index.css, which sits in @layer base so a plain utility wins over it.
     <div
       data-testid="provider-guide"
       className="glass-panel mx-auto mt-6 flex w-full max-w-[42rem] items-end gap-4 rounded-xl px-5 py-4"
     >
       <div className="grid min-h-24 flex-1 text-sm leading-6">
         {FRAME_TEXTS.map((text) => (
-          <p key={text} aria-hidden="true" className="invisible !m-0 !leading-6 [grid-area:1/1]">
+          <p key={text} aria-hidden="true" className="invisible m-0 leading-6 [grid-area:1/1]">
             {text}
           </p>
         ))}
@@ -186,7 +186,7 @@ function ProviderGuideFrame({ active }) {
           aria-live="polite"
           aria-atomic="true"
           className={cn(
-            '!m-0 !leading-6 [grid-area:1/1]',
+            'm-0 leading-6 [grid-area:1/1]',
             active ? 'text-slate-700 dark:text-slate-200' : 'text-slate-500 dark:text-slate-400'
           )}
         >

@@ -251,7 +251,7 @@ function SubscribeSidebar({ meta, platforms, urlFor }) {
       <div
         className={`bg-gradient-to-br ${meta.subscribeBg} backdrop-blur-md border ${meta.subscribeBorder} rounded-2xl p-6`}
       >
-        <h3 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+        <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
           <span className={`material-symbols-outlined ${meta.subscribeIcon} text-[20px]`}>
             podcast
           </span>
@@ -504,7 +504,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
           <div
             className={`absolute -top-10 -left-10 w-96 h-96 ${meta.glow} blur-3xl rounded-full pointer-events-none`}
           />
-          <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold text-white mb-4 relative z-10">
+          <h1 className="text-3xl sm:text-5xl md:text-6xl font-bold mb-4 relative z-10">
             <span className={`bg-clip-text text-transparent bg-gradient-to-r ${meta.gradient}`}>
               {meta.name} Podcast
             </span>
@@ -543,7 +543,7 @@ export default function SharedPodcastPage({ provider: providerProp } = {}) {
             {/* Episode List */}
             <section>
               <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                <h3 className="text-xl font-bold flex items-center gap-2">
                   <span className={`material-symbols-outlined ${meta.sectionIcon} text-[22px]`}>
                     library_music
                   </span>

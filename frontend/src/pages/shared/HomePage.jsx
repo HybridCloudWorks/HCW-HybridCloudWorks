@@ -420,7 +420,7 @@ export default function HomePage() {
 
             {/* Floating Blurry Pane */}
             <div className="absolute inset-0 bg-white/85 dark:bg-slate-900/90 backdrop-blur-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-20 flex flex-col p-6 rounded-xl border border-glass-border">
-              <h4 className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-3">
+              <h4 className="text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold mb-3">
                 Architectures
               </h4>
               <div className="flex flex-col gap-2 flex-1 justify-center">
@@ -480,7 +480,7 @@ export default function HomePage() {
 
             {/* Floating Blurry Pane */}
             <div className="absolute inset-0 bg-white/85 dark:bg-slate-900/90 backdrop-blur-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-20 flex flex-col p-6 rounded-xl border border-glass-border">
-              <h4 className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-3">
+              <h4 className="text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold mb-3">
                 Learning Hubs
               </h4>
               <div className="flex flex-col gap-3 flex-1 justify-center">
@@ -541,7 +541,7 @@ export default function HomePage() {
 
             {/* Floating Blurry Pane */}
             <div className="absolute inset-0 bg-white/85 dark:bg-slate-900/90 backdrop-blur-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 z-20 flex flex-col p-6 rounded-xl border border-glass-border">
-              <h4 className="text-xs uppercase tracking-widest text-slate-500 font-bold mb-3">
+              <h4 className="text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400 font-bold mb-3">
                 Frameworks, Modules and Workflows
               </h4>
               <div className="flex flex-col gap-3 flex-1 justify-center">

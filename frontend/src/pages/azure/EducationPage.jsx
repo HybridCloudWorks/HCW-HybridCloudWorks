@@ -1465,7 +1465,7 @@ export default function AzureEducationPage() {
 
               <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] gap-8">
                 <div>
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">
+                  <h3 className="text-sm font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-3">
                     Microsoft Learn Modules
                   </h3>
                   <div className="space-y-2">
@@ -1498,7 +1498,7 @@ export default function AzureEducationPage() {
                 </div>
 
                 <aside className="bg-card/50 border border-card/60 rounded-2xl p-5">
-                  <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">
+                  <h3 className="text-sm font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-4">
                     Path Snapshot
                   </h3>
                   <div className="grid grid-cols-2 gap-3 mb-5">
@@ -1518,7 +1518,7 @@ export default function AzureEducationPage() {
 
                   {selectedPath.relatedAppliedSkills.length > 0 && (
                     <>
-                      <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">
+                      <h3 className="text-sm font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider mb-3">
                         Associated Applied Skills
                       </h3>
                       <div className="space-y-3 mb-5">

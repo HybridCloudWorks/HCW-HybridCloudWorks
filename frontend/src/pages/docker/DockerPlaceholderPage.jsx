@@ -19,7 +19,7 @@ import Eyebrow from '@/components/shared/Eyebrow';
 export function ComingSoon({ className = '' }) {
   return (
     <p
-      className={`!mb-0 inline-flex w-fit items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary dark:text-(--slate-blue) ${className}`}
+      className={`mb-0 inline-flex w-fit items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-primary dark:text-(--slate-blue) ${className}`}
     >
       <span className="material-symbols-outlined text-sm" aria-hidden="true">
         construction
