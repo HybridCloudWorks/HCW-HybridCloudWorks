@@ -100,6 +100,14 @@ surface. Most hubs have no probe. Two links to `/admin/platform-settings`
 | Hand-built Cert editor overlay vs `ui/dialog` | `ui/dialog` |
 | Status vocabulary on five surfaces | `lib/status.js`: healthy / degraded / misconfigured / unavailable / unknown for systems; one label map for content statuses |
 
+**Amended 2026-10-08 (#1010, #1011).** The system words are now healthy /
+degraded / critical / offline / unknown. Critical replaces misconfigured and
+covers every check that answered and said no; offline replaces unavailable
+and means not reachable, or silent past a heartbeat. The transition rules
+(freshness windows, critical against offline, the heartbeat) are written in
+`lib/status.js` beside the words, and `toSystemStatus` still reads the two
+old ids.
+
 ## 3. Navigation map (sidebar)
 
 ```
