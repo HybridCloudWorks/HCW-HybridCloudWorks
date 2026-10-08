@@ -377,7 +377,10 @@ describe('the workspace', () => {
       { timeout: 5000 }
     );
     expect(await screen.findByText(/Sent to In Review/, {}, { timeout: 5000 })).toBeInTheDocument();
-  });
+    // The three waits above allow 5 s each, and vitest's own limit for a test
+    // is 5 s, so under load the test was killed before its waits could be
+    // used (CI on acbbd716, 2026-10-08). The limit has to cover all three.
+  }, 20000);
 
   it('Draft and Finish say what to do when nothing exists yet', async () => {
     renderPage('/admin/forge-studio?tab=draft');

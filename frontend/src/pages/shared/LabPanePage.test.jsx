@@ -369,7 +369,10 @@ describe('LabPanePage, the pane', () => {
       act(() => {
         document.dispatchEvent(new Event('fullscreenchange'));
       });
-      fireEvent.click(screen.getByRole('button', { name: 'Exit full screen' }));
+      // Awaited: the pane reads full screen through useSyncExternalStore, and
+      // under the full suite's load the re-render that relabels the button
+      // can land after a synchronous query (#997).
+      fireEvent.click(await screen.findByRole('button', { name: 'Exit full screen' }));
       expect(exitFullscreen).toHaveBeenCalledTimes(1);
     });
   });
