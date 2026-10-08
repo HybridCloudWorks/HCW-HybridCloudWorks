@@ -70,12 +70,12 @@ it('fetchLabsEstate returns the configured shape untouched', async () => {
     configured: true,
     arc: {
       status: 'Connected',
-      lastHeartbeatAt: '2026-09-25T10:00:00Z',
+      statusSince: '2026-09-25T10:00:00Z',
       agentVersion: '1.52.02988.2222',
       osName: 'Ubuntu 24.04.3 LTS',
     },
-    policy: { compliant: 12, nonCompliant: 1 },
-    agent: { online: true, queued: 0 },
+    policy: { compliant: 12, nonCompliant: 1, notApplicable: 5 },
+    agent: { online: true, queued: 0, lastHeartbeatAt: '2026-09-25T10:03:50Z' },
     coder: { reachable: true, running: 1, max: 5 },
     asOf: '2026-09-25T10:04:00Z',
   };

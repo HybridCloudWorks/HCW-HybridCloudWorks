@@ -45,7 +45,21 @@ const DAY = 24 * HOUR;
  * or null, and anything else is not something this page should guess about.
  */
 export function heartbeatAgeWords(iso, nowMs) {
-  if (iso === null || iso === undefined) return 'no heartbeat recorded';
+  return timeAgoWords(iso, nowMs, 'no heartbeat recorded');
+}
+
+/**
+ * "3 days ago" for the moment a status began — Arc's last status change,
+ * which is not a heartbeat: a host connected without a break for three days
+ * changed status three days ago. Null is "not recorded".
+ */
+export function sinceWords(iso, nowMs) {
+  return timeAgoWords(iso, nowMs, 'not recorded');
+}
+
+/** The age of `iso` in words, `missing` for null, "unknown" for anything unparseable. */
+function timeAgoWords(iso, nowMs, missing) {
+  if (iso === null || iso === undefined) return missing;
   const then = new Date(iso).getTime();
   if (Number.isNaN(then)) return 'unknown';
   const reference = Number.isFinite(nowMs) ? nowMs : Date.now();
@@ -86,12 +100,23 @@ export function capacityWords(capacity) {
   return `${running} of ${plural(max, 'workspace')} running`;
 }
 
-/** "12 compliant, 1 non-compliant" for the Arc machine's policy assignments. */
+/**
+ * "12 compliant, 1 non-compliant" for the lab's policy checks, with ", 5 not
+ * applicable to this lab" when some cannot evaluate here: checks for a
+ * feature the lab does not use, which the estate read counts apart rather
+ * than as failures. The clause is left out at zero, and for a response from
+ * before the count existed.
+ */
 export function policyWords(policy) {
   const compliant = Number(policy?.compliant);
   const nonCompliant = Number(policy?.nonCompliant);
   if (!Number.isFinite(compliant) || !Number.isFinite(nonCompliant)) return 'not evaluated';
-  return `${compliant} compliant, ${nonCompliant} non-compliant`;
+  const notApplicable = Number(policy?.notApplicable);
+  const apart =
+    Number.isFinite(notApplicable) && notApplicable > 0
+      ? `, ${notApplicable} not applicable to this lab`
+      : '';
+  return `${compliant} compliant, ${nonCompliant} non-compliant${apart}`;
 }
 
 /** "online, 2 jobs queued" for the lab's job runner; "unavailable" when there is none. */
@@ -100,6 +125,20 @@ export function agentWords(agent) {
   const queued = Number(agent.queued);
   const queue = Number.isFinite(queued) ? `${plural(queued, 'job')} queued` : 'queue unknown';
   return `${agent.online ? 'online' : 'offline'}, ${queue}`;
+}
+
+/**
+ * The job runner's last heartbeat: "just now" / "1 minute ago" while it is
+ * online. The estate read sends the time only for a runner that is online,
+ * so null means none in the last minute and a half, said that way rather
+ * than as an age that would describe a runner that had stopped.
+ */
+export function runnerHeartbeatWords(agent, nowMs) {
+  if (!agent || typeof agent.online !== 'boolean') return 'unavailable';
+  if (agent.lastHeartbeatAt === null || agent.lastHeartbeatAt === undefined) {
+    return 'none in the last 90 seconds';
+  }
+  return heartbeatAgeWords(agent.lastHeartbeatAt, nowMs);
 }
 
 /**

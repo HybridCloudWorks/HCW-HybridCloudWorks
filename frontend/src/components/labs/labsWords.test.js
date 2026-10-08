@@ -9,6 +9,8 @@ import {
   plural,
   policyWords,
   providerName,
+  runnerHeartbeatWords,
+  sinceWords,
 } from './labsWords';
 
 const NOW = Date.parse('2026-09-25T12:00:00Z');
@@ -77,6 +79,34 @@ describe('the other words', () => {
     expect(agentWords({ online: true, queued: 2 })).toBe('online, 2 jobs queued');
     expect(agentWords({ online: false, queued: 0 })).toBe('offline, 0 jobs queued');
     expect(agentWords(null)).toBe('unavailable');
+  });
+
+  it('counts checks that cannot evaluate here apart from failures, and only says so when there are some (#1009)', () => {
+    expect(policyWords({ compliant: 3, nonCompliant: 0, notApplicable: 6 })).toBe(
+      '3 compliant, 0 non-compliant, 6 not applicable to this lab'
+    );
+    expect(policyWords({ compliant: 3, nonCompliant: 1, notApplicable: 0 })).toBe(
+      '3 compliant, 1 non-compliant'
+    );
+  });
+
+  it('calls Arc\'s status change a time since, never a heartbeat, and null "not recorded" (#1009)', () => {
+    expect(sinceWords(ago(3 * 86_400_000), NOW)).toBe('3 days ago');
+    expect(sinceWords(null, NOW)).toBe('not recorded');
+    expect(sinceWords('whenever', NOW)).toBe('unknown');
+  });
+
+  it('gives the job runner heartbeat only for a runner that is online', () => {
+    expect(
+      runnerHeartbeatWords({ online: true, queued: 0, lastHeartbeatAt: ago(20_000) }, NOW)
+    ).toBe('just now');
+    expect(
+      runnerHeartbeatWords({ online: true, queued: 0, lastHeartbeatAt: ago(70_000) }, NOW)
+    ).toBe('1 minute ago');
+    expect(runnerHeartbeatWords({ online: false, queued: 0, lastHeartbeatAt: null }, NOW)).toBe(
+      'none in the last 90 seconds'
+    );
+    expect(runnerHeartbeatWords(null, NOW)).toBe('unavailable');
   });
 
   it('names every provider hub the router serves, and echoes an unknown segment (ADR 0033)', () => {

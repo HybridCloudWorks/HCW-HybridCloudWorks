@@ -529,9 +529,12 @@ function requireConfiguredFlag(body, what) {
 /**
  * GET public/labs/estate — the live view of the Hybrid Lab host (#664):
  * `{ configured: false }` until the resource group exists, otherwise
- * `{ configured: true, arc: { status, lastHeartbeatAt, agentVersion, osName },
- * policy: { compliant, nonCompliant } | null, agent: { online, queued } | null,
- * coder: { reachable, running, max } | null, asOf }`. Read through the
+ * `{ configured: true, arc: { status, statusSince, agentVersion, osName },
+ * policy: { compliant, nonCompliant, notApplicable } | null,
+ * agent: { online, queued, lastHeartbeatAt } | null,
+ * coder: { reachable, running, max } | null, asOf }`. `statusSince` is when
+ * Arc's status last changed, not a heartbeat; `agent.lastHeartbeatAt` is the
+ * job runner's, null unless it is online (#1009). Read through the
  * Function App's managed identity and cached a minute server-side; the
  * browser never talks to Azure.
  *
