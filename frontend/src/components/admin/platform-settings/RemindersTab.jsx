@@ -50,6 +50,8 @@ import {
   XCircle,
 } from 'lucide-react';
 import { postJSON } from '@/lib/api';
+import { LINK_PARAMS } from '@/lib/itemLinks';
+import useLinkedItem from '@/hooks/useLinkedItem';
 import IntegrationBadge from '@/components/admin/shared/IntegrationBadge';
 import TelegramReconnectPanel from './TelegramReconnectPanel';
 import {
@@ -389,6 +391,8 @@ export function NewReminderForm({ saving, onAdd }) {
 function ReminderItem({ reminder, today, saving, onEdit, onToggleDone, onCancel }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
+  // `?reminder=<id>` (the dashboard's Decision Center) scrolls to this one and rings it.
+  const { ref, linkedProps, linkedClassName } = useLinkedItem(LINK_PARAMS.reminder, reminder.id);
   const due = describeDue(reminder, today);
   const said = describeNotified(reminder.notified);
 
@@ -413,7 +417,11 @@ function ReminderItem({ reminder, today, saving, onEdit, onToggleDone, onCancel 
   }
 
   return (
-    <li className="flex flex-wrap items-start gap-3 rounded-md border border-border p-3">
+    <li
+      ref={ref}
+      {...linkedProps}
+      className={`flex flex-wrap items-start gap-3 rounded-md border border-border p-3 ${linkedClassName}`}
+    >
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <span

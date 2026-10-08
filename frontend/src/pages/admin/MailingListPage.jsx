@@ -33,6 +33,7 @@ import StatusBadge from '@/components/admin/shared/StatusBadge';
 import HubTabs from '@/components/admin/HubTabs';
 import { Mail, Loader2, RefreshCw, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
 import { postJSON } from '@/lib/api';
+import { LINK_PARAMS } from '@/lib/itemLinks';
 import { countList, unwrapProxy } from '@/lib/proxyEnvelope';
 import NewsletterIssues from '@/components/admin/newsletter/NewsletterIssues';
 import NewsletterPublished from '@/components/admin/newsletter/NewsletterPublished';
@@ -218,8 +219,9 @@ export default function MailingListPage() {
   // the newsletter rather than on a blank page.
   const requested = MOVED_TABS[searchParams.get('tab')] ?? searchParams.get('tab');
   const activeTab = TAB_IDS.has(requested) ? requested : 'newsletter';
-  // The Calendar links an issue as `?tab=published&issue=<id>`.
-  const issueParam = searchParams.get('issue') || null;
+  // The Calendar links an issue as `?tab=published&issue=<id>`; the
+  // dashboard's Decision Center as `?tab=newsletter` or `?tab=drafts`.
+  const issueParam = searchParams.get(LINK_PARAMS.issue) || null;
   const [connected, setConnected] = useState('checking');
 
   useEffect(() => {
@@ -255,8 +257,10 @@ export default function MailingListPage() {
         idPrefix="newsletter"
         label="Newsletter Hub"
       >
-        {activeTab === 'newsletter' && <NewsletterIssues view="review" />}
-        {activeTab === 'drafts' && <NewsletterIssues view="drafts" />}
+        {activeTab === 'newsletter' && (
+          <NewsletterIssues view="review" linkedIssueId={issueParam} />
+        )}
+        {activeTab === 'drafts' && <NewsletterIssues view="drafts" linkedIssueId={issueParam} />}
         {activeTab === 'published' && <NewsletterPublished initialIssueId={issueParam} />}
         {activeTab === 'audience' && <NewsletterAudience />}
         {activeTab === 'settings' && <SettingsTab onStatusChange={setConnected} />}

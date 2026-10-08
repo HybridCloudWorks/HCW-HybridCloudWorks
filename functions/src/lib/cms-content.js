@@ -102,6 +102,10 @@ export const ADMIN_CONTENT_SNAPSHOT_FIELDS = [
   "critiqueSpecificityScore",
   "critiqueIssues",
   "draftRevised",
+  // When Drafts' Send to In Review moved it into the Review Queue: an article
+  // written on the page has no fetchedAt, so the queue orders it by this
+  // (admin-snapshots.js reviewWaitingSince).
+  "sentToReviewAt",
   // Taxonomy (ADR 0033 §4): what the item becomes, how it became an idea.
   "kind",
   "ideaOrigin",

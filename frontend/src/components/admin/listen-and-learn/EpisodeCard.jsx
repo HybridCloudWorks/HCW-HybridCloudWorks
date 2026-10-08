@@ -9,6 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import { Loader2, VolumeX } from 'lucide-react';
+import useLinkedItem from '@/hooks/useLinkedItem';
+import { LINK_PARAMS } from '@/lib/itemLinks';
 import { EpisodeSources } from '@/pages/admin/SourceGroundingPanel';
 import ChapterPlayer from './ChapterPlayer';
 import RegenerationNotice from './RegenerationNotice';
@@ -73,9 +75,15 @@ function EpisodeBadges({ episode }) {
 export default function EpisodeCard({ episode, busy, onReview, onRetry, onKeepCurrent }) {
   const published = episode.status === 'published';
   const failedOnly = episode.status === 'failed' && episode.error && !episode.lastError;
+  // `?chapter=<id>` (the dashboard's Decision Center) scrolls to this card and rings it.
+  const { ref, linkedProps, linkedClassName } = useLinkedItem(LINK_PARAMS.chapter, episode.id);
 
   return (
-    <div className="space-y-3 rounded-lg border border-border p-4">
+    <div
+      ref={ref}
+      {...linkedProps}
+      className={`space-y-3 rounded-lg border border-border p-4 ${linkedClassName}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-semibold">{episode.title || episode.areaName}</p>

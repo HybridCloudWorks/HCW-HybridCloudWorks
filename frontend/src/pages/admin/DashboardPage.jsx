@@ -11,18 +11,15 @@
  * "Explore" strip that introduces each group of the menu in one sentence,
  * for a user who has never seen the product.
  */
-import React, { useMemo } from 'react';
+import React from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useAuthReady } from '@/hooks/useAuthReady';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import {
   Zap,
-  ListChecks,
-  CheckCircle,
   RefreshCw,
   Loader2,
-  ArrowRight,
   TrendingUp,
   FileText,
   Globe,
@@ -33,33 +30,12 @@ import {
 } from 'lucide-react';
 import useDashboardCounts from '@/hooks/useDashboardCounts';
 import { NAV_GROUPS } from '@/config/adminNav';
-import StatusBadge from '@/components/admin/shared/StatusBadge';
-import EmptyState from '@/components/admin/shared/EmptyState';
-import { labelFor, DEFAULT_IDEA_ORIGINS, resolveIdeaOrigin } from '@/lib/taxonomy';
+import DecisionCenter from '@/components/admin/dashboard/DecisionCenter';
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
 function pluralize(n, word) {
   return `${n} ${word}${n !== 1 ? 's' : ''}`;
-}
-
-function toDateMaybe(value) {
-  if (!value) return null;
-  if (typeof value?.toDate === 'function') return value.toDate();
-  if (value?.seconds !== undefined) return new Date(value.seconds * 1000);
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
-function timeAgo(value) {
-  const date = toDateMaybe(value);
-  if (!date) return '';
-  const diff = Date.now() - date.getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
 }
 
 // ── The pipeline ──────────────────────────────────────────────────────────────
@@ -188,56 +164,6 @@ function DashboardPipeline({ counts }) {
 }
 
 // ── Sections ──────────────────────────────────────────────────────────────────
-
-function ContentRow({ item }) {
-  const title = item.Title || item.title || item.sourceUrl || 'Untitled';
-  const provider = item['Cloud Provider'] || item.cloudProvider || '';
-  const ago = timeAgo(item.updatedAt || item.createdAt || item.fetchedAt);
-  const origin = labelFor(DEFAULT_IDEA_ORIGINS, resolveIdeaOrigin(item));
-
-  return (
-    <Link
-      to={`/admin/queue/${item.id}`}
-      className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-muted/50 transition-colors group"
-    >
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate group-hover:text-primary transition-colors">
-          {title}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {[item.type || 'blog', provider, origin].filter(Boolean).join(' · ')}
-          {ago && <span className="ml-2 opacity-60">{ago}</span>}
-        </p>
-      </div>
-      <StatusBadge content={item} size="xs" />
-    </Link>
-  );
-}
-
-function Section({ title, icon: Icon, iconColor, to, children, hint }) {
-  return (
-    <Card>
-      <CardHeader className="pb-3 flex flex-row items-start justify-between gap-3">
-        <div>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Icon className={`h-4 w-4 ${iconColor}`} aria-hidden="true" />
-            {title}
-          </CardTitle>
-          {hint && <p className="text-xs text-muted-foreground mt-1">{hint}</p>}
-        </div>
-        {to && (
-          <Link
-            to={to}
-            className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors shrink-0"
-          >
-            View all <ArrowRight className="h-3 w-3" aria-hidden="true" />
-          </Link>
-        )}
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
-  );
-}
 
 function DashboardHeader({ today, counts, loadError, recalculating, onRecalculate, onNewContent }) {
   return (
@@ -415,47 +341,6 @@ function DashboardExplore() {
   );
 }
 
-function DashboardNeedsReview({ recentNeedsReview }) {
-  return (
-    <Section
-      title="Needs a decision"
-      icon={ListChecks}
-      iconColor="text-amber-500"
-      to="/admin/queue"
-      hint="The newest items waiting in the Review Queue. Open one to approve, send back or reject."
-    >
-      {recentNeedsReview.length === 0 ? (
-        <EmptyState
-          compact
-          icon={CheckCircle}
-          title="Nothing in the queue"
-          description="New imports, feed items and drafts sent to review will appear here."
-          action={
-            <Button asChild size="sm" variant="outline">
-              <Link to="/admin/submit">Start something new</Link>
-            </Button>
-          }
-        />
-      ) : (
-        <div className="divide-y divide-border/50">
-          {recentNeedsReview.slice(0, 8).map((item) => (
-            <ContentRow key={item.id} item={item} />
-          ))}
-          {recentNeedsReview.length > 8 && (
-            <Link
-              to="/admin/queue"
-              className="flex items-center justify-center gap-1 pt-3 text-xs text-muted-foreground hover:text-primary transition-colors"
-            >
-              +{recentNeedsReview.length - 8} more{' '}
-              <ArrowRight className="h-3 w-3" aria-hidden="true" />
-            </Link>
-          )}
-        </div>
-      )}
-    </Section>
-  );
-}
-
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -479,8 +364,6 @@ export default function DashboardPage() {
       setRecalculating(false);
     }
   };
-
-  const recentNeedsReview = useMemo(() => snapshot?.recentNeedsReview || [], [snapshot]);
 
   const today = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
@@ -511,7 +394,7 @@ export default function DashboardPage() {
       />
       <DashboardPipeline counts={counts} />
       <DashboardStats counts={counts} />
-      <DashboardNeedsReview recentNeedsReview={recentNeedsReview} />
+      <DecisionCenter enabled={authReady} />
       <DashboardExplore />
     </div>
   );

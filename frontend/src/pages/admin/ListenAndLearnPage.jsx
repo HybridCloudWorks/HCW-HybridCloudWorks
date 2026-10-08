@@ -19,7 +19,9 @@
  *
  * Deep links are `?tab=`; the old tab and section words (published, sets,
  * episodes, voice, grounding) and anything unknown land where their content
- * went (listen-and-learn/tabs.js).
+ * went (listen-and-learn/tabs.js). `?platform=&exam=` opens that book, and
+ * `&chapter=` rings one of its chapters — the dashboard's Decision Center
+ * links a chapter awaiting review as `?tab=review&platform&exam&chapter`.
  *
  * The books and the open book's chapters are read once, here on the page,
  * because Library and Review both show them and an approval on one must be
@@ -29,10 +31,11 @@
  * live in the hook rather than in the Generate tab.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useSearchParams } from 'react-router';
 import { Headphones } from 'lucide-react';
 import { useAuthReady } from '@/hooks/useAuthReady';
+import { LINK_PARAMS } from '@/lib/itemLinks';
 import PageHeader from '@/components/admin/shared/PageHeader';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
 import HubTabs from '@/components/admin/HubTabs';
@@ -101,6 +104,16 @@ export default function ListenAndLearnPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = resolveTab(searchParams.get('tab'));
   const hub = useListenAndLearn(ready);
+
+  // A link that names a book opens it once the session is ready. Deferred
+  // like every other admin read: the effect starts it, state follows.
+  const linkedPlatform = searchParams.get(LINK_PARAMS.platform);
+  const linkedExam = searchParams.get(LINK_PARAMS.exam);
+  const { openSet } = hub;
+  useEffect(() => {
+    if (!ready || !linkedPlatform || !linkedExam) return;
+    queueMicrotask(() => openSet(linkedPlatform, linkedExam));
+  }, [ready, linkedPlatform, linkedExam, openSet]);
 
   const setTab = (id) => {
     if (id === activeTab) return;

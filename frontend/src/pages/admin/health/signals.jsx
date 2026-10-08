@@ -19,6 +19,8 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import StatusBadge from '@/components/admin/shared/StatusBadge';
+import useLinkedItem from '@/hooks/useLinkedItem';
+import { LINK_PARAMS } from '@/lib/itemLinks';
 import { AlertTriangle, CheckCircle2, Workflow } from 'lucide-react';
 
 export const ALERT_FILTERS = [
@@ -316,8 +318,15 @@ function AlertRow({
   handleAlertAction,
 }) {
   const status = getAlertStatus(alert);
+  // `?alert=<id>` (the dashboard's Decision Center) scrolls to this alert and rings it.
+  const { ref, linkedProps, linkedClassName } = useLinkedItem(LINK_PARAMS.alert, alert.id);
   return (
-    <div key={alert.id} className="rounded-lg border p-3">
+    <div
+      key={alert.id}
+      ref={ref}
+      {...linkedProps}
+      className={`rounded-lg border p-3 ${linkedClassName}`}
+    >
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-sm font-medium">{alert.alertType || 'workflow_alert'}</p>

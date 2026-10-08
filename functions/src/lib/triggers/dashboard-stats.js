@@ -12,13 +12,18 @@
  * a lost delta is recoverable, a stale marker skews every later one.
  *
  * The classification mirrors admin-snapshots.js summarizeDashboardItems so
- * the maintained counters agree with a full-scan recompute.
+ * the maintained counters agree with a full-scan recompute, and the recompute
+ * (recalculateDashboardStats) re-derives the markers with `rederiveMarkers`
+ * below, so a change to the classification is applied to both by one Recount.
+ * admin-snapshots.js loads this module with a dynamic import, at call time,
+ * because this module imports it statically.
  */
 import {
   isBlockedContentSource,
   getCanonicalContentTypeForAdmin,
   DASHBOARD_STATS_DOC_ID,
 } from '../admin-snapshots.js';
+import { REVIEW_DECISION_STATUSES } from '../cms/content-status.js';
 
 export const MARKERS_CONTAINER = 'content_stats_markers';
 export const ABSENT_POSITION = Object.freeze({ exists: false, bucket: null, type: null });
@@ -31,7 +36,8 @@ export const ABSENT_POSITION = Object.freeze({ exists: false, bucket: null, type
  * is sent to In Review.
  */
 const UNCOUNTED_STATUSES = new Set(['archived', 'drafting']);
-const NEEDS_REVIEW_STATUSES = new Set(['draft', 'ingested', 'inspected']);
+/** draft, ingested, inspected and — since 2026-10-08 — in_review. */
+const NEEDS_REVIEW_STATUSES = new Set(REVIEW_DECISION_STATUSES);
 
 /** 'needsReview' | 'inProgress' | 'published' | 'rejected' | null (archived / drafting / missing / blocked). */
 export function classifyContentBucket(data) {
@@ -98,6 +104,80 @@ export function applyDeltas(stats, deltas) {
     next[type][bucket] = Math.max(0, (Number(next[type][bucket]) || 0) + delta);
   }
   return next;
+}
+
+/** The markers one Recount reads: one per content document, bounded like its scan. */
+export const MARKER_SCAN_TOP = 5000;
+/** Marker writes a Recount keeps in flight at once. */
+const MARKER_WRITE_BATCH = 10;
+
+const hasStatus = (code) => (err) => err?.code === code || err?.statusCode === code;
+const isConflict = hasStatus(409);
+const isPreconditionFailed = hasStatus(412);
+
+/** The write that brings one marker to `position`, or null when it is there already. */
+function markerWrite(store, { id, marker, position, stamp }) {
+  const next = { bucket: position.bucket, type: position.type, updatedAt: stamp };
+  if (!marker) {
+    return () =>
+      store.createDoc(MARKERS_CONTAINER, { id, ...next }).then(
+        () => 'created',
+        (err) => {
+          if (isConflict(err)) return 'skipped';
+          throw err;
+        }
+      );
+  }
+  const current = { exists: true, bucket: marker.bucket ?? null, type: marker.type ?? null };
+  if (positionsEqual(current, position)) return null;
+  return () =>
+    store.replaceDocIfMatch(MARKERS_CONTAINER, { ...marker, ...next }).then(
+      () => 'rewritten',
+      (err) => {
+        if (isPreconditionFailed(err)) return 'skipped';
+        throw err;
+      }
+    );
+}
+
+/**
+ * Bring each scanned document's marker to the position the current
+ * classification gives it: the half of a Recount the counters alone cannot
+ * do, because every later delta is computed from the marker. A marker the
+ * change feed moved after it was read (412) or created meanwhile (409) is
+ * left as the feed wrote it — that write is newer than the scan. Markers of
+ * documents outside the scan are not touched.
+ *
+ * @param {object} args
+ * @param {{ queryDocs: Function, createDoc: Function, replaceDocIfMatch: Function }} args.store
+ * @param {object[]} args.items the scanned content documents
+ * @param {() => Date} [args.now]
+ * @returns {Promise<{ checked: number, created: number, rewritten: number, skipped: number }>}
+ */
+export async function rederiveMarkers({ store, items, now = () => new Date() }) {
+  const rows = await store.queryDocs(MARKERS_CONTAINER, `SELECT TOP ${MARKER_SCAN_TOP} * FROM c`, []);
+  const markers = new Map((rows || []).map((row) => [row.id, row]));
+  const stamp = now().toISOString();
+  const scanned = items || [];
+  const writes = scanned
+    .map((item) =>
+      markerWrite(store, {
+        id: item.id,
+        marker: markers.get(item.id),
+        position: resolveStatsPosition(item),
+        stamp,
+      })
+    )
+    .filter(Boolean);
+  const tally = { checked: scanned.length, created: 0, rewritten: 0, skipped: 0 };
+  for (let start = 0; start < writes.length; start += MARKER_WRITE_BATCH) {
+    const batch = writes.slice(start, start + MARKER_WRITE_BATCH);
+    const outcomes = await Promise.all(batch.map((write) => write()));
+    outcomes.forEach((outcome) => {
+      tally[outcome] += 1;
+    });
+  }
+  return tally;
 }
 
 /**

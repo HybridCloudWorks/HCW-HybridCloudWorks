@@ -26,13 +26,17 @@ import {
   Undo2,
 } from 'lucide-react';
 import { safeUrl } from '@/lib/safeUrl';
+import { LINK_PARAMS } from '@/lib/itemLinks';
+import useLinkedItem from '@/hooks/useLinkedItem';
 import { fmtDate } from './recordingView';
 import { HostLine, ReadState, SourceChip, StatusBadge } from './shared';
 
 function TranscriptRow({ item, onOpen, onReview, onRetry, busy }) {
   const audio = safeUrl(item.audioUrl);
+  // `?transcript=<id>` (the dashboard's Decision Center) scrolls to this row and rings it.
+  const { ref, linkedProps, linkedClassName } = useLinkedItem(LINK_PARAMS.transcript, item.id);
   return (
-    <Card>
+    <Card ref={ref} {...linkedProps} className={linkedClassName}>
       <CardContent className="p-4 space-y-2">
         <div className="flex items-start gap-3">
           <div className="rounded-full bg-violet-100 dark:bg-violet-900/40 p-2 mt-0.5 shrink-0">

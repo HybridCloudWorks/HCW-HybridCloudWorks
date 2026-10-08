@@ -13,6 +13,9 @@
  *     instead of vanishing — for an admin queue, showing an item with a
  *     missing timestamp beats hiding it, and the source itself shipped an
  *     unsorted-fetch + JS-sort fallback path accepting these semantics.
+ *     The read WINDOW is ordered in Cosmos by `_ts`, which every document
+ *     carries, so `TOP n` takes the n most recently written rather than an
+ *     arbitrary n (#1013, NEWEST_WRITTEN_FIRST).
  *   - The dashboard stats doc (Firestore `dashboard_stats/v1`) lives in the
  *     existing `system` container as `dashboard_stats_v1`. No container was
  *     migrated for it because it is derived data — recalculateDashboardStats
@@ -20,6 +23,7 @@
  *     load exactly as the source did.
  */
 import { ADMIN_CONTENT_SNAPSHOT_FIELDS } from "./cms-content.js";
+import { REVIEW_DECISION_STATUSES } from "./cms/content-status.js";
 import { resolveIdeaOrigin, resolveKind } from "./cms/taxonomy.js";
 
 const json = (status, body) => ({
@@ -114,7 +118,8 @@ export function matchesTaxonomyFilter(
   return true;
 }
 
-const NEEDS_REVIEW_STATUSES = new Set(["draft", "ingested", "inspected"]);
+/** draft, ingested, inspected and in_review (content-status.js REVIEW_DECISION_STATUSES). */
+const NEEDS_REVIEW_STATUSES = new Set(REVIEW_DECISION_STATUSES);
 const READY_STATUSES = new Set(["approved", "forge_ready", "published"]);
 /**
  * Not in progress: rejected and archived are out of the pipeline; drafting
@@ -197,15 +202,11 @@ export function summarizeDashboardItems(items = []) {
         return;
       }
 
-      if (
-        status === "draft" ||
-        status === "ingested" ||
-        status === "inspected"
-      ) {
+      if (NEEDS_REVIEW_STATUSES.has(status)) {
         bucket.needsReview += 1;
       } else if (status !== "archived") {
-        // Everything else not-yet-Live (in_review, approved, editing,
-        // published staged but Live=false) is in progress.
+        // Everything else not-yet-Live (approved, editing, needs_rework,
+        // forge_ready, published staged but Live=false) is in progress.
         bucket.inProgress += 1;
       }
     });
@@ -222,7 +223,7 @@ export function summarizeDashboardItems(items = []) {
  */
 const QUEUE_FILTERS = Object.freeze({
   needs_review: {
-    statuses: ["draft", "ingested", "inspected"],
+    statuses: REVIEW_DECISION_STATUSES,
     sortField: "fetchedAt",
   },
   // forge_ready is publishable (content-status.js PUBLISHABLE_NORMALIZED_STATUSES)
@@ -233,15 +234,10 @@ const QUEUE_FILTERS = Object.freeze({
   },
   published_live: { where: "c.Live = true", sortField: "publishedAt" },
   // The same set the dashboard counts as inProgress (triggers/dashboard-stats.js),
-  // so the Editor badge never counts an item this view cannot show.
+  // so the Editor badge never counts an item this view cannot show. in_review
+  // left it on 2026-10-08 for needs_review, as it left the inProgress counter.
   in_progress: {
-    statuses: [
-      "approved",
-      "in_review",
-      "editing",
-      "forge_ready",
-      "needs_rework",
-    ],
+    statuses: ["approved", "editing", "forge_ready", "needs_rework"],
     sortField: "updatedAt",
   },
   soft_deleted: { status: "rejected", sortField: "fetchedAt" },
@@ -272,6 +268,45 @@ export function queueFilterFor(statusFilter) {
 
 const sortDescBy = (field) => (a, b) => toMillis(b[field]) - toMillis(a[field]);
 
+/**
+ * When an item started waiting for its review decision: when it was sent to
+ * review for an `in_review` item (Drafts' Send to In Review stamps
+ * sentToReviewAt), otherwise when it arrived. An article written on the
+ * Drafts page has no fetchedAt, so ordering the review view by fetchedAt
+ * alone put every article sent from Drafts at the bottom of the queue.
+ */
+export function reviewWaitingSince(item = {}) {
+  const sent =
+    String(item.contentStatus || "") === "in_review"
+      ? item.sentToReviewAt
+      : null;
+  return (
+    sent ||
+    item.fetchedAt ||
+    item.createdAt ||
+    item["Created At"] ||
+    item.updatedAt ||
+    null
+  );
+}
+
+const byReviewWaitDesc = (a, b) =>
+  toMillis(reviewWaitingSince(b)) - toMillis(reviewWaitingSince(a));
+
+/** A view's in-memory order, where its one sortField is not the whole story. */
+const QUEUE_SORTS = Object.freeze({ needs_review: byReviewWaitDesc });
+
+/**
+ * The read window the snapshot lists take: the most recently written
+ * documents first. `TOP n` with no ORDER BY hands back an arbitrary n, so a
+ * queue longer than its window showed the newest of an arbitrary slice
+ * (#1013). `_ts` is on every document — the sort fields are not, and a
+ * Cosmos ORDER BY on a missing property drops the document (public-reads.js)
+ * — and a single-property ORDER BY needs only the range index the content
+ * container's `/*` policy gives every path (infra/cosmos-containers.json).
+ */
+export const NEWEST_WRITTEN_FIRST = " ORDER BY c._ts DESC";
+
 const FULL_SCAN_TOP = 5000; // content is ~1k docs; bounded, not unbounded
 
 /** The content reads the four snapshots share, over one store. */
@@ -285,28 +320,39 @@ function createSnapshotReads(store) {
     return Number(rows[0]) || 0;
   };
 
-  const fetchProjected = (where, params, top) =>
+  const fetchProjected = (where, params, top, orderBy = "") =>
     store.queryDocs(
       "content",
-      `SELECT TOP ${top} ${PROJECTION} FROM c WHERE ${where}`,
+      `SELECT TOP ${top} ${PROJECTION} FROM c WHERE ${where}${orderBy}`,
       params,
     );
 
+  /**
+   * The dashboard snapshot's newest review items: the most recently written
+   * review items, ordered by how long each has waited. Until #1013 the
+   * window was an unordered TOP 30, so "newest" meant the newest of an
+   * arbitrary thirty.
+   */
   async function recentNeedsReviewItems(limit = 10) {
     const { where, params } = queueFilterFor("needs_review");
-    const rows = await fetchProjected(where, params, limit * 3);
-    const freshest = (item) =>
-      toMillis(item.fetchedAt || item.updatedAt || item.createdAt);
+    const rows = await fetchProjected(
+      where,
+      params,
+      limit * 3,
+      NEWEST_WRITTEN_FIRST,
+    );
     return rows
       .filter((item) => !isBlockedContentSource(item))
-      .sort((a, b) => freshest(b) - freshest(a))
+      .sort(byReviewWaitDesc)
       .slice(0, limit);
   }
 
+  // `url` and `link` are read by isBlockedContentSource; without them a
+  // recount could count a document the change-feed maintainer leaves out.
   async function fullScanStats() {
     const rows = await store.queryDocs(
       "content",
-      `SELECT TOP ${FULL_SCAN_TOP} c.id, c["contentStatus"], c["Live"], c["type"], c["contentType"], c["publishTarget"], c["targetLandingZone"], c["sourceUrl"], c["sourceUrls"], c["sourceFeed"], c["CD Url"] FROM c`,
+      `SELECT TOP ${FULL_SCAN_TOP} c.id, c["contentStatus"], c["Live"], c["type"], c["contentType"], c["publishTarget"], c["targetLandingZone"], c["sourceUrl"], c["sourceUrls"], c["sourceFeed"], c["CD Url"], c["url"], c["link"] FROM c`,
       [],
     );
     return { items: rows, stats: summarizeDashboardItems(rows) };
@@ -379,7 +425,7 @@ async function buildQueueSnapshot({ reads, now }, body) {
   const { where, params, sortField } = queueFilterFor(statusFilter);
   const [totalCount, rawItems] = await Promise.all([
     reads.countWhere(where, params),
-    reads.fetchProjected(where, params, fetchSize),
+    reads.fetchProjected(where, params, fetchSize, NEWEST_WRITTEN_FIRST),
   ]);
 
   const blockedInPage = rawItems.filter(isBlockedContentSource).length;
@@ -389,9 +435,12 @@ async function buildQueueSnapshot({ reads, now }, body) {
     kindFilter,
     ideaOriginFilter,
   });
+  const order = Object.hasOwn(QUEUE_SORTS, statusFilter)
+    ? QUEUE_SORTS[statusFilter]
+    : sortDescBy(sortField);
   const items = rawItems
     .filter((item) => filters.every((keep) => keep(item)))
-    .sort(sortDescBy(sortField));
+    .sort(order);
 
   return {
     success: true,
@@ -541,7 +590,17 @@ export function createAdminSnapshotHandlers({
       }
     },
 
-    /** POST /api/recalculateDashboardStats — source :6109; full overwrite. */
+    /**
+     * POST /api/recalculateDashboardStats — source :6109; full overwrite.
+     *
+     * Re-derives the per-document markers as well as the counters (#1014).
+     * The change-feed maintainer computes every delta from a document's
+     * marker, so a recount that rewrote only the counters left any marker
+     * written under an older bucket rule (in_review was inProgress until
+     * 2026-10-08) to move that document out of the wrong bucket on its next
+     * change. Markers first: a run that fails part-way leaves the counters
+     * as they were, and pressing Recount again finishes it.
+     */
     async recalculateDashboardStats(request, context) {
       const auth = await guard.requireRole(request, "editor");
       if (auth.error) return auth.error;
@@ -549,6 +608,11 @@ export function createAdminSnapshotHandlers({
       try {
         const { user } = auth;
         const scan = await reads.fullScanStats();
+        // Loaded here rather than imported: triggers/dashboard-stats.js
+        // imports this module, and a static import back would make the two a
+        // cycle whose evaluation order decides whether either loads.
+        const { rederiveMarkers } = await import("./triggers/dashboard-stats.js");
+        const markers = await rederiveMarkers({ store, items: scan.items, now });
         const seed = seedFromStats(scan.stats, scan.items.length);
         seed.id = DASHBOARD_STATS_DOC_ID;
         const nowIso = now().toISOString();
@@ -565,6 +629,7 @@ export function createAdminSnapshotHandlers({
           success: true,
           totalDocs: scan.items.length,
           stats: scan.stats,
+          markers,
         });
       } catch (error) {
         context.error("recalculateDashboardStats failed:", error);

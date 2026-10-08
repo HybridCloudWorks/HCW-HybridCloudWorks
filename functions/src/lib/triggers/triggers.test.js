@@ -24,6 +24,7 @@ import {
   buildDashboardStatsDeltas,
   applyDeltas,
   createDashboardStatsMaintainer,
+  rederiveMarkers,
 } from './dashboard-stats.js';
 import {
   createAiCoverGenerator,
@@ -414,6 +415,8 @@ describe('dashboard stats', () => {
     expect(classifyContentBucket({ contentStatus: 'archived' })).toBeNull();
     expect(classifyContentBucket({ Live: true, contentStatus: 'published' })).toBe('published');
     expect(classifyContentBucket({ contentStatus: 'ingested' })).toBe('needsReview');
+    // Sent to review from Drafts: a decision waiting, not the Editor's work (#1014).
+    expect(classifyContentBucket({ contentStatus: 'in_review' })).toBe('needsReview');
     expect(classifyContentBucket({ contentStatus: 'approved' })).toBe('inProgress');
     expect(
       buildDashboardStatsDeltas(
@@ -463,6 +466,81 @@ describe('dashboard stats', () => {
     expect(store.data.system.get('dashboard_stats_v1')).toMatchObject({
       totalDocs: 0,
       blog: { needsReview: 0, published: 0, total: 0 },
+    });
+  });
+
+  describe('rederiveMarkers (the Recount half the counters cannot do)', () => {
+    /** memStore plus the two writes a Recount uses and a marker query. */
+    function recountStore(markers) {
+      const store = memStore({ content_stats_markers: markers });
+      store.queryDocs = vi.fn(async (c) => [...(store.data[c]?.values() || [])]);
+      store.createDoc = vi.fn(async (c, doc) => {
+        if (store.data[c]?.has(doc.id)) {
+          const e = new Error('409');
+          e.code = 409;
+          throw e;
+        }
+        store.data[c].set(doc.id, { ...doc, _etag: 'new' });
+        return doc;
+      });
+      return store;
+    }
+
+    it('moves a marker written under the old bucket rule, creates a missing one, and leaves a current one', async () => {
+      const store = recountStore([
+        { id: 'sent', bucket: 'inProgress', type: 'blog', _etag: 'a' }, // in_review, pre-2026-10-08
+        { id: 'same', bucket: 'needsReview', type: 'blog', _etag: 'b' },
+      ]);
+      const items = [
+        { id: 'sent', contentStatus: 'in_review', type: 'blog' },
+        { id: 'same', contentStatus: 'ingested', type: 'blog' },
+        { id: 'never-marked', contentStatus: 'approved', type: 'framework' },
+      ];
+
+      const tally = await rederiveMarkers({ store, items, now });
+
+      expect(tally).toEqual({ checked: 3, created: 1, rewritten: 1, skipped: 0 });
+      const markers = store.data.content_stats_markers;
+      expect(markers.get('sent')).toMatchObject({ bucket: 'needsReview', type: 'blog' });
+      expect(markers.get('never-marked')).toMatchObject({ bucket: 'inProgress', type: 'framework' });
+      expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(1);
+      expect(store.queryDocs.mock.calls[0][1]).toMatch(/^SELECT TOP \d+ \* FROM c$/);
+    });
+
+    it('so the next change moves the counters from the right bucket', async () => {
+      const store = recountStore([{ id: 'sent', bucket: 'inProgress', type: 'blog', _etag: 'a' }]);
+      await rederiveMarkers({ store, items: [{ id: 'sent', contentStatus: 'in_review', type: 'blog' }], now });
+      store.data.system = new Map([
+        ['dashboard_stats_v1', { id: 'dashboard_stats_v1', blog: { needsReview: 1, total: 1 } }],
+      ]);
+
+      const deltas = await createDashboardStatsMaintainer({ store, now }).applyTransition({
+        contentId: 'sent',
+        afterData: { id: 'sent', contentStatus: 'approved', type: 'blog' },
+      });
+
+      expect(deltas).toEqual({ 'blog.needsReview': -1, 'blog.inProgress': 1 });
+    });
+
+    it('leaves a marker the change feed moved or created meanwhile, and rethrows anything else', async () => {
+      const store = recountStore([{ id: 'raced', bucket: 'inProgress', type: 'blog', _etag: 'a' }]);
+      store.replaceDocIfMatch.mockRejectedValueOnce(Object.assign(new Error('412'), { code: 412 }));
+      store.createDoc.mockRejectedValueOnce(Object.assign(new Error('409'), { statusCode: 409 }));
+      const items = [
+        { id: 'raced', contentStatus: 'in_review', type: 'blog' },
+        { id: 'fresh', contentStatus: 'ingested', type: 'blog' },
+      ];
+      expect(await rederiveMarkers({ store, items, now })).toEqual({
+        checked: 2,
+        created: 0,
+        rewritten: 0,
+        skipped: 2,
+      });
+
+      store.createDoc.mockRejectedValueOnce(Object.assign(new Error('throttled'), { code: 429 }));
+      await expect(
+        rederiveMarkers({ store, items: [{ id: 'other', contentStatus: 'ingested' }], now })
+      ).rejects.toThrow('throttled');
     });
   });
 });

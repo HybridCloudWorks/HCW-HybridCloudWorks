@@ -12,6 +12,7 @@ import {
   matchesTaxonomyFilter,
   summarizeDashboardItems,
   queueFilterFor,
+  reviewWaitingSince,
   DASHBOARD_STATS_DOC_ID,
 } from "./admin-snapshots.js";
 
@@ -129,11 +130,47 @@ describe("classification helpers", () => {
     expect(stats.news.total).toBe(0);
   });
 
+  it("counts in_review as a decision waiting, not as the Editor's work (#1014)", () => {
+    const stats = summarizeDashboardItems([
+      { type: "blog", contentStatus: "in_review" },
+      { type: "blog", contentStatus: "approved" },
+    ]);
+    expect(stats.blog).toMatchObject({ needsReview: 1, inProgress: 1 });
+    expect(matchesQueueStatus({ contentStatus: "in_review" }, "needs_review")).toBe(true);
+    expect(matchesQueueStatus({ contentStatus: "in_review" }, "in_progress")).toBe(false);
+  });
+
+  it("orders review items by when each started waiting: sent to review, else arrived", () => {
+    expect(
+      reviewWaitingSince({
+        contentStatus: "in_review",
+        sentToReviewAt: "2026-08-06T00:00:00.000Z",
+        "Created At": "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe("2026-08-06T00:00:00.000Z");
+    // A Drafts article has no fetchedAt; it falls back rather than sorting last.
+    expect(
+      reviewWaitingSince({ contentStatus: "draft", "Created At": "2026-02-02T00:00:00.000Z" }),
+    ).toBe("2026-02-02T00:00:00.000Z");
+    // sentToReviewAt only speaks for an item still in review.
+    expect(
+      reviewWaitingSince({
+        contentStatus: "ingested",
+        sentToReviewAt: "2026-08-06T00:00:00.000Z",
+        fetchedAt: "2026-03-03T00:00:00.000Z",
+      }),
+    ).toBe("2026-03-03T00:00:00.000Z");
+    expect(reviewWaitingSince({})).toBeNull();
+  });
+
   it("queueFilterFor maps each filter to the source query shape", () => {
     expect(queueFilterFor("needs_review")).toMatchObject({
       sortField: "fetchedAt",
       params: [
-        { name: "@statuses", value: ["draft", "ingested", "inspected"] },
+        {
+          name: "@statuses",
+          value: ["draft", "ingested", "inspected", "in_review"],
+        },
       ],
     });
     expect(queueFilterFor("published_live")).toMatchObject({
@@ -168,13 +205,7 @@ describe("classification helpers", () => {
       params: [
         {
           name: "@statuses",
-          value: [
-            "approved",
-            "in_review",
-            "editing",
-            "forge_ready",
-            "needs_rework",
-          ],
+          value: ["approved", "editing", "forge_ready", "needs_rework"],
         },
       ],
       sortField: "updatedAt",
@@ -193,6 +224,7 @@ describe("classification helpers", () => {
       "draft",
       "ingested",
       "inspected",
+      "in_review",
     ]);
   });
 });
@@ -270,6 +302,42 @@ describe("getQueueSnapshot", () => {
     expect(fetchCall[1]).toContain(
       "ARRAY_CONTAINS(@statuses, c.contentStatus)",
     );
+    // The window is the newest written, not an arbitrary TOP n (#1013).
+    expect(fetchCall[1]).toMatch(/ ORDER BY c\._ts DESC$/);
+  });
+
+  it("puts an article sent from Drafts where its wait says, not at the bottom", async () => {
+    const rows = [
+      {
+        id: "feed-old",
+        contentStatus: "ingested",
+        fetchedAt: "2026-08-01T00:00:00Z",
+      },
+      {
+        id: "sent-from-drafts",
+        contentStatus: "in_review",
+        "Created At": "2026-07-01T00:00:00Z",
+        sentToReviewAt: "2026-08-06T00:00:00Z",
+      },
+      {
+        id: "feed-new",
+        contentStatus: "inspected",
+        fetchedAt: "2026-08-05T00:00:00Z",
+      },
+    ];
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard(),
+      store: makeStore({ count: 3, rows }),
+      ...fixed,
+    });
+    const body = JSON.parse(
+      (await h.getQueueSnapshot(makeRequest({}), context)).body,
+    );
+    expect(body.items.map((i) => i.id)).toEqual([
+      "sent-from-drafts",
+      "feed-new",
+      "feed-old",
+    ]);
   });
 
   it("filters by kind and idea origin on the resolved value, with a wider fetch window (ADR 0033 §4)", async () => {
@@ -439,14 +507,57 @@ describe("getAdminDashboardSnapshot", () => {
     expect(seeded.blog.needsReview).toBe(1);
     expect(body.recentNeedsReview.map((i) => i.id)).toEqual(["a"]);
   });
+
+  it("reads the newest review items from an ordered window, in_review included (#1013)", async () => {
+    const store = makeStore({
+      doc: { id: DASHBOARD_STATS_DOC_ID },
+      rows: [
+        { id: "old", contentStatus: "ingested", fetchedAt: "2026-01-01T00:00:00Z" },
+        {
+          id: "sent",
+          contentStatus: "in_review",
+          sentToReviewAt: "2026-08-01T00:00:00Z",
+        },
+      ],
+    });
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard(),
+      store,
+      ...fixed,
+    });
+    const body = JSON.parse(
+      (await h.getAdminDashboardSnapshot(makeRequest({}), context)).body,
+    );
+    expect(body.recentNeedsReview.map((i) => i.id)).toEqual(["sent", "old"]);
+    const [, query, params] = store.queryDocs.mock.calls[0];
+    expect(query).toMatch(/^SELECT TOP 30 .* ORDER BY c\._ts DESC$/);
+    expect(params[0].value).toContain("in_review");
+  });
 });
 
 describe("recalculateDashboardStats", () => {
+  /** The scan answers `content`; the marker read answers its own container. */
+  function recountStore({ rows, markers = [] }) {
+    return {
+      queryDocs: vi.fn(async (container) =>
+        container === "content_stats_markers" ? markers : rows,
+      ),
+      readDoc: vi.fn(async () => null),
+      upsertDoc: vi.fn(async (_c, d) => d),
+      createDoc: vi.fn(async (_c, d) => d),
+      replaceDocIfMatch: vi.fn(async (_c, d) => d),
+    };
+  }
+
   it("requires editor, scans, and fully overwrites the stats doc", async () => {
-    const store = makeStore({
+    const store = recountStore({
       rows: [
         { id: "a", contentStatus: "published", Live: true, type: "framework" },
         { id: "b", contentStatus: "rejected", type: "blog" },
+      ],
+      markers: [
+        { id: "a", bucket: "published", type: "framework", _etag: "1" },
+        { id: "b", bucket: "rejected", type: "blog", _etag: "2" },
       ],
     });
     const h = createAdminSnapshotHandlers({
@@ -459,6 +570,12 @@ describe("recalculateDashboardStats", () => {
     expect(body.totalDocs).toBe(2);
     expect(body.stats.framework.published).toBe(1);
     expect(body.stats.rejected).toBe(1);
+    expect(body.markers).toEqual({
+      checked: 2,
+      created: 0,
+      rewritten: 0,
+      skipped: 0,
+    });
 
     const doc = store.upsertDoc.mock.calls[0][1];
     expect(doc).toMatchObject({
@@ -467,6 +584,44 @@ describe("recalculateDashboardStats", () => {
       recalculatedAt: "2026-08-07T03:00:00.000Z",
       recalculatedBy: "admin@hcw.dev",
     });
+  });
+
+  it("re-derives the markers too, so in_review moves out of inProgress for good (#1014)", async () => {
+    const store = recountStore({
+      rows: [{ id: "sent", contentStatus: "in_review", type: "blog" }],
+      markers: [{ id: "sent", bucket: "inProgress", type: "blog", _etag: "1" }],
+    });
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard("editor"),
+      store,
+      ...fixed,
+    });
+    const body = JSON.parse(
+      (await h.recalculateDashboardStats(makeRequest({}), context)).body,
+    );
+    expect(body.stats.blog).toMatchObject({ needsReview: 1, inProgress: 0 });
+    expect(body.markers.rewritten).toBe(1);
+    expect(store.replaceDocIfMatch).toHaveBeenCalledWith(
+      "content_stats_markers",
+      expect.objectContaining({ id: "sent", bucket: "needsReview", _etag: "1" }),
+    );
+  });
+
+  it("leaves the counters as they were when a marker write fails, so Recount can be pressed again", async () => {
+    const store = recountStore({
+      rows: [{ id: "x", contentStatus: "ingested", type: "blog" }],
+    });
+    store.createDoc.mockRejectedValueOnce(
+      Object.assign(new Error("throttled"), { code: 429 }),
+    );
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard("editor"),
+      store,
+      ...fixed,
+    });
+    const res = await h.recalculateDashboardStats(makeRequest({}), context);
+    expect(res.status).toBe(500);
+    expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
   it("denies non-editors without scanning", async () => {

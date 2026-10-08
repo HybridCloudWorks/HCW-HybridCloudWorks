@@ -48,8 +48,9 @@ function DeleteConfirm({ row, onCancel, onConfirm }) {
 const openIssue = (detail, rows) =>
   detail?.issue && rows.some((row) => row.id === detail.issue.id) ? detail.issue : null;
 
-export default function NewsletterIssues({ view = 'review' }) {
-  const panel = useNewsletterIssues(view);
+/** `linkedIssueId` is the `?issue=` a link carried: that issue opens first when this view lists it. */
+export default function NewsletterIssues({ view = 'review', linkedIssueId = null }) {
+  const panel = useNewsletterIssues(view, linkedIssueId);
   const { rows, selectedId, detail, busy, notice, testReadyAt } = panel;
   // The row whose red X was pressed, until the dialog answers.
   const [pendingDelete, setPendingDelete] = useState(null);

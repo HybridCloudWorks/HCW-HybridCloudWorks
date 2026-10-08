@@ -23,17 +23,32 @@ const SNAPSHOT = {
     coder_corner: { needsReview: 0, inProgress: 1, published: 2, total: 3 },
     rejected: 9,
   },
-  recentNeedsReview: [
+};
+
+/** The Decision Center's read (functions/src/lib/decision-center.js). */
+const DECISIONS = {
+  success: true,
+  items: [
     {
-      id: 'content-1',
-      Title: 'Queued article',
-      contentStatus: 'ingested',
-      cloudProvider: 'Azure',
-      type: 'blog',
-      source: 'rss',
+      id: 'content:content-1',
+      category: 'queues',
+      kind: 'blog',
+      title: 'Queued article',
+      stage: 'review',
+      status: 'ingested',
+      waitingSince: null,
+      priority: 'normal',
+      href: '/admin/queue/content-1?source=content',
+      source: { collection: 'content', id: 'content-1', Live: false },
+      detail: 'Azure',
     },
   ],
+  counts: { all: 1, frameworks: 0, queues: 1, pipelines: 0, governance: 0, other: 0 },
+  sources: [],
+  errors: [],
 };
+
+const answer = (route) => Promise.resolve(route === 'getDecisionCenter' ? DECISIONS : SNAPSHOT);
 
 function renderDashboard() {
   return render(
@@ -46,10 +61,10 @@ function renderDashboard() {
 describe('DashboardPage', () => {
   beforeEach(() => {
     postJSON.mockReset();
-    postJSON.mockResolvedValue(SNAPSHOT);
+    postJSON.mockImplementation(answer);
   });
 
-  it('renders backend snapshot totals and recent review items', async () => {
+  it('renders backend snapshot totals and the decisions waiting', async () => {
     renderDashboard();
     expect(await screen.findByText('6 items waiting for you')).toBeInTheDocument();
     await waitFor(() => expect(postJSON).toHaveBeenCalledWith('getAdminDashboardSnapshot', {}));
@@ -57,9 +72,31 @@ describe('DashboardPage', () => {
     expect(screen.getByText('Rejected')).toBeInTheDocument();
     expect(screen.getAllByText('12').length).toBeGreaterThan(0);
     expect(screen.getAllByText('9').length).toBeGreaterThan(0);
-    expect(screen.getByText('Queued article')).toBeInTheDocument();
+    expect(await screen.findByText('Queued article')).toBeInTheDocument();
     // 14 pieces live across the four published buckets.
     expect(screen.getByText(/14 pieces live · 8 in editor/)).toBeInTheDocument();
+  });
+
+  it('shows the Decision Center where the newest-five list was, each item opening at its stage', async () => {
+    renderDashboard();
+    const row = (await screen.findByText('Queued article')).closest('a');
+    expect(postJSON).toHaveBeenCalledWith('getDecisionCenter', {});
+    expect(row).toHaveAttribute('href', '/admin/queue/content-1?source=content');
+    expect(within(row).getByText('Blog · Review · Azure')).toBeInTheDocument();
+    const tabs = screen.getByRole('tablist', { name: 'Decisions by area' });
+    expect(within(tabs).getAllByRole('tab')).toHaveLength(6);
+  });
+
+  it('opens each pipeline stage at its own page, the Review Queue on the view its count is', async () => {
+    renderDashboard();
+    await screen.findByText('6 items waiting for you');
+    for (const stage of PIPELINE_STAGES) {
+      const link = screen.getByRole('link', { name: new RegExp(`^${stage.label}: `) });
+      expect(link, stage.id).toHaveAttribute('href', stage.to);
+    }
+    // The Review Queue opens on its default view, needs_review, which is the
+    // needsReview counter the badge shows (in_review included since #1014).
+    expect(PIPELINE_STAGES.find((s) => s.id === 'review').to).toBe('/admin/queue');
   });
 
   it('shows ONE pipeline graphic, with six stages from New Content to Live Pages (ADR 0033)', async () => {
@@ -99,19 +136,11 @@ describe('DashboardPage', () => {
     );
   });
 
-  it('labels a queued item with its derived idea origin and a readable status', async () => {
-    renderDashboard();
-    const row = await screen.findByText('Queued article');
-    const link = row.closest('a');
-    expect(within(link).getByText(/RSS or external feed/)).toBeInTheDocument();
-    expect(within(link).getByText('Ingested')).toBeInTheDocument();
-  });
-
   it('recounts through the backend and re-reads the snapshot', async () => {
     renderDashboard();
     await screen.findByText('6 items waiting for you');
     postJSON.mockClear();
-    postJSON.mockResolvedValue(SNAPSHOT);
+    postJSON.mockImplementation(answer);
     screen.getByRole('button', { name: /Recount/ }).click();
     await waitFor(() => expect(postJSON).toHaveBeenCalledWith('recalculateDashboardStats', {}));
     await waitFor(() => expect(postJSON).toHaveBeenCalledWith('getAdminDashboardSnapshot', {}));

@@ -3943,6 +3943,47 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **"Needs a decision" on `/admin` is now a Decision Center over every
+  decision waiting, and an article sent to review is one of them (#1013,
+  #1014).** It used to show the newest few Review Queue items, and "newest"
+  was the newest of an unordered `TOP 30`.
+  - **One read.** `POST getDecisionCenter` (viewer) gathers the Review Queue,
+    Editor work, frameworks and Coder Corner awaiting review, forge-ready and
+    staged content, podcast transcripts, Listen & Learn chapters, newsletter
+    issues, social posts and Forge Studio Queue entries that failed, open
+    workflow alerts, unresolved Key Vault references, due or overdue
+    reminders, and Ambassador deadlines inside two weeks.
+    - Each source is one `TOP`-bounded read ordered by `_ts` in Cosmos.
+    - A source that fails is named in the answer and costs only its own
+      items.
+    - Editor-only sources are left out of a viewer's answer and listed as
+      such.
+  - **Six tabs.** Needs a Decision, Frameworks, Queues, Pipelines,
+    Governance and Other Actions, each with its count, newest first. The tab
+    is kept in `?decisions=`, so Back from an item returns to it.
+  - **Each row opens its item at its stage.** `lib/itemLinks.js` is now the
+    one place that maps a content stage to its page. New deep links ring the
+    item where it waits:
+    - `?transcript=` on Recording Hub › Transcripts
+    - `?issue=` on the Newsletter and Drafts tabs (it worked on Published
+      only)
+    - `?alert=` on Health › Alerts
+    - `?reminder=` on Platform › Reminders
+    - `?platform=&exam=&chapter=` on Listen & Learn › Review
+  - **`in_review` needs a decision.** Drafts' Send to In Review and the
+    repository import write it. It was counted on the Editor badge, which
+    the Editor list cannot show, and was missing from the Review Queue's
+    default view and the headline count. It is now in `needsReview`, the
+    queue's default view, and the Frameworks and Coder Corner "Needs
+    review" filter. The queue orders an article sent from Drafts by when it
+    was sent, so it no longer sorts last for lack of `fetchedAt`.
+  - **Recount now re-derives each document's counter marker as well as the
+    counters.** The change feed computes every move from the marker, so a
+    recount that rewrote only the counters would have let an `in_review`
+    marker from before this change take its document out of the wrong
+    bucket on its next edit. Press **Recount** on `/admin` once after the
+    Functions deploy. Until then the Editor badge still counts articles in
+    review.
 - **The element defaults in `index.css` sit in `@layer base`, so a utility on
   a paragraph or heading now applies.** The `p` rule (`margin-bottom: 1rem;
   line-height: 1.7`), the `h1`–`h6` rule (`color: var(--dark-gray);

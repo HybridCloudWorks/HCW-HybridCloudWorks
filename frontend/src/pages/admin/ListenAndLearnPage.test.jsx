@@ -178,6 +178,45 @@ describe('the header and tabs', () => {
     expect(selectedTab()).toBe('Library');
   });
 
+  it('opens the book a Decision Center link names on Review, and rings the chapter', async () => {
+    const link = 'tab=review&platform=azure&exam=AZ-104&chapter=storage';
+    searchParams = link;
+    // The chapter ring reads the address bar itself (hooks/useLinkedItem).
+    window.history.replaceState({}, '', `/admin/listen-and-learn?${link}`);
+    fetchSetForReview.mockResolvedValue({
+      set: {
+        id: 'azure_az-104',
+        provider: 'azure',
+        examCode: 'AZ-104',
+        title: 'Azure Administrator',
+      },
+      episodes: [
+        { id: 'compute', setId: 'azure_az-104', title: 'Compute', status: 'draft' },
+        { id: 'storage', setId: 'azure_az-104', title: 'Storage', status: 'failed' },
+      ],
+    });
+    try {
+      const { container } = render(<ListenAndLearnPage />);
+      expect(selectedTab()).toBe('Review');
+      await waitFor(() =>
+        expect(fetchSetForReview).toHaveBeenCalledWith({ platform: 'azure', examCode: 'AZ-104' })
+      );
+      await screen.findByText('Storage');
+      const linked = container.querySelectorAll('[data-linked="true"]');
+      expect(linked).toHaveLength(1);
+      expect(linked[0]).toHaveTextContent('Storage');
+    } finally {
+      window.history.replaceState({}, '', '/');
+    }
+  });
+
+  it('opens no book when the link names none', async () => {
+    searchParams = 'tab=review';
+    render(<ListenAndLearnPage />);
+    await waitFor(() => expect(fetchSets).toHaveBeenCalled());
+    expect(fetchSetForReview).not.toHaveBeenCalled();
+  });
+
   it('shows the library grid with each book’s kind and counts, and no GitHub on the Generate form', async () => {
     fetchSets.mockResolvedValue([
       {
