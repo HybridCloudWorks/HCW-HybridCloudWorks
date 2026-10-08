@@ -12,6 +12,11 @@
  *   needsReview  draft / ingested / inspected / in_review  → Review Queue badge
  *   inProgress   everything else not live                  → Editor badge
  *   published    Live === true                              → live pages
+ *
+ * And one count beside them, `readyToPublish` (approved / forge_ready /
+ * published, not live → Publish badge). The stats document has no bucket for
+ * it, so the snapshot runs the COUNT getPublishSnapshot's readyTotal runs
+ * (functions/src/lib/admin-snapshots.js `readyToPublishWhere`).
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
@@ -37,6 +42,7 @@ export function countsFromSnapshot(snapshot) {
     queue: sumBucket(stats, 'needsReview'),
     editor: sumBucket(stats, 'inProgress'),
     live: sumBucket(stats, 'published'),
+    publish: Number(snapshot?.readyToPublish) || 0,
     rejected: Number(stats.rejected) || 0,
     byType: Object.fromEntries(
       COUNT_TYPES.map((type) => [

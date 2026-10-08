@@ -266,6 +266,29 @@ export function queueFilterFor(statusFilter) {
   return { ...queueWhere(view), sortField: view.sortField };
 }
 
+/**
+ * Not live, exactly as `item.Live !== true` reads in JS. `IS_BOOLEAN` keeps a
+ * missing, null or non-boolean Live counted: `c.Live = true` alone is
+ * undefined for those, and Cosmos drops a row whose WHERE is undefined.
+ */
+const NOT_LIVE = "NOT (IS_BOOLEAN(c.Live) AND c.Live = true)";
+
+/**
+ * The Publish stage: ready to publish and not yet live (ADR 0033 §1). The
+ * ready_to_publish window includes the `published` status, so on its own it
+ * also matches every live page. readyCandidates already dropped those in JS,
+ * but the COUNT did not, so `readyTotal` counted every live page as staged.
+ * The publish page and the dashboard's Publish badge both count this.
+ */
+export function readyToPublishWhere() {
+  const ready = queueFilterFor("ready_to_publish");
+  return {
+    where: `${ready.where} AND ${NOT_LIVE}`,
+    params: ready.params,
+    sortField: ready.sortField,
+  };
+}
+
 const sortDescBy = (field) => (a, b) => toMillis(b[field]) - toMillis(a[field]);
 
 /**
@@ -582,7 +605,9 @@ export function createAdminSnapshotHandlers({
       if (auth.error) return auth.error;
 
       try {
-        const ready = queueFilterFor("ready_to_publish");
+        // Not-live in the query too, so the TOP 150 window is not spent on
+        // live pages the JS filter below would discard.
+        const ready = readyToPublishWhere();
         const publishedWhere =
           "c.Live = true AND c.contentStatus = 'published'";
 
@@ -625,14 +650,20 @@ export function createAdminSnapshotHandlers({
       if (auth.error) return auth.error;
 
       try {
-        const [statsDoc, recentNeedsReview] = await Promise.all([
-          store.readDoc(
-            "system",
-            DASHBOARD_STATS_DOC_ID,
-            DASHBOARD_STATS_DOC_ID,
-          ),
-          reads.recentNeedsReviewItems(10),
-        ]);
+        // readyToPublish is the Publish stage's badge: the stats document
+        // has no bucket for it (ready statuses fall in inProgress), so it is
+        // one COUNT, the same one getPublishSnapshot's readyTotal runs.
+        const ready = readyToPublishWhere();
+        const [statsDoc, recentNeedsReview, readyToPublish] =
+          await Promise.all([
+            store.readDoc(
+              "system",
+              DASHBOARD_STATS_DOC_ID,
+              DASHBOARD_STATS_DOC_ID,
+            ),
+            reads.recentNeedsReviewItems(10),
+            reads.countWhere(ready.where, ready.params),
+          ]);
         const stats = statsDoc
           ? projectStats(statsDoc)
           : await scanAndSeedStats(ctx, context);
@@ -641,6 +672,7 @@ export function createAdminSnapshotHandlers({
           success: true,
           generatedAt: now().toISOString(),
           stats,
+          readyToPublish,
           recentNeedsReview,
         });
       } catch (error) {

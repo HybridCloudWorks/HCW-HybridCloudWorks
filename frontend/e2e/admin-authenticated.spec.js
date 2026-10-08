@@ -241,3 +241,145 @@ test.describe('the phone shell on a Pixel 5 (AP-F1)', () => {
     });
   }
 });
+
+/**
+ * A dashboard snapshot with a count on every stage that has one, so the
+ * badges take their room in the stage boxes the way they do in production.
+ */
+const DASHBOARD_SNAPSHOT = Object.freeze({
+  success: true,
+  stats: {
+    blog: { needsReview: 4, inProgress: 3, published: 41, total: 48 },
+    news: { needsReview: 2, inProgress: 0, published: 6, total: 8 },
+    architecture: { needsReview: 1, inProgress: 2, published: 12, total: 15 },
+    framework: { needsReview: 0, inProgress: 1, published: 9, total: 10 },
+    coder_corner: { needsReview: 1, inProgress: 2, published: 5, total: 8 },
+    rejected: 3,
+  },
+  readyToPublish: 2,
+  recentNeedsReview: [],
+});
+
+/** Geometry of the pipeline and its card, read in the page. */
+async function pipelineLayout(page) {
+  await page.getByTestId('pipeline').waitFor();
+  return page.evaluate(() => {
+    const main = document.getElementById('admin-main');
+    const card = document.querySelector('[data-testid="pipeline-card"]').getBoundingClientRect();
+    const row = document.querySelector('[data-testid="pipeline"]').getBoundingClientRect();
+    const stages = [...document.querySelectorAll('[data-testid="pipeline-stage"]')].map((stage) =>
+      stage.getBoundingClientRect()
+    );
+    const descriptions = [
+      ...document.querySelectorAll('[data-testid="pipeline-stage-description"]'),
+    ];
+    return {
+      columnOverflow: main.scrollWidth - main.clientWidth,
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      card: { left: card.left, right: card.right },
+      row: { left: row.left, right: row.right },
+      stageCount: stages.length,
+      widths: stages.map((s) => s.width),
+      heights: stages.map((s) => s.height),
+      columns: new Set(stages.map((s) => Math.round(s.left))).size,
+      leftmost: Math.min(...stages.map((s) => s.left)),
+      rightmost: Math.max(...stages.map((s) => s.right)),
+      cut: descriptions
+        .filter((d) => d.scrollWidth > d.clientWidth || d.scrollHeight > d.clientHeight)
+        .map(
+          (d) =>
+            `${d.textContent} (${d.scrollWidth}x${d.scrollHeight} in ${d.clientWidth}x${d.clientHeight})`
+        ),
+    };
+  });
+}
+
+/** The assertions every width shares. */
+function expectPipelineFits(layout, columns) {
+  expect(layout.stageCount).toBe(6);
+  expect(layout.columns).toBe(columns);
+  expect({ column: layout.columnOverflow, page: layout.pageOverflow }).toEqual({
+    column: 0,
+    page: 0,
+  });
+  // Inside the card, and as far from its left edge as from its right.
+  expect(layout.row.right).toBeLessThanOrEqual(layout.card.right);
+  expect(layout.rightmost).toBeLessThanOrEqual(layout.card.right);
+  expect(
+    Math.abs(layout.leftmost - layout.card.left - (layout.card.right - layout.rightmost))
+  ).toBeLessThanOrEqual(1);
+  // Six boxes of one size.
+  expect(Math.max(...layout.widths) - Math.min(...layout.widths)).toBeLessThanOrEqual(1);
+  expect(Math.max(...layout.heights) - Math.min(...layout.heights)).toBeLessThanOrEqual(1);
+  // Every description whole: not cut across, not cut below its two lines.
+  expect(layout.cut).toEqual([]);
+}
+
+/**
+ * The stat tiles: one height across every row, the expected column count,
+ * and no label or note cut short.
+ */
+async function expectStatTilesEven(page, columns) {
+  const tiles = await page.getByTestId('stat-tile').evaluateAll((nodes) =>
+    nodes.map((tile) => {
+      const box = tile.getBoundingClientRect();
+      const cut = [...tile.querySelectorAll('span[title]')]
+        .filter((line) => line.scrollWidth > line.clientWidth)
+        .map((line) => line.textContent);
+      return { left: Math.round(box.left), height: box.height, cut };
+    })
+  );
+  expect(tiles).toHaveLength(5);
+  expect(new Set(tiles.map((tile) => tile.left)).size).toBe(columns);
+  const heights = tiles.map((tile) => tile.height);
+  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(1);
+  expect(tiles.flatMap((tile) => tile.cut)).toEqual([]);
+}
+
+test.describe('the dashboard pipeline fits its card on a desktop', () => {
+  test.skip(({ isMobile }) => isMobile, 'the phone layout is checked on mobile-chrome below');
+
+  for (const width of [1280, 1440]) {
+    test.describe(`${width} px`, () => {
+      test.use({ viewport: { width, height: 900 } });
+
+      test('six equal stages in one row inside the card, nothing cut, five even stat tiles', async ({
+        page,
+        identity,
+      }) => {
+        // Fails if: the row goes back to `flex` with a `min-w-38` box (the six
+        // boxes and chevrons needed ~1072 px of the 926 px card, so Live
+        // Pages ran past the card's right edge), a description goes back to
+        // one-line `truncate` ("Still being writ…", "Deci…"), the count badge
+        // returns to the label's line, or the grid stops giving six columns
+        // here. Measured on the old row on 2026-10-08: #admin-main scrolled
+        // 97 px sideways at 1280 and 17 px at 1440, and five of the six
+        // descriptions were cut. The stat tiles: fails if a tile with a note
+        // stretches its row again, or the row stops giving five columns here
+        // (`@2xl` would: index.css redefines it as 1400 px).
+        identity.answerApi('getAdminDashboardSnapshot', DASHBOARD_SNAPSHOT);
+        await identity.signIn('/admin');
+        expectPipelineFits(await pipelineLayout(page), 6);
+        await expect(page.getByRole('link', { name: /^Publish: .*2 items$/ })).toBeVisible();
+        await expectStatTilesEven(page, 5);
+      });
+    });
+  }
+});
+
+test.describe('the dashboard pipeline fits its card on a Pixel 5', () => {
+  test.skip(({ isMobile }) => !isMobile, 'mobile-chrome runs the phone layout');
+
+  test('two equal columns inside the card, nothing cut, stat tiles two to a row', async ({
+    page,
+    identity,
+  }) => {
+    // Fails if: the grid drops to one column or overflows the phone, or a
+    // description is cut. Same measurements as the desktop widths, and the
+    // stat tiles two to a row, even, with nothing cut.
+    identity.answerApi('getAdminDashboardSnapshot', DASHBOARD_SNAPSHOT);
+    await identity.signIn('/admin');
+    expectPipelineFits(await pipelineLayout(page), 2);
+    await expectStatTilesEven(page, 2);
+  });
+});

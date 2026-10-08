@@ -12,9 +12,12 @@ import {
   matchesTaxonomyFilter,
   summarizeDashboardItems,
   queueFilterFor,
+  readyToPublishWhere,
   reviewWaitingSince,
   DASHBOARD_STATS_DOC_ID,
 } from "./admin-snapshots.js";
+
+const NOT_LIVE = "NOT (IS_BOOLEAN(c.Live) AND c.Live = true)";
 
 const context = { log: vi.fn(), error: vi.fn(), warn: vi.fn() };
 
@@ -474,6 +477,38 @@ describe("getPublishSnapshot", () => {
     expect(body.readyCandidates.map((i) => i.id)).toEqual(["r1"]);
     expect(body.publishedItems.map((i) => i.id)).toEqual(["p1"]);
   });
+
+  it("counts and fetches the ready bucket without live pages, so readyTotal matches the list", async () => {
+    // Fails if the ready COUNT goes back to the bare ready_to_publish window:
+    // that window includes the `published` status, so it counted every live
+    // page as staged while readyCandidates dropped them.
+    const store = makeStore({ count: 3, rows: [] });
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard(),
+      store,
+      ...fixed,
+    });
+    await h.getPublishSnapshot(makeRequest({}), context);
+    const readyQueries = store.queryDocs.mock.calls
+      .map(([, query]) => query)
+      .filter((query) => query.includes("ARRAY_CONTAINS(@statuses"));
+    expect(readyQueries).toHaveLength(2); // the COUNT and the fetch
+    for (const query of readyQueries) expect(query).toContain(NOT_LIVE);
+  });
+});
+
+describe("readyToPublishWhere", () => {
+  it("is the ready_to_publish window narrowed to not-live, with the same parameters", () => {
+    const ready = queueFilterFor("ready_to_publish");
+    const narrowed = readyToPublishWhere();
+    expect(narrowed.where).toBe(`${ready.where} AND ${NOT_LIVE}`);
+    expect(narrowed.params).toEqual(ready.params);
+    expect(narrowed.params[0].value).toEqual([
+      "approved",
+      "forge_ready",
+      "published",
+    ]);
+  });
 });
 
 describe("getAdminDashboardSnapshot", () => {
@@ -505,6 +540,26 @@ describe("getAdminDashboardSnapshot", () => {
     expect(body.stats.rejected).toBe(4);
     expect(body.stats).not.toHaveProperty("totalDocs"); // UI shape, not doc shape
     expect(store.upsertDoc).not.toHaveBeenCalled(); // no reseed on the fast path
+  });
+
+  it("carries the Publish stage's count: ready to publish and not live", async () => {
+    // The dashboard's Publish badge. The stats document has no bucket for it,
+    // so it is the same COUNT as getPublishSnapshot's readyTotal.
+    const store = makeStore({ count: 4, doc: { id: DASHBOARD_STATS_DOC_ID } });
+    const h = createAdminSnapshotHandlers({
+      guard: allowGuard(),
+      store,
+      ...fixed,
+    });
+    const body = JSON.parse(
+      (await h.getAdminDashboardSnapshot(makeRequest({}), context)).body,
+    );
+    expect(body.readyToPublish).toBe(4);
+    const countCall = store.queryDocs.mock.calls.find(([, query]) =>
+      query.includes("VALUE COUNT"),
+    );
+    expect(countCall[1]).toContain(readyToPublishWhere().where);
+    expect(countCall[2]).toEqual(readyToPublishWhere().params);
   });
 
   it("falls back to a live scan and seeds the doc when unseeded", async () => {

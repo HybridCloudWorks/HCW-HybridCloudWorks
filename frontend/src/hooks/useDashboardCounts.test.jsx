@@ -32,8 +32,22 @@ describe('countsFromSnapshot', () => {
     expect(sumBucket(stats, 'published', ['blog'])).toBe(5);
   });
 
+  it('takes the Publish count from the snapshot, not from a stats bucket', () => {
+    // readyToPublish is its own COUNT (approved, forge_ready, published and
+    // not live); summing a bucket would count the Editor's items again.
+    expect(countsFromSnapshot({ stats: {}, readyToPublish: 5 }).publish).toBe(5);
+    // An API that predates the field: no badge rather than a wrong one.
+    expect(countsFromSnapshot({ stats: {} }).publish).toBe(0);
+  });
+
   it('is all zeros for nothing', () => {
-    expect(countsFromSnapshot(null)).toMatchObject({ queue: 0, editor: 0, live: 0, rejected: 0 });
+    expect(countsFromSnapshot(null)).toMatchObject({
+      queue: 0,
+      editor: 0,
+      live: 0,
+      publish: 0,
+      rejected: 0,
+    });
   });
 });
 
