@@ -63,7 +63,10 @@ const shellReady =
   run('bash', ['--version']).status === 0 &&
   run('git', ['--version']).status === 0;
 
-describe.skipIf(!shellReady)('the checkout block, run', () => {
+// Each case spawns git (clone, remote, fetch) and bash several times. The
+// 5 s default was exceeded once on a loaded Windows machine (2026-10-08),
+// where every spawn is slow; 30 s still fails a real hang well within CI.
+describe.skipIf(!shellReady)('the checkout block, run', { timeout: 30_000 }, () => {
   const root = mkdtempSync(join(tmpdir(), 'hcw-bootstrap-origin-'));
   const slash = (path) => path.replace(/\\/g, '/');
   const git = (cwd, ...args) => {
