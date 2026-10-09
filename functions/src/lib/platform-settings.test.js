@@ -14,6 +14,7 @@ import {
   PLATFORM_SETTING_AUDIT_ACTION,
   parseHistoryQuery,
   presentHistoryEntry,
+  MERGE_WRITE_ATTEMPTS,
   PLATFORM_SETTINGS,
   PLATFORM_SETTING_NAMES,
   PlatformSettingValidationError,
@@ -63,9 +64,17 @@ function makeStore(over = {}) {
   return {
     readDoc: vi.fn(async () => null),
     upsertDoc: vi.fn(async (_c, d) => d),
+    replaceDocIfMatch: vi.fn(async (_c, d) => d),
+    createDoc: vi.fn(async (_c, d) => d),
     ...over,
   };
 }
+
+/** The admin_config document a save wrote, by whichever write it took. */
+const writtenConfig = (store) =>
+  [store.replaceDocIfMatch, store.createDoc, store.upsertDoc]
+    .flatMap((fn) => fn?.mock?.calls ?? [])
+    .find(([container]) => container === 'admin_config')?.[1];
 
 const fixed = { now: () => new Date('2026-09-07T12:00:00.000Z'), uuid: () => 'fixed-uuid' };
 const parse = (res) => JSON.parse(res.body);
@@ -939,7 +948,7 @@ describe('handlers', () => {
       context
     );
     expect(put.status).toBe(200);
-    const written = store.upsertDoc.mock.calls.find(([c]) => c === 'admin_config')[1];
+    const written = writtenConfig(store);
     expect(written.reminders[0]).toMatchObject({ title: 'T renamed', notified: { ahead: stamp } });
     expect(written.reminders[1].notified).toEqual({});
     expect(parse(put).value.reminders[0].notified).toEqual({ ahead: stamp });
@@ -950,6 +959,114 @@ describe('handlers', () => {
       context
     );
     expect(plain.readDoc).not.toHaveBeenCalled();
+  });
+
+  describe('a merged save is written under the ETag of the read it merged (CodeRabbit, review of #1039)', () => {
+    const stamp = '2026-12-28T13:00:00.000Z';
+    const sheet = (etag, notified = {}) => ({
+      id: 'reminders',
+      _etag: etag,
+      reminders: [{ id: 'a', title: 'T', dueDate: '2027-01-04', notified }],
+    });
+    const request = () =>
+      makeRequest({
+        params: { setting: 'reminders' },
+        body: { reminders: [{ id: 'a', title: 'T renamed', dueDate: '2027-01-04', notified: {} }] },
+      });
+    const conflict = (code) => Object.assign(new Error('conflict'), { code });
+
+    it('replaces the stored sheet only if its ETag still matches, and never upserts it', async () => {
+      const store = makeStore({ readDoc: vi.fn(async () => sheet('"e1"')) });
+      const put = await createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed }).putSetting(
+        request(),
+        context
+      );
+      expect(put.status).toBe(200);
+      const [container, doc, options] = store.replaceDocIfMatch.mock.calls[0];
+      expect(container).toBe('admin_config');
+      expect(doc._etag).toBe('"e1"');
+      expect(options).toEqual({ partitionKey: ADMIN_CONFIG_PARTITION });
+      expect(store.upsertDoc.mock.calls.some(([c]) => c === 'admin_config')).toBe(false);
+    });
+
+    it('creates the sheet when none is stored, and never upserts it', async () => {
+      const store = makeStore();
+      const put = await createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed }).putSetting(
+        request(),
+        context
+      );
+      expect(put.status).toBe(200);
+      expect(store.createDoc).toHaveBeenCalledTimes(1);
+      expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+      expect(store.upsertDoc.mock.calls.some(([c]) => c === 'admin_config')).toBe(false);
+    });
+
+    it('on a 412 re-reads and re-merges, so a stamp the timer wrote meanwhile is kept', async () => {
+      const readDoc = vi
+        .fn()
+        .mockResolvedValueOnce(sheet('"e1"'))
+        .mockResolvedValueOnce(sheet('"e2"', { ahead: stamp }));
+      const replaceDocIfMatch = vi
+        .fn()
+        .mockRejectedValueOnce(conflict(412))
+        .mockImplementationOnce(async (_c, d) => d);
+      const store = makeStore({ readDoc, replaceDocIfMatch });
+      const put = await createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed }).putSetting(
+        request(),
+        context
+      );
+      expect(put.status).toBe(200);
+      expect(readDoc).toHaveBeenCalledTimes(2);
+      const [, written] = replaceDocIfMatch.mock.calls[1];
+      expect(written._etag).toBe('"e2"');
+      expect(written.reminders[0]).toMatchObject({ title: 'T renamed', notified: { ahead: stamp } });
+    });
+
+    it('a 409 on create (written since an absent read) re-reads too', async () => {
+      const readDoc = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce(sheet('"e1"'));
+      const store = makeStore({
+        readDoc,
+        createDoc: vi.fn().mockRejectedValueOnce(conflict(409)),
+      });
+      const put = await createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed }).putSetting(
+        request(),
+        context
+      );
+      expect(put.status).toBe(200);
+      expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(1);
+      expect(store.replaceDocIfMatch.mock.calls[0][1]._etag).toBe('"e1"');
+    });
+
+    it(`answers 409 after ${MERGE_WRITE_ATTEMPTS} conflicting writes, writing nothing`, async () => {
+      const store = makeStore({
+        readDoc: vi.fn(async () => sheet('"e1"')),
+        replaceDocIfMatch: vi.fn(async () => {
+          throw conflict(412);
+        }),
+      });
+      const put = await createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed }).putSetting(
+        request(),
+        context
+      );
+      expect(put.status).toBe(409);
+      expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(MERGE_WRITE_ATTEMPTS);
+      expect(store.upsertDoc.mock.calls.some(([c]) => c === 'admin_config')).toBe(false);
+    });
+
+    it('lets any other write error through as before (500)', async () => {
+      const store = makeStore({
+        readDoc: vi.fn(async () => sheet('"e1"')),
+        replaceDocIfMatch: vi.fn(async () => {
+          throw conflict(503);
+        }),
+      });
+      const put = await createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed }).putSetting(
+        request(),
+        context
+      );
+      expect(put.status).toBe(500);
+      expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('the credential register’s rows on the reminders sheet (review of #1039)', () => {
@@ -975,7 +1092,7 @@ describe('handlers', () => {
         makeRequest({ params: { setting: 'reminders' }, body: { reminders: rows } }),
         context
       );
-      const written = store.upsertDoc.mock.calls.find(([c]) => c === 'admin_config')?.[1];
+      const written = writtenConfig(store);
       return { put, written };
     }
     const registerRowOf = (written) => written.reminders.find((r) => r.id === registerRow.id);

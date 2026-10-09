@@ -66,7 +66,10 @@ This project has not cut a tagged release; entries are grouped under
   for, the row's due date and title: after an ETag conflict it re-applies a
   stamp only to a row still in that cycle, so a reminder re-dated or
   renamed meanwhile is said afresh. This applies to every reminder, and
-  nothing changes when there is no conflict.
+  nothing changes when there is no conflict. A Platform Settings save of the
+  sheet is written under the ETag of the read it merged from (412 or 409
+  re-reads, three attempts, then 409), so a sync or a stamp that lands
+  between the read and the write is never written over.
 
 - **Lab host: Coder automation. The host renews the site's Coder status
   token and publishes the `hcw-lab` template on its own, with one rotation
