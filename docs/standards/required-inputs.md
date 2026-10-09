@@ -247,7 +247,11 @@ app-settings map that holds them is in
 `infra/functionapp.tf`, and `functions/src/lib/secret-catalog.test.js` reads
 every `.tf` file in that directory as one module rather than any one file, so a
 reference is found wherever it is declared. Each name therefore has a named
-consumer and a fixed spelling; presence is what is unconfirmed. [Accepted risks](../repo/todo.md#accepted-risks) records the vault as holding 18
+consumer and a fixed spelling; presence is what is unconfirmed. Three rows in
+the table are not vault secrets and are not in that count: `FOUNDRY_ENDPOINT`,
+`CONTENTFORGE_IMAGE_COST_USD` and `CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD` are
+plain app settings, each marked so, listed beside the keys they belong with.
+[Accepted risks](../repo/todo.md#accepted-risks) records the vault as holding 18
 live secrets as of 2026-08-24.
 
 Seeding one is an owner action through the approved vault procedure, and the
