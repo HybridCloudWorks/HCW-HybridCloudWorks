@@ -345,6 +345,70 @@ export async function recordSecretVerdict(
 }
 
 /**
+ * Store one catalogue secret and record the write: the ONE path from a value
+ * to the vault.
+ *
+ * Two callers since 2026-10-08. The Keys tab's PUT below, for a value the
+ * owner pasted or generated; and the lab agent's renewal of the Coder status
+ * token (lib/labs/coder-automation.js), for a value the lab host minted and
+ * the API has already checked against Coder. Both get the same refusals, the
+ * same set-only vault write, the same best-effort refresh and the same state
+ * record, so a renewal from the host turns the Keys row amber and then green
+ * exactly as a paste does, and there is no second Key Vault client to keep
+ * honest. The value reaches `setVaultSecret` and nothing else: not the state
+ * document, not the answer, not a log line.
+ *
+ * Answers `{ ok: true, entry, record, refresh }`, or `{ ok: false, status,
+ * error }` with 400 for a name the catalogue does not declare or a value
+ * `rejectSecretValue` refuses, and 502 when Key Vault refuses the write — in
+ * which case nothing was recorded, because nothing changed.
+ *
+ * @param {object} deps
+ * @param {{ readDoc: Function, upsertDoc: Function }} deps.store
+ * @param {Record<string, unknown>} deps.env
+ * @param {() => string} deps.now ISO time of the write
+ * @param {{ setVaultSecret: Function, refreshKeyVaultReferences: Function }} deps.vault
+ * @param {{ error?: Function }} [deps.log]
+ * @param {{ name: string, value: string, actor: string }} write
+ */
+export async function writeCatalogSecret({ store, env, now, vault, log }, { name, value, actor }) {
+  const entry = findBySecretName(name);
+  if (!entry) {
+    return { ok: false, status: 400, error: `${name || 'that name'} is not a secret this estate declares` };
+  }
+  const rejection = rejectSecretValue(value);
+  if (rejection) return { ok: false, status: 400, error: rejection };
+
+  let version = null;
+  try {
+    ({ version } = await vault.setVaultSecret(name, value, { env }));
+  } catch (error) {
+    // The message names the secret and the HTTP status, never the body.
+    log?.error?.(`[admin-secrets] could not set ${name}: ${error?.message ?? error}`);
+    return { ok: false, status: 502, error: `Key Vault refused the write for ${name}. The value was not stored.` };
+  }
+
+  // The secret is safely in the vault from here on. Nothing below may fail
+  // the request — see secret-vault.js on why the refresh is best-effort.
+  const refresh = await vault.refreshKeyVaultReferences({ env });
+
+  const secrets = await readState(store);
+  secrets[name] = {
+    ...(secrets[name] ?? {}),
+    lastWriteAt: now(),
+    lastWriteBy: actor || 'unknown',
+    lastWriteVersion: version,
+    // A rotation makes any previous verdict meaningless: the old key's 401
+    // says nothing about the new one.
+    lastOkAt: null,
+    lastFailAt: null,
+    lastFailStatus: null,
+  };
+  await writeState(store, secrets);
+  return { ok: true, entry, record: secrets[name], refresh };
+}
+
+/**
  * @param {object} deps
  * @param {{requireRole: Function}} deps.guard
  * @param {object} deps.store readDoc/upsertDoc over Cosmos
@@ -407,35 +471,12 @@ export function createAdminSecretHandlers({
       value = randomSecret();
     }
 
-    const rejection = rejectSecretValue(value);
-    if (rejection) return bad(400, rejection);
-
-    let version = null;
-    try {
-      ({ version } = await vault.setVaultSecret(name, value, { env }));
-    } catch (error) {
-      // The message names the secret and the HTTP status, never the body.
-      log.error?.(`[admin-secrets] could not set ${name}: ${error?.message ?? error}`);
-      return bad(502, `Key Vault refused the write for ${name}. The value was not stored.`);
-    }
-
-    // The secret is safely in the vault from here on. Nothing below may fail
-    // the request — see secret-vault.js on why the refresh is best-effort.
-    const refresh = await vault.refreshKeyVaultReferences({ env });
-
-    const secrets = await readState(store);
-    secrets[name] = {
-      ...(secrets[name] ?? {}),
-      lastWriteAt: now(),
-      lastWriteBy: auth.user?.oid ?? auth.user?.preferred_username ?? 'unknown',
-      lastWriteVersion: version,
-      // A rotation makes any previous verdict meaningless: the old key's 401
-      // says nothing about the new one.
-      lastOkAt: null,
-      lastFailAt: null,
-      lastFailStatus: null,
-    };
-    await writeState(store, secrets);
+    const written = await writeCatalogSecret(
+      { store, env, now, vault, log },
+      { name, value, actor: auth.user?.oid ?? auth.user?.preferred_username ?? 'unknown' }
+    );
+    if (!written.ok) return bad(written.status, written.error);
+    const { refresh } = written;
 
     return {
       status: 200,
@@ -443,7 +484,7 @@ export function createAdminSecretHandlers({
         success: true,
         secret: presentSecret(entry, {
           env,
-          record: secrets[name],
+          record: written.record,
           startedAt: workerStartedAt(),
         }),
         refreshed: refresh.refreshed,

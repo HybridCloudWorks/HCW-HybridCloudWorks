@@ -63,6 +63,33 @@ describe('the service registry', () => {
     ]);
   });
 
+  it('groups every Coder key on the Hybrid Lab card under Coder, with the automatic renewal, and Turnstile apart', () => {
+    const lab = SERVICES.find((service) => service.id === 'hybrid-lab');
+    expect(lab.keyGroups).toEqual([
+      { title: 'Coder', secrets: ['CODER-URL', 'CODER-STATUS-TOKEN'], panel: 'coderAutomation' },
+      { title: 'Turnstile', secrets: ['TURNSTILE-SECRET-KEY'] },
+    ]);
+  });
+
+  it('only groups keys a card actually uses, each once, and only names panels the Services tab draws', () => {
+    // IntegrationsServices.jsx KEY_GROUP_PANELS: a name not there would draw
+    // an empty box; a grouped key the card does not use would never show.
+    const KNOWN_PANELS = ['coderAutomation'];
+    for (const service of SERVICES.filter((s) => s.keyGroups)) {
+      const grouped = service.keyGroups.flatMap((group) => group.secrets ?? []);
+      expect(new Set(grouped).size, `${service.name} groups a key twice`).toBe(grouped.length);
+      for (const name of grouped) {
+        expect(service.secrets, `${service.name} groups ${name}, which it does not use`).toContain(
+          name
+        );
+      }
+      for (const group of service.keyGroups) {
+        expect(group.title, `${service.name} has an untitled key group`).toMatch(/\w/);
+        if (group.panel) expect(KNOWN_PANELS).toContain(group.panel);
+      }
+    }
+  });
+
   it('gives every service a URL, since that is the one thing they all have', () => {
     // A card with no globe is a dead end: no key to rotate, no test to run and
     // nowhere to go. Education profiles have only the globe, which is the

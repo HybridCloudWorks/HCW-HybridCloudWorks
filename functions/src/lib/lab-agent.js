@@ -1,10 +1,10 @@
 /**
- * The Labs agent API — the three operations the VPS agent is allowed to
+ * The Labs agent API — the four operations the VPS agent is allowed to
  * perform, and nothing else.
  *
  * This replaces the agent's direct Cosmos access (T-401). The reasoning for the
  * credential model is in `auth/require-agent.js`; this file is what that model
- * buys. The blast radius of a credential stolen off the VPS is these three
+ * buys. The blast radius of a credential stolen off the VPS is these four
  * handlers, under the constraints written into them, rather than read/write
  * over two containers:
  *
@@ -13,6 +13,11 @@
  *   heartbeatAgent   — write liveness for *this* agent only
  *   completeLabJob   — write a terminal result, only for a job this agent
  *                      currently holds
+ *   reportCoderAutomation
+ *                    — record how the host's Coder upkeep went, and hand
+ *                      over a renewed Coder status token: one secret, by
+ *                      name, stored only after Coder accepts it
+ *                      (labs/coder-automation.js, 2026-10-08)
  *
  * The API owns the job claim and completion rules. The standalone `vps-agent/`
  * process only polls these handlers with its scoped Entra credential; it never
@@ -26,6 +31,7 @@ const json = (status, body) => ({
 });
 
 import { AGENT_DOWN_STATUSES } from './labs.js';
+import { createCoderAutomationReporter } from './labs/coder-automation.js';
 import {
   BACK_ONLINE_SENT,
   OFFLINE_NOTIFY_AFTER_MS,
@@ -392,16 +398,40 @@ async function completeLabJob({ guard, store, now }, request, context) {
 }
 
 /**
+ * The Coder automation report: the same two first steps as every handler
+ * here (JSON, then requireAgent on the body's agentId), then
+ * labs/coder-automation.js, which validates, verifies any token against
+ * Coder, stores it and records the report.
+ */
+async function reportCoderAutomation(ctx, request, context) {
+  const parsed = await authenticatedAgentBody(ctx.guard, request);
+  if (parsed.error) return parsed.error;
+  return ctx.reportAutomation(parsed, context);
+}
+
+/**
  * @param {object} deps
  * @param {{ requireAgent: Function }} deps.guard
- * @param {{ queryDocs: Function, readDoc: Function, patchDoc: Function, replaceDocIfMatch: Function }} deps.store
+ * @param {{ queryDocs: Function, readDoc: Function, patchDoc: Function, replaceDocIfMatch: Function, createDoc?: Function, upsertDoc?: Function }} deps.store
+ *        createDoc and upsertDoc are the Coder automation report's: its
+ *        document's first write, and the audit row and secret state
  * @param {() => Date} [deps.now]
+ * @param {object} [deps.coderAutomation] env, fetchImpl, vault and uuid for
+ *        the report (labs/coder-automation.js); production defaults otherwise
  */
-export function createLabAgentHandlers({ guard, store, now = () => new Date(), notifier = null }) {
-  const ctx = { guard, store, now, notifier };
+export function createLabAgentHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+  notifier = null,
+  coderAutomation = {},
+}) {
+  const reportAutomation = createCoderAutomationReporter({ store, now, ...coderAutomation });
+  const ctx = { guard, store, now, notifier, reportAutomation };
   return {
     claimLabJob: (request, context) => claimLabJob(ctx, request, context),
     heartbeatAgent: (request, context) => heartbeatAgent(ctx, request, context),
     completeLabJob: (request, context) => completeLabJob(ctx, request, context),
+    reportCoderAutomation: (request, context) => reportCoderAutomation(ctx, request, context),
   };
 }

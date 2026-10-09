@@ -15,10 +15,11 @@
  * a file someone has to exfiltrate.
  *
  * Even so, assume the credential is stealable — a VPS is a machine you do not
- * fully control. What bounds the damage is the server: the three endpoints
+ * fully control. What bounds the damage is the server: the four endpoints
  * this file calls are the whole of what the credential can do, and each is
  * constrained further (claim only registered job types, complete only jobs
- * this agent holds). See functions/src/lib/lab-agent.js.
+ * this agent holds, hand over only the Coder status token and only one Coder
+ * accepts). See functions/src/lib/lab-agent.js.
  */
 
 import { ClientCertificateCredential } from '@azure/identity';
@@ -103,6 +104,16 @@ export function createApiClient({
     /** Terminal result. The server refuses jobs this agent does not hold. */
     completeJob({ jobId, status, exitCode, output }) {
       return post('agent/completeLabJob', { jobId, status, exitCode, output });
+    },
+
+    /**
+     * The lab host's Coder upkeep, and a renewed status token when there is
+     * one (bin/report-coder-automation.js). The server verifies the token
+     * against Coder before it stores it, and answers `{ ok, stored }`; an
+     * absent `statusToken` is left out of the body by JSON.stringify.
+     */
+    reportCoderAutomation({ statusToken, report }) {
+      return post('agent/reportCoderAutomation', { statusToken, report });
     },
   };
 }

@@ -1,7 +1,7 @@
 /**
  * The agent's only link to the platform (#817).
  *
- * Everything this process may do is these three POSTs, so what they carry is
+ * Everything this process may do is these four POSTs, so what they carry is
  * the contract: a bearer token from the certificate credential on every call,
  * the agentId in every body (the server checks it against the token), and a
  * refusal that surfaces as an error with the server's status and message
@@ -121,5 +121,33 @@ describe('claimJob', () => {
     const { api } = client({ responses: [{ status: 200, body: { job: null } }, { status: 200, body: {} }] });
     assert.equal(await api.claimJob(), null);
     assert.equal(await api.claimJob(), null);
+  });
+});
+
+describe('reportCoderAutomation', () => {
+  const report = { checkedAt: '2026-10-08T04:30:00Z' };
+
+  it('posts the token and the report to agent/reportCoderAutomation and returns the answer', async () => {
+    const { api, calls } = client({ responses: [{ status: 200, body: { ok: true, stored: true } }] });
+    // Built at run time: a literal in Coder's API key shape reads as a leaked
+    // token to secret scanners (GitGuardian flagged these on #1030).
+    const statusToken = ['FAKEKEYID0', 'FAKESECRETFAKESECRET00'].join('-');
+    assert.deepEqual(await api.reportCoderAutomation({ statusToken, report }), { ok: true, stored: true });
+    assert.equal(calls[0].url, `${API}/agent/reportCoderAutomation`);
+    assert.deepEqual(calls[0].body, { agentId: 'vps-hostinger-01', statusToken, report });
+  });
+
+  it('sends no statusToken key at all when there is no token, and no agentId but its own', async () => {
+    const { api, calls } = client();
+    await api.reportCoderAutomation({ report, agentId: 'someone-else' });
+    assert.deepEqual(calls[0].body, { agentId: 'vps-hostinger-01', report });
+  });
+
+  it('surfaces a refused token as an error carrying the status', async () => {
+    const { api } = client({ responses: [{ status: 422, body: { ok: false, stored: false, error: 'Coder refused the token (HTTP 401); the token was not stored' } }] });
+    await assert.rejects(api.reportCoderAutomation({ report }), (error) => {
+      assert.equal(error.status, 422);
+      return true;
+    });
   });
 });

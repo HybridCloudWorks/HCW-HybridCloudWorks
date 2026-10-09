@@ -403,9 +403,11 @@ const LLM_SECURITY_NOTE =
  * service configured rather than credentialed (Sessionize’s speaker id), and
  * `action` for the one the site fills itself (the pricing cache’s Refresh
  * now). `reconnectHref` names the page holding a service's own sign-in flow
- * (Plaud's OAuth connect, in the Recording Hub). All are names, not
- * components, so this file stays free of React state and the registry test
- * can read them as data.
+ * (Plaud's OAuth connect, in the Recording Hub). `keyGroups` splits a card's
+ * keys into titled boxes, each of which may name a `panel` drawn inside it:
+ * the Hybrid Lab card's Coder box carries the lab host's automatic renewal
+ * (CoderAutomation). All are names, not components, so this file stays free
+ * of React state and the registry test can read them as data.
  *
  * DESCRIPTIONS ARE FOR SOMEONE WHO HAS NEVER SEEN THIS REPOSITORY. One line,
  * saying what the service is and what it does for the site. No issue numbers,
@@ -812,12 +814,19 @@ export const SERVICES = Object.freeze([
     // The public labs card's own read, cached server-side.
     test: testHybridLab,
     secrets: ['CODER-URL', 'CODER-STATUS-TOKEN', 'TURNSTILE-SECRET-KEY'],
+    // Two services behind one card, so the keys say which is which: Coder's
+    // two values together, with what the lab host last reported about
+    // renewing the status token (2026-10-08), and Turnstile's apart.
+    keyGroups: [
+      { title: 'Coder', secrets: ['CODER-URL', 'CODER-STATUS-TOKEN'], panel: 'coderAutomation' },
+      { title: 'Turnstile', secrets: ['TURNSTILE-SECRET-KEY'] },
+    ],
     capabilities: ['List lab templates', 'Count running workspaces', 'Verify a browser check'],
     usedIn: ['Labs', 'Public labs page', 'Landing Zone Builder'],
     dataDirection:
-      'Inbound: workspace status comes from Coder; a Turnstile token goes to Cloudflare to verify.',
+      'Inbound: workspace status comes from Coder, and the lab host hands over a renewed status token; a Turnstile token goes to Cloudflare to verify.',
     securityNote:
-      'The status token is read-only in Coder and never reaches a browser; the Turnstile secret goes to Cloudflare siteverify and nowhere else.',
+      'The status token is read-only in Coder and never reaches a browser; a renewed one from the lab host is stored only after Coder accepts it. The Turnstile secret goes to Cloudflare siteverify and nowhere else.',
   },
 ]);
 

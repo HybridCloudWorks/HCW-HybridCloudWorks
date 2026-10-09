@@ -19,6 +19,7 @@ import { buildIntegrationView } from './integrationView';
 import { SERVICES, SERVICE_GROUPS } from './serviceRegistry';
 import ServiceCard from './ServiceCard';
 import CloudPricingRefresh from './CloudPricingRefresh';
+import CoderAutomation from './CoderAutomation';
 import SessionizeSetting, { useSpeakerId } from './SessionizeSetting';
 import useSecretStatus from './useSecretStatus';
 import { TabError, TabLoading } from './TabNotice';
@@ -47,6 +48,26 @@ function GroupPicker({ groups, active, onChange }) {
         </button>
       ))}
     </div>
+  );
+}
+
+/**
+ * The panels a card's `keyGroups` may name, each drawn inside its group's
+ * box (ServiceCard). Built only for a card that names one, so a card
+ * without key groups never loads what it would not show.
+ */
+const KEY_GROUP_PANELS = { coderAutomation: CoderAutomation };
+
+function panelsFor(service) {
+  const names = (service.keyGroups ?? []).map((group) => group.panel).filter(Boolean);
+  if (!names.length) return undefined;
+  return Object.fromEntries(
+    names
+      .filter((name) => KEY_GROUP_PANELS[name])
+      .map((name) => {
+        const Panel = KEY_GROUP_PANELS[name];
+        return [name, <Panel key={name} />];
+      })
   );
 }
 
@@ -110,6 +131,7 @@ export default function IntegrationsServices({ group, onGroupChange, onOpenKeys,
               testing={tests.testing.has(service.id)}
               onTest={() => tests.runTest(service, speakerId.trim())}
               onOpenKeys={onOpenKeys}
+              panels={panelsFor(service)}
             >
               {service.setting === 'sessionizeSpeakerId' ? (
                 <SessionizeSetting

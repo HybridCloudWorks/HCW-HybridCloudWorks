@@ -19,6 +19,51 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Coder automation, the site's half: the lab host can hand the site a
+  renewed Coder status token through the lab agent, and the site stores it
+  only after Coder accepts it; the Hybrid Lab card shows what the host last
+  reported (owner approval, 2026-10-08).**
+  Until now `CODER-STATUS-TOKEN` was renewed by hand once a year, minted in
+  a pane and pasted on the Keys tab, because the host cannot reach Key
+  Vault and must not. A fourth agent route, `POST
+  /api/agent/reportCoderAutomation`, guarded by `requireAgent` exactly as
+  the heartbeat is, takes `{ agentId, statusToken?, report { checkedAt,
+  statusTokenExpiresAt?, statusTokenRotatedAt?, rotationTokenExpiresAt?,
+  templatePushedAt?, templateVersion?, lastError? } }` and refuses
+  anything else with a 400 and a sentence before any read
+  (`functions/src/lib/labs/coder-automation.js`, composed in
+  `lib/lab-agent.js`). A token must have Coder's key shape, measured
+  against Coder v2.38's source (a 10-character id, a dash, a 22-character
+  secret), and must answer Coder's running-workspaces read with an integer
+  count through `coder-status.js`'s guarded GET (`verifyStatusToken`); only
+  then is it written by `writeCatalogSecret`, the Keys tab's own writer
+  factored out of `admin-secrets.js`, so the Keys row goes amber and then
+  green as for a paste and there is no second vault client. One
+  `coder_status_token_rotated` audit row, never the value. A token Coder
+  refuses is 422 and a vault refusal 502; the report is recorded either way
+  in one `admin_config/coder_automation` document, merged under its ETag
+  (event dates kept when a report omits them, `lastError` cleared by a
+  clean check, anything shaped like a Coder key in it removed). Warning and
+  error lines name a status, never the token, the agent or a document id.
+  `GET /api/cms/labs/coder-automation` (editor) serves the document, and
+  the Hybrid Lab card on the Services tab now groups its keys: Coder's two
+  values together with **Automatic renewal** (status token renewed on,
+  rotation credential expires on, template last published, last check, and
+  `lastError` amber or red by `lib/status.js`), Turnstile's apart. Before
+  the first report it reads `Automatic renewal not set up yet`, and the
+  manual paste on the Keys tab is unchanged. On the host side,
+  `vps-agent/bin/report-coder-automation.js` reads one JSON object on
+  stdin, adds `agentId`, posts it with the agent's API client, prints
+  `{"ok":true,"stored":<bool>}`, and on failure prints the error's class
+  alone; the agent's configuration moved to `vps-agent/lib/config.js` so
+  the agent and the one-shot read it one way. `lab-host/README.md`, "The
+  status token for the site", gains a paragraph pointing to the host's
+  setup. Tests: `functions/src/lib/labs/coder-automation.test.js`,
+  `coder-status.test.js`, `admin-secrets.test.js`, `lab-agent.test.js`;
+  `frontend/src/components/admin/integrations/coderAutomationView.test.js`,
+  `IntegrationsServices.test.jsx`, `serviceRegistry.test.js`;
+  `vps-agent/lib/report-coder-automation.test.js`, `config.test.js`,
+  `api.test.js`.
 - **CodeRabbit is configured for this repository, for its free open-source
   plan.** It reviews nothing until the CodeRabbit GitHub App is installed on
   the repository, an owner step. `.coderabbit.yaml` at the root (owner

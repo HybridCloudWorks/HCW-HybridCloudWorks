@@ -130,19 +130,66 @@ export function ServiceActions({ service, testing, onTest }) {
   );
 }
 
-function KeyNames({ items }) {
+function KeyRows({ items }) {
+  return items.map((item) => (
+    <li key={item.secret} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2">
+      <StateDot state={item.state} />
+      <code className="text-muted-foreground">{item.secret}</code>
+      <span className="font-medium">
+        {(STATE_PRESENTATION[item.state] ?? STATE_PRESENTATION.never).label}
+      </span>
+    </li>
+  ));
+}
+
+const KEY_BOX = 'rounded-md border border-border/60 bg-muted/20 px-3 text-xs';
+
+/**
+ * One titled box per `keyGroups` entry: its keys, then the panel it names
+ * (`panels[group.panel]`), so everything about one part of a service sits
+ * together. The Hybrid Lab card is the one that has them: Coder (its two
+ * keys and the lab host's automatic renewal) apart from Turnstile. A group
+ * with neither keys nor a panel is not drawn, and a key no group names still
+ * shows, in an untitled box after them, rather than vanishing.
+ */
+function KeyGroups({ items, groups, panels }) {
+  const placed = new Set(groups.flatMap((group) => group.secrets ?? []));
+  const rest = items.filter((item) => !placed.has(item.secret));
+  return (
+    <div className="mt-3 space-y-2">
+      {groups.map((group) => {
+        const groupItems = (group.secrets ?? [])
+          .map((name) => items.find((item) => item.secret === name))
+          .filter(Boolean);
+        const panel = group.panel ? (panels?.[group.panel] ?? null) : null;
+        if (!groupItems.length && !panel) return null;
+        return (
+          <section key={group.title} aria-label={group.title} className={`${KEY_BOX} pt-2`}>
+            <p className="font-semibold">{group.title}</p>
+            {groupItems.length ? (
+              <ul className="divide-y divide-border/60">
+                <KeyRows items={groupItems} />
+              </ul>
+            ) : null}
+            {panel}
+          </section>
+        );
+      })}
+      {rest.length ? (
+        <ul className={`divide-y divide-border/60 ${KEY_BOX}`}>
+          <KeyRows items={rest} />
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function KeyNames({ items, groups, panels }) {
+  if (groups?.length) return <KeyGroups items={items} groups={groups} panels={panels} />;
   if (!items.length) return null;
   return (
-    <ul className="mt-3 divide-y divide-border/60 rounded-md border border-border/60 bg-muted/20 px-3 text-xs">
-      {items.map((item) => (
-        <li key={item.secret} className="flex flex-wrap items-center gap-x-2 gap-y-1 py-2">
-          <StateDot state={item.state} />
-          <code className="text-muted-foreground">{item.secret}</code>
-          <span className="font-medium">
-            {(STATE_PRESENTATION[item.state] ?? STATE_PRESENTATION.never).label}
-          </span>
-        </li>
-      ))}
+    <ul className={`mt-3 divide-y divide-border/60 ${KEY_BOX}`}>
+      <KeyRows items={items} />
     </ul>
   );
 }
@@ -215,6 +262,7 @@ export default function ServiceCard({
   testing,
   onTest,
   onOpenKeys,
+  panels,
   children,
 }) {
   const Icon = service.icon;
@@ -248,7 +296,7 @@ export default function ServiceCard({
         <p className="mt-2 text-xs text-muted-foreground">No test: {service.untestedReason}</p>
       ) : null}
       <ServiceFacts service={service} />
-      <KeyNames items={service.items ?? []} />
+      <KeyNames items={service.items ?? []} groups={service.keyGroups} panels={panels} />
 
       {service.credentialNote && (
         <p className="mt-3 text-xs text-muted-foreground">{service.credentialNote}</p>

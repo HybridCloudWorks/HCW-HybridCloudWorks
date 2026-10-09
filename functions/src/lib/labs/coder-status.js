@@ -205,6 +205,56 @@ async function coderGet(fetchImpl, config, path, token) {
   return response.json();
 }
 
+/**
+ * The exact shape of a Coder API key: a 10-character key id, a dash, and a
+ * 22-character secret, both drawn from letters and digits. From Coder
+ * v2.38.0's source, read 2026-10-08: `apikey.Generate` makes the id with
+ * `cryptorand.String(10)` and the secret with `GenerateSecret(22)`, joined
+ * by `fmt.Sprintf("%s-%s", keyID, keySecret)`; `cryptorand.String` draws
+ * from `Default`, which is `Numeric + Alpha`. Stricter than `tokenKeyId`,
+ * which only has to find the id in something already stored; this one
+ * decides what may be stored at all (lib/labs/coder-automation.js).
+ */
+export const CODER_API_KEY_PATTERN = /^[A-Za-z0-9]{10}-[A-Za-z0-9]{22}$/;
+
+/**
+ * Whether a candidate status token works, before anything stores it (Coder
+ * automation, 2026-10-08). The card's own running-workspaces read, made with
+ * the candidate's header through the same guarded GET as every other call
+ * here: https only, no redirect, five seconds. `{ ok: true, running }` when
+ * Coder answers 200 with an integer `count`; otherwise `{ ok: false,
+ * reason }`, a sentence naming a status or a cause and never the token, nor
+ * Coder's address. Never throws.
+ */
+export async function verifyStatusToken({ fetchImpl, config, token }) {
+  const running = new URLSearchParams({ q: 'status:running' });
+  let body;
+  try {
+    body = await coderGet(fetchImpl, config, `/api/v2/workspaces?${running}`, token);
+  } catch (error) {
+    return { ok: false, reason: verificationFailure(error) };
+  }
+  if (!Number.isInteger(body?.count)) {
+    return { ok: false, reason: 'Coder answered the running-workspaces read without a count' };
+  }
+  return { ok: true, running: body.count };
+}
+
+/** Why a verification read failed, in words that carry no token and no URL. */
+function verificationFailure(error) {
+  if (error?.status === 401 || error?.status === 403) {
+    return `Coder refused the token (HTTP ${error.status})`;
+  }
+  if (Number.isInteger(error?.status)) {
+    return `Coder answered HTTP ${error.status} to the running-workspaces read`;
+  }
+  if (error?.code === 'FETCH_TIMEOUT') {
+    return `Coder did not answer within ${CODER_TIMEOUT_MS / 1000} s`;
+  }
+  if (error instanceof SyntaxError) return 'Coder answered with something that is not JSON';
+  return 'Coder could not be reached';
+}
+
 /** Whether Coder answers: the unauthenticated build info, in its documented shape. Throws otherwise. */
 async function readReachable(fetchImpl, config) {
   const info = await coderGet(fetchImpl, config, '/api/v2/buildinfo', '');

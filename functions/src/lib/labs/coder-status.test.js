@@ -5,6 +5,7 @@ import {
   CODER_STATUS_CACHE_ID,
   CODER_STATUS_CACHE_SECONDS,
   CODER_TIMEOUT_MS,
+  CODER_API_KEY_PATTERN,
   DEFAULT_CODER_MAX_WORKSPACES,
   MAX_TEMPLATES,
   SCOPE_REFUSAL_STATUSES,
@@ -16,6 +17,7 @@ import {
   readSetting,
   readTokenExpiry,
   tokenKeyId,
+  verifyStatusToken,
 } from './coder-status.js';
 
 const NOW = Date.parse('2026-09-25T12:00:00Z');
@@ -497,5 +499,103 @@ describe('the status token\'s own expiry (#763)', () => {
     // Without a guard the read refuses to run rather than answer anonymously.
     const unguarded = createCoderStatusHandlers({ store: makeStore(), fetchImpl, env: KEY_ENV, now: () => NOW });
     expect((await unguarded.getCoderToken(request(), context)).status).toBe(500);
+  });
+});
+
+describe('verifying a renewed status token before it is stored (Coder automation)', () => {
+  // Shaped like a Coder key and plainly not one.
+  // Built at run time: a literal in Coder's API key shape reads as a leaked
+  // token to secret scanners (GitGuardian flagged these on #1030).
+  const CANDIDATE = ['FAKEKEYID0', 'FAKESECRETFAKESECRET00'].join('-');
+  const config = { base: 'https://coder.lab.example', token: 'the-stored-one', max: 5 };
+  const RUNNING = '/api/v2/workspaces?q=status%3Arunning';
+
+  it('knows the shape of a Coder API key: ten letters or digits, a dash, twenty-two more', () => {
+    expect(CODER_API_KEY_PATTERN.test(CANDIDATE)).toBe(true);
+    for (const wrong of [
+      'FAKEKEYID-FAKESECRETFAKESECRET00', // nine-character id
+      'FAKEKEYID00-FAKESECRETFAKESECRET0', // eleven
+      'FAKEKEYID0-FAKESECRETFAKESECRET0', // twenty-one-character secret
+      'FAKEKEYID0_FAKESECRETFAKESECRET00',
+      'FAKEKEYID0-FAKESECRET-AKESECRET00',
+      ` ${CANDIDATE}`,
+      `${CANDIDATE}\n`,
+      'read-only-token',
+    ]) {
+      expect(CODER_API_KEY_PATTERN.test(wrong), wrong).toBe(false);
+    }
+  });
+
+  it('asks Coder for the running count with the candidate, through the guarded GET', async () => {
+    const fetchImpl = coderFetch({ [RUNNING]: { count: 3, workspaces: [] } });
+    await expect(verifyStatusToken({ fetchImpl, config, token: CANDIDATE })).resolves.toEqual({
+      ok: true,
+      running: 3,
+    });
+    const [{ url, options }] = fetchImpl.calls;
+    expect(url).toBe(`https://coder.lab.example${RUNNING}`);
+    // The candidate, not the stored token; and no redirect may carry it on.
+    expect(options.headers['Coder-Session-Token']).toBe(CANDIDATE);
+    expect(options.redirect).toBe('error');
+    expect(options.signal).toBeDefined();
+  });
+
+  it('accepts zero, and nothing that is not an integer count', async () => {
+    const zero = coderFetch({ [RUNNING]: { count: 0 } });
+    expect(await verifyStatusToken({ fetchImpl: zero, config, token: CANDIDATE })).toEqual({
+      ok: true,
+      running: 0,
+    });
+    for (const answer of [{}, { count: '2' }, { count: 1.5 }, { workspaces: [{ id: 'w' }] }, null]) {
+      const fetchImpl = coderFetch({ [RUNNING]: () => okJson(answer) });
+      const verdict = await verifyStatusToken({ fetchImpl, config, token: CANDIDATE });
+      expect(verdict, JSON.stringify(answer)).toEqual({
+        ok: false,
+        reason: 'Coder answered the running-workspaces read without a count',
+      });
+    }
+  });
+
+  it('says why in words that carry neither the token nor Coder’s address', async () => {
+    const cases = [
+      [() => ({ ok: false, status: 401, json: async () => ({}) }), 'Coder refused the token (HTTP 401)'],
+      [() => ({ ok: false, status: 403, json: async () => ({}) }), 'Coder refused the token (HTTP 403)'],
+      [
+        () => ({ ok: false, status: 502, json: async () => ({}) }),
+        'Coder answered HTTP 502 to the running-workspaces read',
+      ],
+      [
+        () => ({ ok: true, status: 200, json: async () => JSON.parse('<html>') }),
+        'Coder answered with something that is not JSON',
+      ],
+      [
+        () => {
+          throw new TypeError(`fetch failed for ${CANDIDATE} at https://coder.lab.example`);
+        },
+        'Coder could not be reached',
+      ],
+    ];
+    for (const [answer, reason] of cases) {
+      const fetchImpl = coderFetch({ [RUNNING]: answer });
+      const verdict = await verifyStatusToken({ fetchImpl, config, token: CANDIDATE });
+      expect(verdict).toEqual({ ok: false, reason });
+      expect(verdict.reason).not.toContain(CANDIDATE);
+      expect(verdict.reason).not.toContain('coder.lab.example');
+    }
+  });
+
+  it('gives up after the same five seconds as every other Coder call', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(
+      (_url, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () =>
+            reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+          );
+        })
+    );
+    const pending = verifyStatusToken({ fetchImpl, config, token: CANDIDATE });
+    await vi.advanceTimersByTimeAsync(CODER_TIMEOUT_MS);
+    await expect(pending).resolves.toEqual({ ok: false, reason: 'Coder did not answer within 5 s' });
   });
 });

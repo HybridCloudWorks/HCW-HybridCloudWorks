@@ -7,6 +7,7 @@ import {
   processStartedAt,
   recordSecretVerdict,
   rejectSecretValue,
+  writeCatalogSecret,
 } from './admin-secrets.js';
 
 const STARTED = Date.parse('2026-08-29T10:00:00.000Z');
@@ -590,5 +591,52 @@ describe('recording verdicts', () => {
 describe('processStartedAt', () => {
   it('derives the start from uptime, not from module load', () => {
     expect(processStartedAt(10_000, 4)).toBe(6_000);
+  });
+});
+
+describe('writeCatalogSecret, the one writer behind the Keys tab and the lab agent', () => {
+  // The lab agent's Coder status token renewal (labs/coder-automation.js)
+  // calls this directly, so its refusals are pinned here, not only through
+  // putSecret.
+  const write = (deps, over = {}) =>
+    writeCatalogSecret(
+      { store: deps._store, env: deps.env, now: deps.now, vault: deps.vault, log: deps.log },
+      { name: 'CODER-STATUS-TOKEN', value: ['FAKEKEYID0', 'FAKESECRETFAKESECRET00'].join('-'), actor: 'lab-agent:vps-1', ...over }
+    );
+
+  it('refuses a name outside the catalogue and a value rejectSecretValue refuses, before the vault', async () => {
+    const deps = buildDeps();
+    expect(await write(deps, { name: 'NOT-A-SECRET' })).toEqual({
+      ok: false,
+      status: 400,
+      error: 'NOT-A-SECRET is not a secret this estate declares',
+    });
+    expect(await write(deps, { value: ' padded-value-long-enough' })).toMatchObject({ ok: false, status: 400 });
+    expect(deps.vault.setVaultSecret).not.toHaveBeenCalled();
+    expect(deps._store.current()).toBeNull();
+  });
+
+  it('writes, refreshes and records the actor it is given, and never the value', async () => {
+    const deps = buildDeps();
+    const written = await write(deps);
+    expect(written).toMatchObject({ ok: true, refresh: { refreshed: true } });
+    expect(written.entry.setting).toBe('CODER_STATUS_TOKEN');
+    expect(written.record).toMatchObject({ lastWriteBy: 'lab-agent:vps-1', lastWriteVersion: 'v2' });
+    expect(JSON.stringify(deps._store.current())).not.toContain('FAKESECRET');
+    expect(JSON.stringify(written)).not.toContain('FAKESECRET');
+  });
+
+  it('answers 502 and records nothing when Key Vault refuses', async () => {
+    const deps = buildDeps({
+      vault: {
+        setVaultSecret: vi.fn(async () => {
+          throw new Error('Key Vault refused to set CODER-STATUS-TOKEN: HTTP 403');
+        }),
+        refreshKeyVaultReferences: vi.fn(),
+      },
+    });
+    expect(await write(deps)).toMatchObject({ ok: false, status: 502 });
+    expect(deps.vault.refreshKeyVaultReferences).not.toHaveBeenCalled();
+    expect(deps._store.current()).toBeNull();
   });
 });

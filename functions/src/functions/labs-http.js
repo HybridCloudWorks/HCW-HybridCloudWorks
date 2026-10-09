@@ -25,6 +25,7 @@ import { createDoc, deleteDoc, queryDocs, readDoc, upsertDoc, patchDoc } from '.
 import { createLabHandlers } from '../lib/labs.js';
 import { createAgentRegistryHandlers } from '../lib/labs/agent-registry.js';
 import { createCoderStatusHandlers } from '../lib/labs/coder-status.js';
+import { createCoderAutomationReadHandler } from '../lib/labs/coder-automation.js';
 
 const handlers = () =>
   createLabHandlers({
@@ -93,4 +94,18 @@ httpRoute('cmsLabsCoderToken', {
   authLevel: 'anonymous',
   route: 'cms/labs/coder-token',
   handler: (request, context) => coderToken().getCoderToken(request, context),
+});
+
+// What the lab host last reported about its Coder upkeep, for the same card
+// (2026-10-08): one admin_config document, written by the agent route
+// agent/reportCoderAutomation. Editor, as the token read beside it is.
+httpRoute('cmsLabsCoderAutomation', {
+  methods: ['GET'],
+  authLevel: 'anonymous',
+  route: 'cms/labs/coder-automation',
+  handler: (request, context) =>
+    createCoderAutomationReadHandler({ guard: getDefaultGuard(), store: { readDoc } })(
+      request,
+      context
+    ),
 });
