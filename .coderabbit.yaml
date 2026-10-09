@@ -1,0 +1,77 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit for this repository (owner request, 2026-10-08), on the free plan
+# CodeRabbit gives public open-source repositories. Nothing here turns on a
+# paid add-on, and every key and value is in schema.v2.json (checked against
+# it when this file was written; the header line above lets an editor check it
+# on every change). The repository's own review rules live in
+# .github/skills/code-review/, and CodeRabbit reads them as code guidelines
+# (knowledge_base below), so its comments hold the house checklist's bar.
+#
+# Its comments are review threads, and the Default ruleset requires every
+# thread resolved before a merge (.claude/CLAUDE.md), so each is answered on
+# its thread and resolved like any other reviewer's.
+#
+# On the open-source plan a public repository with few stars is reviewed only
+# when asked: comment "@coderabbitai review" on the pull request. CodeRabbit's
+# own check says so ("manual review required for this OSS repository"). The
+# auto_review settings below apply once the plan reviews on its own.
+language: "en-US"
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: true
+  # Generated, vendored or dated files, which a review cannot improve.
+  path_filters:
+    - "!**/package-lock.json"
+    - "!**/dist/**"
+    - "!**/node_modules/**"
+    - "!CHANGELOG.md"
+    - "!docs/history/**"
+  path_instructions:
+    - path: "functions/**"
+      instructions: >-
+        Telemetry is content-free: no document ids, tokens, file paths, route
+        values or payloads in log lines (.github/pull_request_template.md). A
+        write decided from an earlier read is ETag-guarded (ifMatch) with a
+        412 handled. patchDoc treats an undefined value as a field deletion,
+        and a dotted key is a nested Cosmos patch, so flag either in an update
+        built from request input.
+    - path: "infra/**"
+      instructions: >-
+        This is live production, applied by HCP Terraform with a human
+        confirmation. Flag any change that would replace or destroy a stateful
+        resource (Cosmos, Storage, Key Vault, the Function App) or put a secret
+        value into state.
+    - path: "lab-host/ansible/**"
+      instructions: >-
+        ansible-core 2.21: ansible_managed exists only for the template module,
+        so it must not appear in a copy task's content. Tasks must be
+        idempotent and say why in a comment when they are not.
+    - path: "frontend/src/pages/**"
+      instructions: >-
+        Public pages never name the site's back-end vendors, tools, models or
+        admin-side states; they speak to visitors. Admin pages under
+        pages/admin/ are exempt.
+    - path: "docs/**"
+      instructions: >-
+        A command meant for the owner is PowerShell unless the line above it
+        says bash, is one line, and carries no placeholder; a browser step
+        gives the exact URL.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - ".github/skills/code-review/SKILL.md"
+      - ".github/skills/code-review/references/*.md"

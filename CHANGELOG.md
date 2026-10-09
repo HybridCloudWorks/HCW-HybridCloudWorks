@@ -19,6 +19,18 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **CodeRabbit reviews pull requests here, on its free open-source plan.**
+  `.coderabbit.yaml` at the root (owner request, 2026-10-08) enables no paid
+  add-on, and every key and value was checked against CodeRabbit's
+  `schema.v2.json`. It reviews drafts too, with the `chill` profile and no
+  request-changes gate, and it skips lockfiles, build output,
+  `CHANGELOG.md` and `docs/history/`. It reads the repository's own review
+  checklist in `.github/skills/code-review/` as its code guidelines, with
+  short path instructions for the functions, infra, lab-host, public-page and
+  docs rules. On the open-source plan a public repository with few stars is
+  reviewed when asked: comment `@coderabbitai review` on the pull request.
+  `scripts/validate-repository-structure.ps1` allows the file at the root.
+
 - **Publer MCP: `PUBLER_API_KEY` usable as an MCP key, bound to
   `mcp.publer.com` only, a server-side MCP tool allowlist that keeps
   Publer's write tools out of reach (#995), a disabled `Publer MCP` seed
