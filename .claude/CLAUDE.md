@@ -234,10 +234,14 @@ so it is recorded here, where every session reads it.
     bot, and the fixes pushed in answer to it. Work the loop above for a
     bot's first three reviews; after the third round's fixes are pushed,
     merge once required checks are green and every thread is replied to and
-    resolved. Do not request, or wait for, a fourth review. A review that
-    does arrive on the final head still has its findings answered on their
-    threads before the merge. #835 and #836 ran three and four Copilot
-    rounds; the owner put a loop at "more than 3 turns".
+    resolved. Do not request, or wait for, a fourth review. The cap
+    overrides the approval bullet above: before the cap, a review that
+    recommends changes still means fix, push and wait for the next review;
+    once the third round's fixes are pushed, the final head needs no review
+    recommending approval. A review that does arrive on the final head still
+    has its findings answered on their threads before the merge. #835 and
+    #836 ran three and four Copilot rounds; the owner put a loop at "more
+    than 3 turns".
   - **CodeRabbit's summary is a checklist to work, not to tick.** Its
     walkthrough comment is not a review thread, so nothing blocks the merge
     on it, which is what makes it easy to miss. It carries actionable
