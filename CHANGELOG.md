@@ -72,7 +72,9 @@ This project has not cut a tagged release; entries are grouped under
   between the read and the write is never written over. A Keys-tab write
   syncs the credential reminders at once, so a rotation moves its reminder
   without waiting for the timer, and the register copies only `lastWriteAt`
-  and `rotatedOn` out of the records it reads.
+  and `rotatedOn` out of the records it reads. An editor's save of the sheet
+  may hold at most 180 of the owner's own reminders: 20 rows stay free for
+  the register, so its warnings can always be installed.
 
 - **Lab host: Coder automation. The host renews the site's Coder status
   token and publishes the `hcw-lab` template on its own, with one rotation

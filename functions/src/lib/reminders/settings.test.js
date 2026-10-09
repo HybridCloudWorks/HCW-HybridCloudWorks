@@ -8,6 +8,7 @@ import {
   DEFAULT_LEAD_DAYS,
   MAX_REMINDERS,
   OVERDUE_REPEAT_DAYS,
+  REGISTER_RESERVED_ROWS,
   RemindersValidationError,
   daysUntil,
   isCredentialRow,
@@ -238,6 +239,14 @@ describe('the credential register’s rows survive any save unchanged (review of
       reminders: Array.from({ length: MAX_REMINDERS }, (_, i) => reminder({ id: `r${i}` })),
     });
     expect(() => mergeStoredStamps(full, stored())).toThrow(RemindersValidationError);
+  });
+
+  it('keeps REGISTER_RESERVED_ROWS free for the register, even before any of its rows exist (review of #1039)', () => {
+    const own = (n) =>
+      normalizeReminders({ reminders: Array.from({ length: n }, (_, i) => reminder({ id: `r${i}` })) });
+    const limit = MAX_REMINDERS - REGISTER_RESERVED_ROWS;
+    expect(mergeStoredStamps(own(limit), null).reminders).toHaveLength(limit);
+    expect(() => mergeStoredStamps(own(limit + 1), null)).toThrow(/kept for the credential register/);
   });
 });
 

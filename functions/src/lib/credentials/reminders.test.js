@@ -6,7 +6,12 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { memoryStore } from '../../../test/memory-store.js';
-import { MAX_REMINDERS, normalizeReminders, readStoredReminders } from '../reminders/settings.js';
+import {
+  MAX_REMINDERS,
+  REGISTER_RESERVED_ROWS,
+  normalizeReminders,
+  readStoredReminders,
+} from '../reminders/settings.js';
 import { CREDENTIAL_REGISTER } from './register.js';
 import { recordRotation } from './sources.js';
 import { buildRegisterView } from './status.js';
@@ -59,6 +64,11 @@ describe('wantedReminders', () => {
     expect(undated.map((row) => row.id).sort()).toEqual(ids);
     expect(dated.map((row) => row.id).sort()).toEqual(ids);
     expect(ids).toHaveLength(8);
+  });
+
+  it('fits within the rows the sheet keeps for the register, so an editor-filled sheet still takes them (review of #1039)', () => {
+    expect(wantedReminders(view(), { today: TODAY }).length).toBeLessThanOrEqual(REGISTER_RESERVED_ROWS);
+    expect(wantedReminders(view(ALL_RECORDED), { today: TODAY }).length).toBeLessThanOrEqual(REGISTER_RESERVED_ROWS);
   });
 
   it('asks for the date, due today, when no date is known', () => {

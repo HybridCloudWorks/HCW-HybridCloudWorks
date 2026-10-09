@@ -34,6 +34,14 @@ export {
 
 export const REMINDERS_CONFIG_ID = 'reminders';
 export const MAX_REMINDERS = 200;
+/**
+ * Rows kept for the credential register's own reminders, which an editor's
+ * save of the sheet cannot use (review of #1039): without the reserve, a
+ * sheet filled with the owner's rows before the register's were installed
+ * would refuse every sync, and the renewal warnings would never appear.
+ * credentials/reminders.test.js holds the register's rows under it.
+ */
+export const REGISTER_RESERVED_ROWS = 20;
 export const MAX_TITLE_LENGTH = 200;
 export const MAX_NOTES_LENGTH = 2000;
 export const MAX_URL_LENGTH = 2048;
@@ -246,6 +254,12 @@ export function mergeStoredStamps(value, storedDoc) {
     .map((row) =>
       stored.has(row.id) ? { ...row, notified: mergeStamps(stored.get(row.id), row.notified) } : row
     );
+  const ownLimit = MAX_REMINDERS - REGISTER_RESERVED_ROWS;
+  if (ownRows.length > ownLimit) {
+    fail(
+      `reminders may hold at most ${ownLimit} of your own entries; ${REGISTER_RESERVED_ROWS} are kept for the credential register`
+    );
+  }
   const reminders = [...ownRows, ...storedCredentialRows(storedDoc)];
   if (reminders.length > MAX_REMINDERS) {
     fail(`reminders may hold at most ${MAX_REMINDERS} entries, the credential register's rows included`);
