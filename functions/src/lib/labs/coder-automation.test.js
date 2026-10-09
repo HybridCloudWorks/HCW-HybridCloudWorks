@@ -205,6 +205,9 @@ describe('the body is exactly the contract, or a 400 with a sentence', () => {
     ['30 February', bodyWith({ report: { ...REPORT, templatePushedAt: '2026-02-30T00:00:00Z' } }), /templatePushedAt must be an ISO 8601/],
     ['a version that is too long', bodyWith({ report: { ...REPORT, templateVersion: 'v'.repeat(65) } }), /at most 64 characters/],
     ['a version that is not a string', bodyWith({ report: { ...REPORT, templateVersion: 7 } }), /templateVersion must be a non-empty string/],
+    // The report is token-free, and the version is stored and served back as sent (CodeRabbit review).
+    ['a version carrying a Coder key', bodyWith({ report: { ...REPORT, templateVersion: TOKEN } }), /templateVersion must not carry a Coder API key/],
+    ['a version with a Coder key inside it', bodyWith({ report: { ...REPORT, templateVersion: `v1 ${TOKEN}` } }), /templateVersion must not carry a Coder API key/],
     ['an error that is too long', bodyWith({ report: { ...REPORT, lastError: 'e'.repeat(301) } }), /at most 300 characters/],
     ['an error that is not a string', bodyWith({ report: { ...REPORT, lastError: { message: 'x' } } }), /lastError must be a string/],
     // A nine-character id, built at run time like TOKEN.

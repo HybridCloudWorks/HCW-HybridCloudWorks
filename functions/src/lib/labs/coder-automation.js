@@ -228,28 +228,46 @@ export function parseIsoDateTime(value) {
   return new Date(ms).toISOString();
 }
 
-/** One report field, checked and normalised: `{ value }` or `{ error }`. */
-function reportValue(key, kind, raw) {
-  if (kind === 'date') {
-    const iso = parseIsoDateTime(raw);
-    return iso
-      ? { value: iso }
-      : { error: `report.${key} must be an ISO 8601 date-time with a zone, such as 2026-10-08T04:30:00Z` };
+function dateValue(key, raw) {
+  const iso = parseIsoDateTime(raw);
+  return iso
+    ? { value: iso }
+    : { error: `report.${key} must be an ISO 8601 date-time with a zone, such as 2026-10-08T04:30:00Z` };
+}
+
+/**
+ * The template version, which the card shows. Refused when it carries
+ * anything shaped like a Coder key (CodeRabbit review of #1030): the report is
+ * token-free, and this field is stored and served back as it came, so a key
+ * copied into it would reach the document and the editor read.
+ */
+function versionValue(raw) {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return { error: 'report.templateVersion must be a non-empty string' };
   }
-  if (kind === 'version') {
-    if (typeof raw !== 'string' || !raw.trim()) {
-      return { error: 'report.templateVersion must be a non-empty string' };
-    }
-    if (raw.length > MAX_TEMPLATE_VERSION_LENGTH) {
-      return { error: `report.templateVersion must be at most ${MAX_TEMPLATE_VERSION_LENGTH} characters` };
-    }
-    return { value: raw.trim() };
+  if (raw.length > MAX_TEMPLATE_VERSION_LENGTH) {
+    return { error: `report.templateVersion must be at most ${MAX_TEMPLATE_VERSION_LENGTH} characters` };
   }
+  if (new RegExp(EMBEDDED_KEY.source).test(raw)) {
+    return { error: 'report.templateVersion must not carry a Coder API key' };
+  }
+  return { value: raw.trim() };
+}
+
+/** lastError, with anything shaped like a Coder key replaced, not refused: an error line may quote one. */
+function errorValue(raw) {
   if (typeof raw !== 'string') return { error: 'report.lastError must be a string' };
   if (raw.length > MAX_LAST_ERROR_LENGTH) {
     return { error: `report.lastError must be at most ${MAX_LAST_ERROR_LENGTH} characters` };
   }
   return { value: raw.replace(EMBEDDED_KEY, REDACTED_KEY).trim() };
+}
+
+/** One report field, checked and normalised: `{ value }` or `{ error }`. */
+function reportValue(key, kind, raw) {
+  if (kind === 'date') return dateValue(key, raw);
+  if (kind === 'version') return versionValue(raw);
+  return errorValue(raw);
 }
 
 /** The first past-event date that is ahead of the site's clock by more than the skew, as a refusal; or null. */
