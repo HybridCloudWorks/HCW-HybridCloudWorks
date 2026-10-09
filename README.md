@@ -128,6 +128,7 @@ Each Node.js package installs and tests the same way, from its own directory:
 | `scripts/` | 26 | `npm ci` | `npm test` | `npm run lint` | — |
 | `vps-agent/` | 26 | `npm ci` | `npm test` | — | `npm start` |
 | `edge/availability-probe/` | 26 | `npm ci` | `npm test` | — | — |
+| `lab-host/coder/` | 26 | — (no dependencies, so no lockfile) | `npm test` | `bash compose-config-check.sh`, and `terraform fmt`, `init` and `validate` on the workspace template | — |
 
 For example, the website, in PowerShell or bash alike:
 
