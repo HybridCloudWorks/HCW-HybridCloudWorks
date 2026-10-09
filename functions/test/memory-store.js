@@ -6,12 +6,18 @@
  *
  * `fail(container, id, verb)` makes the next calls of one verb on one
  * document throw (a read that fails, a write that loses a race), for the
- * paths a real store reaches only under load. The same shape as
- * labs/coder-automation.test.js's makeStore, across containers.
+ * paths a real store reaches only under load; for `queryDocs` the id is
+ * `*`. The same shape as labs/coder-automation.test.js's makeStore, across
+ * containers.
+ *
+ * `queryDocs` answers with `query({ container, query, parameters, docs })`
+ * when one is given (docs are copies of that container's documents), and
+ * with no rows otherwise: an in-memory store cannot run Cosmos SQL, so a test
+ * that queries says what Cosmos would answer (test/mcp-projection.js).
  */
 import { vi } from 'vitest';
 
-export function memoryStore(initial = {}) {
+export function memoryStore(initial = {}, { query = null } = {}) {
   const docs = new Map();
   const failures = new Map();
   let etag = 0;
@@ -19,6 +25,8 @@ export function memoryStore(initial = {}) {
   const stamp = (doc) => ({ ...structuredClone(doc), _etag: `"e${++etag}"` });
   for (const [path, doc] of Object.entries(initial)) docs.set(path, stamp(doc));
 
+  const docsIn = (container) =>
+    [...docs.entries()].filter(([path]) => path.startsWith(`${container}/`)).map(([, doc]) => doc);
   const maybeFail = (container, id, verb) => {
     const queue = failures.get(`${verb}:${key(container, id)}`);
     const error = queue?.shift();
@@ -52,6 +60,12 @@ export function memoryStore(initial = {}) {
       }
       docs.set(key(container, doc.id), stamp(doc));
       return structuredClone(docs.get(key(container, doc.id)));
+    }),
+    queryDocs: vi.fn(async (container, sql, parameters = []) => {
+      maybeFail(container, '*', 'queryDocs');
+      if (!query) return [];
+      const copies = docsIn(container).map((doc) => structuredClone(doc));
+      return query({ container, query: sql, parameters, docs: copies });
     }),
     upsertDoc: vi.fn(async (container, doc) => {
       maybeFail(container, doc.id, 'upsertDoc');

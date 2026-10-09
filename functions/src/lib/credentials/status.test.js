@@ -4,6 +4,8 @@
  */
 import { describe, it, expect } from 'vitest';
 
+import { projectMcpServers } from '../../../test/mcp-projection.js';
+import { oauthConnectionState } from '../ai/mcp-oauth.js';
 import { findCredential } from './register.js';
 import {
   CREDENTIAL_STATES,
@@ -13,8 +15,10 @@ import {
   computeCredentialStatus,
   countStates,
   dueSoonDays,
+  mcpConnection,
   presentCredential,
   resolveLive,
+  sourcesOf,
 } from './status.js';
 
 const NOW = Date.parse('2026-10-09T12:00:00.000Z');
@@ -22,7 +26,7 @@ const DAY = 86_400_000;
 const daysAgo = (n) => new Date(NOW - n * DAY).toISOString();
 const daysAhead = (n) => new Date(NOW + n * DAY).toISOString();
 
-const anthropic = findCredential('kv-anthropic-api-key'); // hand, 365
+const anthropic = findCredential('kv-anthropic-api-key'); // hand, 180
 const swa = findCredential('azure-swa-deployment-token'); // hand, 90
 const openai = findCredential('kv-openai-api-key'); // hand, no rule
 const coderStatus = findCredential('kv-coder-status-token'); // automation, 90, live
@@ -81,12 +85,14 @@ describe('resolveLive', () => {
     expect(resolveLive(rotation, { coder })).toMatchObject({ lastRotatedAt: null, expiresAt: daysAhead(200) });
   });
 
-  it('reads an OAuth Connect server’s connection and refresh time, never its token', () => {
-    const doc = {
-      oauthToken: 'TOKEN-MUST-NOT-TRAVEL',
-      oauth: { status: 'connected', connectedAt: daysAgo(5), refreshedAt: daysAgo(1), expiresAt: daysAhead(0.04) },
+  it('reads an OAuth Connect server’s projected record: its connection and refresh time', () => {
+    const record = {
+      oauthStatus: 'connected',
+      oauthConnectedAt: daysAgo(5),
+      oauthRefreshedAt: daysAgo(1),
+      hasToken: true,
     };
-    const live = resolveLive(findCredential('mcp-replicate'), { mcp: { 'replicate-mcp': doc } });
+    const live = resolveLive(findCredential('mcp-replicate'), { mcp: { 'replicate-mcp': record } });
     expect(live).toEqual({
       lastRotatedAt: daysAgo(1),
       lastRotatedSource: 'oauth',
@@ -94,7 +100,6 @@ describe('resolveLive', () => {
       expiresAt: null,
       connection: 'connected',
     });
-    expect(JSON.stringify(live)).not.toContain('TOKEN-MUST-NOT-TRAVEL');
   });
 
   it('tells a failed read (unknown) from an absent document (not connected)', () => {
@@ -102,21 +107,48 @@ describe('resolveLive', () => {
     expect(resolveLive(replicate, { mcp: {} }).connection).toBeNull();
     expect(resolveLive(replicate, { mcp: { 'replicate-mcp': null } }).connection).toBe('not_connected');
     expect(
-      resolveLive(replicate, { mcp: { 'replicate-mcp': { oauth: { status: 'disconnected' } } } }).connection
+      resolveLive(replicate, { mcp: { 'replicate-mcp': { oauthStatus: 'disconnected', hasToken: false } } })
+        .connection
     ).toBe('expired');
   });
 
   it('reads Plaud’s pasted token by its own fields', () => {
     const plaud = findCredential('mcp-plaud');
-    const connected = { oauthToken: 'x', status: 'connected', lastTokenRefresh: daysAgo(0.5) };
+    const connected = { hasToken: true, status: 'connected', lastTokenRefresh: daysAgo(0.5) };
     expect(resolveLive(plaud, { mcp: { plaud: connected } })).toMatchObject({
       connection: 'connected',
       lastRotatedAt: daysAgo(0.5),
     });
-    expect(resolveLive(plaud, { mcp: { plaud: { oauthToken: 'x', status: 'disconnected' } } }).connection).toBe(
+    expect(resolveLive(plaud, { mcp: { plaud: { hasToken: true, status: 'disconnected' } } }).connection).toBe(
       'expired'
     );
-    expect(resolveLive(plaud, { mcp: { plaud: { status: 'untested' } } }).connection).toBe('not_connected');
+    expect(resolveLive(plaud, { mcp: { plaud: { status: 'untested', hasToken: false } } }).connection).toBe(
+      'not_connected'
+    );
+  });
+
+  it('reads a connection exactly as mcp-oauth.js does, from the projection instead of the document', () => {
+    // The rule is oauthConnectionState's; this holds the two to one answer
+    // for every shape a Connect server's document takes.
+    const documents = [
+      { id: 'replicate-mcp', oauthToken: 't', oauth: { status: 'connected' } },
+      { id: 'replicate-mcp', oauthToken: '', oauth: { status: 'connected' } },
+      { id: 'replicate-mcp', oauth: { status: 'connected' } },
+      { id: 'replicate-mcp', oauthToken: 't', oauth: { status: 'disconnected' } },
+      { id: 'replicate-mcp', oauth: { status: 'pending' } },
+      { id: 'replicate-mcp' },
+    ];
+    for (const doc of documents) {
+      const [row] = projectMcpServers({
+        container: 'mcp_servers',
+        parameters: [{ name: '@ids', value: ['replicate-mcp'] }],
+        docs: [doc],
+      });
+      const record = { oauthStatus: row.oauthStatus ?? null, hasToken: row.hasToken };
+      expect(mcpConnection('replicate-mcp', { 'replicate-mcp': record }), JSON.stringify(doc)).toBe(
+        oauthConnectionState(doc)
+      );
+    }
   });
 });
 
@@ -125,22 +157,23 @@ describe('computeCredentialStatus', () => {
     const result = status(anthropic, { secrets: { 'ANTHROPIC-API-KEY': { lastWriteAt: daysAgo(100) } } });
     expect(result).toMatchObject({
       ageDays: 100,
-      expiresAt: daysAhead(265),
+      expiresAt: daysAhead(80),
       expiryEstimated: true,
-      daysLeft: 265,
+      daysLeft: 80,
       state: 'ok',
     });
-    expect(result.reason).toBe(`Next rotation due on ${daysAhead(265).slice(0, 10)}.`);
+    expect(result.reason).toBe(`Next rotation due on ${daysAhead(80).slice(0, 10)}.`);
   });
 
   it('turns due-soon inside the window and overdue past the date', () => {
     const at = (age) => status(anthropic, { secrets: { 'ANTHROPIC-API-KEY': { lastWriteAt: daysAgo(age) } } });
-    expect(at(365 - 31).state).toBe('ok');
-    expect(at(365 - 30)).toMatchObject({ state: 'due-soon', daysLeft: 30 });
-    expect(at(365 - 30).reason).toMatch(/^Rotation due in 30 days, on \d{4}-\d{2}-\d{2}\.$/);
-    expect(at(365)).toMatchObject({ state: 'overdue', daysLeft: 0 });
-    expect(at(400)).toMatchObject({ state: 'overdue', daysLeft: -35 });
-    expect(at(400).reason).toMatch(/^Rotation was due on /);
+    // 180 days is not shorter than half a year, so the window is a month.
+    expect(at(180 - 31).state).toBe('ok');
+    expect(at(180 - 30)).toMatchObject({ state: 'due-soon', daysLeft: 30 });
+    expect(at(180 - 30).reason).toMatch(/^Rotation due in 30 days, on \d{4}-\d{2}-\d{2}\.$/);
+    expect(at(180)).toMatchObject({ state: 'overdue', daysLeft: 0 });
+    expect(at(215)).toMatchObject({ state: 'overdue', daysLeft: -35 });
+    expect(at(215).reason).toMatch(/^Rotation was due on /);
   });
 
   it('uses the short window for the 90-day reset', () => {
@@ -186,16 +219,16 @@ describe('computeCredentialStatus', () => {
 
   it('is overdue for a signed-out connection and unknown for one never made', () => {
     const replicate = findCredential('mcp-replicate');
-    expect(status(replicate, { mcp: { 'replicate-mcp': { oauth: { status: 'disconnected' } } } }).state).toBe(
-      'overdue'
-    );
+    expect(
+      status(replicate, { mcp: { 'replicate-mcp': { oauthStatus: 'disconnected', hasToken: false } } }).state
+    ).toBe('overdue');
     expect(status(replicate, { mcp: { 'replicate-mcp': null } }).state).toBe('unknown');
     expect(status(replicate, { mcp: {} })).toMatchObject({
       state: 'unknown',
       reason: 'Its connection could not be read.',
     });
     expect(
-      status(replicate, { mcp: { 'replicate-mcp': { oauthToken: 't', oauth: { status: 'connected' } } } }).state
+      status(replicate, { mcp: { 'replicate-mcp': { oauthStatus: 'connected', hasToken: true } } }).state
     ).toBe('ok');
   });
 
@@ -232,11 +265,13 @@ describe('presentCredential and the view', () => {
         'recordedOn',
         'renewal',
         'rotate',
+        'sourceUnavailable',
         'state',
         'store',
       ].sort()
     );
     expect(JSON.stringify(row)).not.toContain('LEAK');
+    expect(row.sourceUnavailable).toBeNull();
   });
 
   it('presents the whole register and counts its states', () => {
@@ -246,5 +281,53 @@ describe('presentCredential and the view', () => {
     expect(Object.keys(counts)).toEqual(CREDENTIAL_STATES);
     expect(Object.values(counts).reduce((a, b) => a + b, 0)).toBe(view.credentials.length);
     expect(view.counts).toEqual(counts);
+  });
+});
+
+describe('a source that could not be read (review of #1039)', () => {
+  const recorded = { records: { 'kv-anthropic-api-key': { rotatedOn: '2026-09-01' } } };
+
+  it('names the sources each entry’s dates come from', () => {
+    expect(sourcesOf(anthropic)).toEqual(['secret-state', 'credential-register']);
+    expect(sourcesOf(coderStatus)).toEqual(['secret-state', 'coder-automation']);
+    expect(sourcesOf(findCredential('mcp-plaud'))).toEqual(['mcp:plaud']);
+    expect(sourcesOf(oidc)).toEqual([]);
+  });
+
+  it('shows a Key Vault credential unknown, with nothing computed, when secret_state could not be read', () => {
+    // Without the guard, the owner's date alone would date this key, though a
+    // later Key Vault write nobody could read may exist.
+    expect(presentCredential(anthropic, recorded, NOW).state).toBe('ok');
+    const row = presentCredential(anthropic, recorded, NOW, ['secret-state']);
+    expect(row).toMatchObject({
+      state: 'unknown',
+      sourceUnavailable: 'secret-state',
+      lastRotatedAt: null,
+      lastRotatedSource: null,
+      ageDays: null,
+      expiresAt: null,
+      expiryEstimated: false,
+      daysLeft: null,
+      recordedOn: '2026-09-01',
+      reason: 'Its Key Vault write date could not be read, so its age and expiry are not shown.',
+    });
+  });
+
+  it('leaves a credential that does not read the missing source alone, and counts after the change', () => {
+    const sources = {
+      ...recorded,
+      records: { ...recorded.records, 'lab-agent-certificate': { rotatedOn: '2026-09-29' } },
+    };
+    const whole = buildRegisterView(sources, NOW);
+    const partial = buildRegisterView(sources, NOW, ['secret-state']);
+    const byId = (view) => Object.fromEntries(view.credentials.map((c) => [c.id, c]));
+    expect(byId(partial)['lab-agent-certificate']).toEqual(byId(whole)['lab-agent-certificate']);
+    expect(partial.counts).toEqual(countStates(partial.credentials));
+    expect(partial.counts.unknown).toBeGreaterThan(whole.counts.unknown);
+  });
+
+  it('reads the recorded date as unknown too when the register document could not be read', () => {
+    const row = presentCredential(findCredential('lab-agent-certificate'), {}, NOW, ['credential-register']);
+    expect(row).toMatchObject({ state: 'unknown', sourceUnavailable: 'credential-register', recordedOn: null });
   });
 });

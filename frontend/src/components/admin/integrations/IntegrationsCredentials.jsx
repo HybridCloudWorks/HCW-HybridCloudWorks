@@ -55,9 +55,9 @@ import {
   describeSync,
   groupByStore,
   remindersOutOfStep,
+  rotationDateBounds,
   stateCounts,
   stateOf,
-  todayIso,
 } from './credentialsView';
 import { TabError, TabLoading } from './TabNotice';
 
@@ -184,10 +184,13 @@ function Counts({ counts }) {
   );
 }
 
-/** The inline form under a row: the date it was rotated, today by default. */
+/**
+ * The inline form under a row: the date it was rotated, this browser's day
+ * by default, and at most the API's own bound (rotationDateBounds).
+ */
 function RecordForm({ credential, busy, onSave, onClear, onCancel }) {
-  const today = todayIso();
-  const [date, setDate] = useState(today);
+  const [bounds] = useState(() => rotationDateBounds());
+  const [date, setDate] = useState(bounds.initial);
   const submit = (event) => {
     event.preventDefault();
     if (date) onSave(date);
@@ -201,7 +204,7 @@ function RecordForm({ credential, busy, onSave, onClear, onCancel }) {
           className="h-8 rounded-md border border-input bg-background px-2 text-xs"
           aria-label={`Rotation date for ${credential.name}`}
           value={date}
-          max={today}
+          max={bounds.max}
           onChange={(event) => setDate(event.target.value)}
           required
         />
@@ -389,8 +392,9 @@ export default function IntegrationsCredentials() {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <p className="max-w-2xl text-sm text-muted-foreground">
           Every credential the site, its workflows and the lab host use: where it lives, what uses
-          it, who issues it, how old it is, when it expires and whether anything renews it. The ones
-          only you can renew get a reminder on Telegram, through Platform Settings → Reminders.
+          it, who issues it, how old it is, when it expires and whether anything renews it. Each one
+          only you can renew on a schedule gets a reminder on Telegram, through Platform Settings →
+          Reminders: to rotate it when its date is known, and to record that date until it is.
         </p>
         <div className="flex items-center gap-2">
           <select
@@ -441,7 +445,8 @@ export default function IntegrationsCredentials() {
             Names and dates only: no value is read, stored or shown here. A Key Vault secret’s age
             is its last write on the Keys tab; the Coder tokens’ dates are what the lab host
             reports; for a credential the site cannot read, Record sets the date it was last
-            rotated, and the reminder moves with it.
+            rotated, and its reminder turns from “record the date” into “rotate it” at the next due
+            date.
           </span>
         </p>
       ) : null}

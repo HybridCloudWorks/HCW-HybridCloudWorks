@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest';
 import { SECRET_CATALOG } from '../secret-catalog.js';
 import { MAX_LEAD_DAYS } from '../reminders/settings.js';
 import {
-  ANNUAL_ROTATION_DAYS,
+  HAND_ROTATION_DAYS,
   CREDENTIAL_REGISTER,
   CREDENTIAL_STORES,
   KEY_VAULT_METADATA_NAMES,
@@ -141,7 +141,17 @@ describe('the issue’s list', () => {
     expect(findCredential('lab-agent-certificate').lifetimeDays).toBe(LAB_CERTIFICATE_DAYS);
     expect(findCredential('lab-vault-tls-certificate').lifetimeDays).toBe(LAB_CERTIFICATE_DAYS);
     expect(LAB_CERTIFICATE_DAYS).toBe(730);
-    expect(findCredential('kv-anthropic-api-key').lifetimeDays).toBe(ANNUAL_ROTATION_DAYS);
+    // The owner's rule for the hand-only ones that never expire (2026-10-09).
+    expect(HAND_ROTATION_DAYS).toBe(180);
+    for (const id of [
+      'kv-anthropic-api-key',
+      'kv-telegram-bot-token',
+      'gh-manifest-app-private-key',
+      'gh-copilot-review-app-private-key',
+      'lab-coder-github-oauth-secret',
+    ]) {
+      expect(findCredential(id).lifetimeDays, id).toBe(HAND_ROTATION_DAYS);
+    }
   });
 
   it('marks the Coder tokens as renewed by the lab host, with their lifetimes', () => {

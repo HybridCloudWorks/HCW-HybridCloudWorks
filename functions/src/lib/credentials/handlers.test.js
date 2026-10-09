@@ -6,6 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { memoryStore } from '../../../test/memory-store.js';
+import { projectMcpServers } from '../../../test/mcp-projection.js';
 import { SECRETS_ROLE } from '../admin-secrets.js';
 import { CREDENTIAL_REGISTER } from './register.js';
 import {
@@ -30,8 +31,10 @@ const deny = () => ({
 const request = (body) => ({ json: async () => body });
 const context = () => ({ error: vi.fn(), warn: vi.fn(), log: vi.fn() });
 const parse = (response) => JSON.parse(response.body);
+/** An in-memory store that answers the mcp_servers projection as Cosmos would. */
+const storeWith = (initial = {}) => memoryStore(initial, { query: projectMcpServers });
 
-function setup({ guard = allow(), store = memoryStore(), sync } = {}) {
+function setup({ guard = allow(), store = storeWith(), sync } = {}) {
   const handlers = createCredentialRegisterHandlers({
     guard,
     store,
@@ -74,7 +77,7 @@ describe('GET cms/credentials', () => {
   });
 
   it('says whether each reminder is on the sheet, by its due date', async () => {
-    const store = memoryStore({
+    const store = storeWith({
       'admin_config/credential_register': {
         id: 'credential_register',
         credentials: {
@@ -85,8 +88,12 @@ describe('GET cms/credentials', () => {
       'admin_config/reminders': {
         id: 'reminders',
         reminders: [
-          { id: 'credential-lab-agent-certificate', dueDate: '2028-09-28' },
-          { id: 'credential-lab-vault-tls-certificate', dueDate: '2027-01-01' },
+          {
+            id: 'credential-lab-agent-certificate',
+            title: 'Rotate /etc/hcw/labs-agent.pem (sp-labs-agent-lab-hybrid-prod-cus-01)',
+            dueDate: '2028-09-28',
+          },
+          { id: 'credential-lab-vault-tls-certificate', title: 'Rotate /etc/vault.d/tls/vault.crt', dueDate: '2027-01-01' },
         ],
       },
     });
@@ -94,17 +101,61 @@ describe('GET cms/credentials', () => {
     const byId = Object.fromEntries(body.credentials.map((c) => [c.id, c]));
     expect(byId['lab-agent-certificate'].reminder).toEqual({
       id: 'credential-lab-agent-certificate',
+      kind: 'rotate',
       dueDate: '2028-09-28',
       leadDays: 30,
       inSheet: true,
     });
     expect(byId['lab-vault-tls-certificate'].reminder.inSheet).toBe(false);
-    expect(byId['kv-anthropic-api-key'].reminder).toBeNull();
+    // A rule and no date: the reminder asks for the date, due today (#1026).
+    expect(byId['kv-anthropic-api-key'].reminder).toEqual({
+      id: 'credential-kv-anthropic-api-key',
+      kind: 'record',
+      dueDate: TODAY,
+      leadDays: 0,
+      inSheet: false,
+    });
+    // No rule: no reminder.
     expect(byId['kv-openai-api-key'].reminder).toBeNull();
   });
 
+  it('shows a Key Vault credential unknown, without expiry or reminder, when secret_state cannot be read', async () => {
+    const store = storeWith({
+      'admin_config/credential_register': {
+        id: 'credential_register',
+        credentials: {
+          'kv-anthropic-api-key': { rotatedOn: '2026-09-01' },
+          'lab-agent-certificate': { rotatedOn: '2026-09-29' },
+        },
+      },
+    });
+    const whole = parse(await setup({ store }).handlers.getRegister(request(), context()));
+    store.fail('admin_config', 'secret_state', 'readDoc', Object.assign(new Error('x'), { code: 503 }));
+    const partial = parse(await setup({ store }).handlers.getRegister(request(), context()));
+    const byId = (body) => Object.fromEntries(body.credentials.map((c) => [c.id, c]));
+
+    expect(byId(whole)['kv-anthropic-api-key']).toMatchObject({ state: 'ok', reminder: { kind: 'rotate' } });
+    expect(byId(partial)['kv-anthropic-api-key']).toMatchObject({
+      state: 'unknown',
+      sourceUnavailable: 'secret-state',
+      expiresAt: null,
+      daysLeft: null,
+      ageDays: null,
+      reminder: null,
+    });
+    // Every Key Vault row is affected; a lab host file is not.
+    expect(byId(partial)['kv-openai-api-key'].state).toBe('unknown');
+    expect(byId(partial)['lab-agent-certificate']).toEqual(byId(whole)['lab-agent-certificate']);
+    // The counts are the rows' counts after the change.
+    const tally = (body) =>
+      body.credentials.reduce((counts, c) => ({ ...counts, [c.state]: (counts[c.state] ?? 0) + 1 }), {});
+    expect(partial.counts).toEqual({ ok: 0, 'due-soon': 0, overdue: 0, unknown: 0, ...tally(partial) });
+    expect(partial.counts.unknown).toBeGreaterThan(whole.counts.unknown);
+    expect(partial.unavailable.map((u) => u.id)).toEqual(['secret-state']);
+  });
+
   it('names a source it could not read, says unknown rather than missing, and still answers', async () => {
-    const store = memoryStore();
+    const store = storeWith();
     store.fail('admin_config', 'reminders', 'readDoc', Object.assign(new Error('x'), { code: 503 }));
     store.fail('admin_config', 'coder_automation', 'readDoc', Object.assign(new Error('x'), { code: 503 }));
     const body = parse(await setup({ store }).handlers.getRegister(request(), context()));
@@ -113,7 +164,7 @@ describe('GET cms/credentials', () => {
   });
 
   it('never carries a value or a token, whatever the sources hold', async () => {
-    const store = memoryStore({
+    const store = storeWith({
       'admin_config/secret_state': {
         id: 'secret_state',
         secrets: { 'ANTHROPIC-API-KEY': { lastWriteAt: '2026-10-01T00:00:00.000Z', value: LEAK } },
@@ -131,6 +182,11 @@ describe('GET cms/credentials', () => {
     const response = await setup({ store }).handlers.getRegister(request(), context());
     expect(response.body).not.toContain(LEAK);
     expect(response.body).not.toContain('tokenEndpoint');
+    // The connections were read, from the projection: no point read of either.
+    const byId = Object.fromEntries(parse(response).credentials.map((c) => [c.id, c]));
+    expect(byId['mcp-replicate'].connection).toBe('connected');
+    expect(byId['mcp-plaud'].connection).toBe('connected');
+    expect(store.readDoc.mock.calls.filter((call) => call[0] === 'mcp_servers')).toEqual([]);
   });
 });
 
@@ -214,10 +270,31 @@ describe('PUT cms/credentials', () => {
     const body = parse(
       await handlers.putRotation(request({ credentialId: 'lab-agent-certificate', rotatedOn: '2026-09-29' }), context())
     );
-    expect(store.get('admin_config', 'reminders').reminders.map((r) => r.id)).toEqual([
-      'credential-lab-agent-certificate',
-    ]);
-    expect(body.credentials.find((c) => c.id === 'lab-agent-certificate').reminder.inSheet).toBe(true);
+    // One row for each of the eight: this one dated, the rest asking for a date.
+    const rows = store.get('admin_config', 'reminders').reminders;
+    expect(rows).toHaveLength(8);
+    expect(rows.find((r) => r.id === 'credential-lab-agent-certificate')).toMatchObject({
+      dueDate: '2028-09-28',
+      title: expect.stringMatching(/^Rotate /),
+    });
+    expect(body.credentials.find((c) => c.id === 'lab-agent-certificate').reminder).toMatchObject({
+      kind: 'rotate',
+      inSheet: true,
+    });
+    expect(body.credentials.filter((c) => c.reminder?.inSheet === false)).toEqual([]);
+  });
+
+  it('answers 500 for a malformed register document, and leaves it as it was', async () => {
+    const store = storeWith({ 'admin_config/credential_register': { id: 'credential_register', credentials: 'x' } });
+    const ctx = context();
+    const response = await setup({ store }).handlers.putRotation(
+      request({ credentialId: 'lab-agent-certificate', rotatedOn: TODAY }),
+      ctx
+    );
+    expect(response.status).toBe(500);
+    expect(parse(response).error).toMatch(/nothing changed/);
+    expect(ctx.error.mock.calls[0][0]).toBe('putCredentialRotation failed (MALFORMED)');
+    expect(store.get('admin_config', 'credential_register').credentials).toBe('x');
   });
 
   it('refuses a bad body with 400 and writes nothing', async () => {
@@ -246,7 +323,7 @@ describe('PUT cms/credentials', () => {
   }, 10_000);
 
   it('still answers 200 when the audit row and the sync fail after the record landed', async () => {
-    const store = memoryStore();
+    const store = storeWith();
     store.fail('admin_audit_logs', 'audit-1', 'upsertDoc', new Error('audit down'));
     const sync = vi.fn(async () => {
       throw Object.assign(new Error('x'), { code: 500 });
@@ -262,7 +339,7 @@ describe('PUT cms/credentials', () => {
   });
 
   it('clears a record with null', async () => {
-    const store = memoryStore({
+    const store = storeWith({
       'admin_config/credential_register': {
         id: 'credential_register',
         credentials: { 'lab-agent-certificate': { rotatedOn: '2026-09-29' } },

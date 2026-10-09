@@ -102,11 +102,11 @@ export const RENEWAL = Object.freeze(['self', 'automation', 'hand', 'none']);
  * The issue names Anthropic, the Telegram bot token, the two GitHub App
  * private keys and the Coder GitHub OAuth secret as credentials no API can
  * renew, and asks for a reminder for each; none of them expires, so a
- * reminder needs a rule to be due by. A year is that rule until the owner
- * chooses another, and it lives here, in one constant, so choosing another
- * is one line.
+ * reminder needs a rule to be due by. 180 days is that rule: the owner's
+ * decision of 2026-10-09, on the review of #1039, which had proposed a year.
+ * It lives here, in one constant, so changing it is one line.
  */
-export const ANNUAL_ROTATION_DAYS = 365;
+export const HAND_ROTATION_DAYS = 180;
 
 /** The Static Web Apps deployment token's reset rule: TODO.md, accepted risk for #834. */
 export const SWA_TOKEN_RESET_DAYS = 90;
@@ -129,7 +129,7 @@ const KEY_VAULT_METADATA = Object.freeze({
   'ANTHROPIC-API-KEY': {
     issuer: 'Anthropic Console',
     consumer: 'AI router',
-    lifetimeDays: ANNUAL_ROTATION_DAYS,
+    lifetimeDays: HAND_ROTATION_DAYS,
   },
   'OPENAI-API-KEY': { issuer: 'OpenAI', consumer: 'AI router' },
   'NVIDIA-API-KEY': { issuer: 'NVIDIA API Catalog', consumer: 'AI router, content features only' },
@@ -147,7 +147,7 @@ const KEY_VAULT_METADATA = Object.freeze({
   'TELEGRAM-BOT-TOKEN': {
     issuer: 'Telegram BotFather',
     consumer: 'Approvals, alerts and reminders on Telegram',
-    lifetimeDays: ANNUAL_ROTATION_DAYS,
+    lifetimeDays: HAND_ROTATION_DAYS,
     // The catalogue's own warning, which a rotation must not miss.
     rotate:
       'Revoke and reissue it in BotFather, paste it on Integrations → Keys, then re-run scripts/cutover/04-telegram-webhook.ps1: a new token invalidates the webhook.',
@@ -297,7 +297,7 @@ const OTHER_ENTRIES = [
       'publish-content-manifest.yml, update-avm-versions.yml, update-learn-catalogue.yml, update-version-floors.yml',
     issuer: 'GitHub App (MANIFEST_APP_ID)',
     renewal: 'hand',
-    lifetimeDays: ANNUAL_ROTATION_DAYS,
+    lifetimeDays: HAND_ROTATION_DAYS,
     rotate:
       'Generate a new private key on the GitHub App’s settings page, set it as MANIFEST_APP_PRIVATE_KEY, then delete the old key there.',
   },
@@ -308,7 +308,7 @@ const OTHER_ENTRIES = [
     consumer: 'copilot-setup-steps.yml: the GitHub MCP server Copilot code review reads with',
     issuer: 'GitHub App HCW Copilot Review Reader',
     renewal: 'hand',
-    lifetimeDays: ANNUAL_ROTATION_DAYS,
+    lifetimeDays: HAND_ROTATION_DAYS,
     rotate:
       'Generate a new private key on the App’s settings page, store it in the Agents store (docs/runbooks/copilot-code-review-mcp.md, step 4), then delete the old key.',
   },
@@ -446,7 +446,7 @@ const OTHER_ENTRIES = [
     consumer: 'Coder learner sign-in with GitHub',
     issuer: 'GitHub OAuth app (HybridCloudWorks organisation)',
     renewal: 'hand',
-    lifetimeDays: ANNUAL_ROTATION_DAYS,
+    lifetimeDays: HAND_ROTATION_DAYS,
     rotate:
       'Generate a new client secret on the OAuth app, edit the vault key and re-run bootstrap.sh, which recreates the coder container.',
   },

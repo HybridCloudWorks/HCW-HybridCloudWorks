@@ -2,21 +2,35 @@
  * The register's reads, and its one write (#1026).
  *
  * READS. Every live date the register shows comes from a document another
- * feature already keeps; this module reads each one by its point id and
- * hands `status.js` the field maps it needs:
+ * feature already keeps; this module reads each one and hands `status.js`
+ * the field maps it needs:
  *
+ *   reminders            admin_config/reminders          the sheet: the read's "in the sheet" column, and the sync's base
  *   secret-state         admin_config/secret_state      the Keys tab's lastWriteAt per secret
  *   coder-automation     admin_config/coder_automation  the lab host's Coder token dates
  *   credential-register  admin_config/credential_register  the owner's recorded rotations
- *   mcp:<id>             mcp_servers/<id>                an MCP server's connection
- *   reminders            admin_config/reminders          only for the read's "in the sheet" column
+ *   mcp:<id>             mcp_servers, PROJECTED          an MCP server's connection
  *
- * Each read stands alone: one that fails is named in `unavailable`, and the
- * credentials that depend on it show `unknown` rather than the whole tab
- * failing. Two documents read here sit beside credentials (an mcp_servers
- * record holds its tokens; secret_state holds none, by its own rule), so
- * nothing read here is passed on whole: status.js names every field it
- * uses, and the answer is built field by field (status.js presentCredential).
+ * THE SHEET IS READ FIRST, the date sources after it. The reminders sync
+ * (reminders.js) writes the sheet under the ETag of this read, and that
+ * order is what makes its write safe: a rotation recorded after the sheet
+ * was read is followed by its own sync, whose write changes the ETag and
+ * sends this one round again with the new date.
+ *
+ * AN MCP SERVER'S RECORD IS NEVER READ WHOLE (review of #1039). The
+ * document holds the write-only `oauthToken`, `oauthRefreshToken` and
+ * `oauthClientSecret`, and a point read would bring them into this process.
+ * MCP_SERVER_QUERY asks Cosmos for the dates and states status.js reads and
+ * one boolean, `hasToken`, computed inside Cosmos; no token field is in its
+ * SELECT list, and the rows are copied field by field besides.
+ *
+ * FAIL CLOSED (review of #1039). Each read stands alone: one that fails is
+ * named in `unavailable`, and the credentials that depend on it show
+ * `unknown` rather than the whole tab failing. A document that is PRESENT
+ * but malformed (a `secrets` or `credentials` map that is not a map of
+ * records, a sheet whose `reminders` is not a list) is unavailable too, not
+ * empty: read as empty, it would have the reminders sync remove every
+ * credential row the sheet holds. Only an absent document reads as empty.
  *
  * THE WRITE: admin_config/credential_register.
  *
@@ -60,8 +74,31 @@ export const MCP_SERVER_IDS = Object.freeze([
   ...new Set(CREDENTIAL_REGISTER.map((entry) => entry.source?.mcpServer).filter(Boolean)),
 ]);
 
+/**
+ * The mcp_servers fields status.js reads, projected by Cosmos. `hasToken`
+ * is computed there, so the token itself never crosses the wire: IS_STRING
+ * is false for an absent token, and `false AND …` is false without the
+ * LENGTH. Partition key `/id`, so this is a small cross-partition query over
+ * the register's own ids.
+ */
+export const MCP_SERVER_QUERY =
+  'SELECT c.id, c.status, c.lastTokenRefresh, c.oauth.status AS oauthStatus, ' +
+  'c.oauth.connectedAt AS oauthConnectedAt, c.oauth.refreshedAt AS oauthRefreshedAt, ' +
+  '(IS_STRING(c.oauthToken) AND LENGTH(c.oauthToken) > 0) AS hasToken ' +
+  'FROM c WHERE ARRAY_CONTAINS(@ids, c.id)';
+
+/** The projection's fields, and nothing else, as status.js reads them. */
+export const MCP_RECORD_FIELDS = Object.freeze([
+  'status',
+  'lastTokenRefresh',
+  'oauthStatus',
+  'oauthConnectedAt',
+  'oauthRefreshedAt',
+  'hasToken',
+]);
+
 const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-const mapOf = (value) => (isPlainObject(value) ? value : {});
+const stringOrNull = (value) => (typeof value === 'string' && value ? value : null);
 
 /** A source's label, for one that could not be read. */
 export function sourceLabel(id) {
@@ -69,43 +106,94 @@ export function sourceLabel(id) {
   return id.startsWith('mcp:') ? `the ${id.slice(4)} MCP server record (mcp_servers)` : id;
 }
 
+/** One read as `{ ok, value }`; never throws. */
+async function settle(read) {
+  try {
+    return { ok: true, value: (await read()) ?? null };
+  } catch {
+    return { ok: false, value: null };
+  }
+}
+
 /**
- * Every source, read in parallel. `{ sources, unavailable }`: `sources` as
- * status.js reads them, plus `reminders` (the stored rows, or null when the
- * sheet could not be read); `unavailable` the ids of the reads that failed.
+ * A document's map of records: `{}` when the document is absent, the map
+ * when it is a map of records, and null (malformed: unavailable) otherwise.
+ */
+function recordMap(doc, field) {
+  if (!doc) return {};
+  const map = doc[field];
+  return isPlainObject(map) && Object.values(map).every(isPlainObject) ? map : null;
+}
+
+/** The sheet's rows: `[]` for no sheet or no rows yet, null when `reminders` is not a list. */
+function sheetRows(doc) {
+  if (!doc || doc.reminders === undefined) return [];
+  return Array.isArray(doc.reminders) ? doc.reminders : null;
+}
+
+/** One projected row, copied field by field. */
+function mcpRecord(row) {
+  return {
+    status: stringOrNull(row.status),
+    lastTokenRefresh: stringOrNull(row.lastTokenRefresh),
+    oauthStatus: stringOrNull(row.oauthStatus),
+    oauthConnectedAt: stringOrNull(row.oauthConnectedAt),
+    oauthRefreshedAt: stringOrNull(row.oauthRefreshedAt),
+    hasToken: row.hasToken === true,
+  };
+}
+
+/** Every register MCP server's projected record by id; null for a server with no document. */
+async function readMcpServers(store) {
+  const rows = await store.queryDocs('mcp_servers', MCP_SERVER_QUERY, [
+    { name: '@ids', value: [...MCP_SERVER_IDS] },
+  ]);
+  const byId = new Map((rows ?? []).filter(isPlainObject).map((row) => [row.id, row]));
+  return Object.fromEntries(
+    MCP_SERVER_IDS.map((id) => [id, byId.has(id) ? mcpRecord(byId.get(id)) : null])
+  );
+}
+
+/**
+ * Every source: the sheet first, then the date sources in parallel (see the
+ * header for why that order).
+ *
+ * Resolves to `{ sources, unavailable, reminderDoc }`: `sources` as status.js
+ * reads them, plus `reminders` (the stored rows, or null when the sheet could
+ * not be read); `unavailable` the ids of the sources that failed or were
+ * malformed; `reminderDoc` the sheet as read, with its ETag, for the sync.
  */
 export async function readCredentialSources(store) {
-  const reads = {
-    'secret-state': () => store.readDoc(CONTAINER, SECRET_STATE_DOC_ID, ADMIN_CONFIG_PARTITION),
-    'coder-automation': () => store.readDoc(CONTAINER, CODER_AUTOMATION_DOC_ID, ADMIN_CONFIG_PARTITION),
-    'credential-register': () => store.readDoc(CONTAINER, CREDENTIAL_REGISTER_DOC_ID, ADMIN_CONFIG_PARTITION),
-    reminders: () => store.readDoc(CONTAINER, REMINDERS_CONFIG_ID, ADMIN_CONFIG_PARTITION),
-    ...Object.fromEntries(MCP_SERVER_IDS.map((id) => [`mcp:${id}`, () => store.readDoc('mcp_servers', id, id)])),
-  };
-  const ids = Object.keys(reads);
-  const settled = await Promise.allSettled(ids.map((id) => reads[id]()));
-  const result = Object.fromEntries(ids.map((id, index) => [id, settled[index]]));
-  const value = (id) => (result[id].status === 'fulfilled' ? (result[id].value ?? null) : null);
+  const sheet = await settle(() => store.readDoc(CONTAINER, REMINDERS_CONFIG_ID, ADMIN_CONFIG_PARTITION));
+  const [secretState, coder, register, servers] = await Promise.all([
+    settle(() => store.readDoc(CONTAINER, SECRET_STATE_DOC_ID, ADMIN_CONFIG_PARTITION)),
+    settle(() => store.readDoc(CONTAINER, CODER_AUTOMATION_DOC_ID, ADMIN_CONFIG_PARTITION)),
+    settle(() => store.readDoc(CONTAINER, CREDENTIAL_REGISTER_DOC_ID, ADMIN_CONFIG_PARTITION)),
+    settle(() => readMcpServers(store)),
+  ]);
 
-  const mcp = {};
-  for (const id of MCP_SERVER_IDS) {
-    // A failed read stays absent, which status.js tells apart from a server
-    // that has no document (null): one is unknown, the other not connected.
-    if (result[`mcp:${id}`].status === 'fulfilled') mcp[id] = value(`mcp:${id}`);
-  }
-  const reminders = value('reminders');
+  const secrets = secretState.ok ? recordMap(secretState.value, 'secrets') : null;
+  const records = register.ok ? recordMap(register.value, 'credentials') : null;
+  const rows = sheet.ok ? sheetRows(sheet.value) : null;
+  const unavailable = [
+    ...(rows === null ? ['reminders'] : []),
+    ...(secrets === null ? ['secret-state'] : []),
+    ...(coder.ok ? [] : ['coder-automation']),
+    ...(records === null ? ['credential-register'] : []),
+    // A failed query leaves every server absent, which status.js tells
+    // apart from a server with no document (null): unknown, not unconnected.
+    ...(servers.ok ? [] : MCP_SERVER_IDS.map((id) => `mcp:${id}`)),
+  ];
   return {
     sources: {
-      secrets: mapOf(value('secret-state')?.secrets),
-      coder: value('coder-automation'),
-      records: mapOf(value('credential-register')?.credentials),
-      mcp,
-      reminders:
-        result.reminders.status === 'fulfilled'
-          ? (Array.isArray(reminders?.reminders) ? reminders.reminders : [])
-          : null,
+      secrets: secrets ?? {},
+      coder: coder.value,
+      records: records ?? {},
+      mcp: servers.ok ? servers.value : {},
+      reminders: rows,
     },
-    unavailable: ids.filter((id) => result[id].status === 'rejected'),
+    unavailable,
+    reminderDoc: sheet.ok && rows !== null ? sheet.value : null,
   };
 }
 
@@ -114,8 +202,10 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /**
  * Record, or with `rotatedOn` null clear, when one credential was last
  * rotated. Resolves to the stored record (null when cleared); throws with
- * `code: 'CONFLICT'` when every attempt lost a race, with no id in the
- * message, which a caller may log.
+ * `code: 'CONFLICT'` when every attempt lost a race, and with `code:
+ * 'MALFORMED'` when the stored document's `credentials` is not a map of
+ * records, which a write would otherwise replace with this one record. No
+ * id is in either message, which a caller may log.
  *
  * @param {{ readDoc: Function, createDoc: Function, replaceDocIfMatch: Function }} store
  * @param {{ credentialId: string, rotatedOn: string|null, actor: string, at: string }} change
@@ -129,7 +219,11 @@ export async function recordRotation(
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt > 0) await sleep(20 * 2 ** Math.min(attempt, 5) + Math.random() * 20);
     const current = await store.readDoc(CONTAINER, CREDENTIAL_REGISTER_DOC_ID, ADMIN_CONFIG_PARTITION);
-    const credentials = { ...mapOf(current?.credentials) };
+    const stored = recordMap(current, 'credentials');
+    if (stored === null) {
+      throw Object.assign(new Error('The credential register document is malformed'), { code: 'MALFORMED' });
+    }
+    const credentials = { ...stored };
     if (record) credentials[credentialId] = record;
     else delete credentials[credentialId];
     const next = {

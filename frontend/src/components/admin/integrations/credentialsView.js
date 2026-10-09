@@ -61,6 +61,27 @@ const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 /** Today as the API's calendar sees it: the UTC day. */
 export const todayIso = (now = Date.now()) => new Date(now).toISOString().slice(0, 10);
 
+const DAY_MS = 86_400_000;
+
+/** This browser's own calendar day, as `YYYY-MM-DD`. */
+export function localDateIso(now = Date.now()) {
+  const date = new Date(now);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+/**
+ * The Record form's date bounds (review of #1039). `max` is the API's own
+ * limit: the UTC day plus the one day of grace `parseRotationBody` allows
+ * (functions/src/lib/credentials/handlers.js), so an owner whose local day
+ * is already tomorrow in UTC terms, or still yesterday, can pick it. The
+ * default is the browser's own day, which is the day an owner means by
+ * "rotated today", and always inside that bound.
+ */
+export function rotationDateBounds(now = Date.now()) {
+  return { max: todayIso(now + DAY_MS), initial: localDateIso(now) };
+}
+
 /** The state's badge record; an unexpected state reads as Unknown, never as OK. */
 export const stateOf = (credential) =>
   CREDENTIAL_STATE[credential?.state] ?? CREDENTIAL_STATE.unknown;
@@ -111,10 +132,13 @@ export function describeRule(credential) {
 export function describeReminder(credential) {
   const reminder = credential?.reminder;
   if (!reminder) return null;
-  if (reminder.inSheet === true)
-    return { text: `Reminder set for ${reminder.dueDate}`, inStep: true };
+  // A credential with a rule and no known date has a reminder too: one that
+  // asks for the date (#1026), due the day it was added.
+  const what =
+    reminder.kind === 'record' ? 'Reminder to record its rotation date' : 'Rotation reminder';
+  if (reminder.inSheet === true) return { text: `${what}, due ${reminder.dueDate}`, inStep: true };
   if (reminder.inSheet === false) {
-    return { text: `Reminder for ${reminder.dueDate} not on the sheet yet`, inStep: false };
+    return { text: `${what}, due ${reminder.dueDate}, not on the sheet yet`, inStep: false };
   }
   return { text: 'Reminder state unknown: the sheet could not be read', inStep: null };
 }

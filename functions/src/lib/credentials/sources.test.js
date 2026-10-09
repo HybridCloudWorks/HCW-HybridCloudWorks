@@ -5,21 +5,26 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { memoryStore } from '../../../test/memory-store.js';
+import { PROJECTED_FIELDS, projectMcpServers } from '../../../test/mcp-projection.js';
 import {
   CREDENTIAL_REGISTER_DOC_ID,
+  MCP_RECORD_FIELDS,
   MCP_SERVER_IDS,
+  MCP_SERVER_QUERY,
   readCredentialSources,
   recordRotation,
   sourceLabel,
 } from './sources.js';
 
 const AT = '2026-10-09T12:00:00.000Z';
+const LEAK = 'sk-live-THIS-MUST-NEVER-BE-READ-0123456789';
 const noSleep = () => Promise.resolve();
 const down = () => Object.assign(new Error('unavailable'), { code: 503 });
+const withMcp = (initial) => memoryStore(initial, { query: projectMcpServers });
 
 describe('readCredentialSources', () => {
-  it('reads every source by point id and hands status.js the maps it reads', async () => {
-    const store = memoryStore({
+  it('reads every source and hands status.js the maps it reads', async () => {
+    const store = withMcp({
       'admin_config/secret_state': { id: 'secret_state', secrets: { 'ANTHROPIC-API-KEY': { lastWriteAt: AT } } },
       'admin_config/coder_automation': { id: 'coder_automation', statusTokenExpiresAt: AT },
       'admin_config/credential_register': {
@@ -27,37 +32,147 @@ describe('readCredentialSources', () => {
         credentials: { 'lab-agent-certificate': { rotatedOn: '2026-09-29' } },
       },
       'admin_config/reminders': { id: 'reminders', reminders: [{ id: 'a' }] },
-      'mcp_servers/plaud': { id: 'plaud', status: 'connected' },
+      'mcp_servers/plaud': { id: 'plaud', status: 'connected', oauthToken: LEAK, lastTokenRefresh: AT },
     });
-    const { sources, unavailable } = await readCredentialSources(store);
+    const { sources, unavailable, reminderDoc } = await readCredentialSources(store);
     expect(unavailable).toEqual([]);
     expect(sources.secrets).toEqual({ 'ANTHROPIC-API-KEY': { lastWriteAt: AT } });
     expect(sources.coder.statusTokenExpiresAt).toBe(AT);
     expect(sources.records).toEqual({ 'lab-agent-certificate': { rotatedOn: '2026-09-29' } });
     expect(sources.reminders).toEqual([{ id: 'a' }]);
+    expect(reminderDoc).toMatchObject({ id: 'reminders', _etag: expect.any(String) });
+    expect(sources.mcp.plaud).toEqual({
+      status: 'connected',
+      lastTokenRefresh: AT,
+      oauthStatus: null,
+      oauthConnectedAt: null,
+      oauthRefreshedAt: null,
+      hasToken: true,
+    });
     // A server with no document is null (not connected), not absent (unread).
     expect(Object.keys(sources.mcp).sort()).toEqual([...MCP_SERVER_IDS].sort());
     expect(sources.mcp['replicate-mcp']).toBeNull();
-    expect(store.readDoc).toHaveBeenCalledWith('mcp_servers', 'plaud', 'plaud');
     expect(store.readDoc).toHaveBeenCalledWith('admin_config', 'secret_state', 'admin_config');
   });
 
   it('names a read that failed and keeps the rest', async () => {
-    const store = memoryStore();
+    const store = withMcp({});
     store.fail('admin_config', 'secret_state', 'readDoc', down());
-    store.fail('mcp_servers', 'hostinger-mcp', 'readDoc', down());
     store.fail('admin_config', 'reminders', 'readDoc', down());
-    const { sources, unavailable } = await readCredentialSources(store);
-    expect(unavailable.sort()).toEqual(['mcp:hostinger-mcp', 'reminders', 'secret-state']);
+    const { sources, unavailable, reminderDoc } = await readCredentialSources(store);
+    expect(unavailable.sort()).toEqual(['reminders', 'secret-state']);
     expect(sources.secrets).toEqual({});
-    expect(Object.hasOwn(sources.mcp, 'hostinger-mcp')).toBe(false);
     expect(sources.reminders).toBeNull();
+    expect(reminderDoc).toBeNull();
+  });
+
+  it('marks every MCP server unknown when the projected query fails', async () => {
+    const store = withMcp({});
+    store.fail('mcp_servers', '*', 'queryDocs', down());
+    const { sources, unavailable } = await readCredentialSources(store);
+    expect(unavailable.sort()).toEqual(MCP_SERVER_IDS.map((id) => `mcp:${id}`).sort());
+    expect(sources.mcp).toEqual({});
   });
 
   it('reads an empty estate as empty, not as failed', async () => {
-    const { sources, unavailable } = await readCredentialSources(memoryStore());
+    const { sources, unavailable } = await readCredentialSources(withMcp({}));
     expect(unavailable).toEqual([]);
     expect(sources).toMatchObject({ secrets: {}, coder: null, records: {}, reminders: [] });
+  });
+
+  it('reads the sheet before any date source, which the reminders sync relies on', async () => {
+    const store = withMcp({});
+    await readCredentialSources(store);
+    const first = Math.min(...store.readDoc.mock.invocationCallOrder);
+    const sheetCall = store.readDoc.mock.calls.findIndex((call) => call[1] === 'reminders');
+    expect(store.readDoc.mock.invocationCallOrder[sheetCall]).toBe(first);
+    expect(store.queryDocs.mock.invocationCallOrder[0]).toBeGreaterThan(first);
+  });
+});
+
+describe('an MCP server’s record is never read whole (review of #1039)', () => {
+  it('asks Cosmos for a projection with no token field in it, and never point-reads the document', async () => {
+    const store = withMcp({});
+    await readCredentialSources(store);
+    expect(store.readDoc.mock.calls.filter((call) => call[0] === 'mcp_servers')).toEqual([]);
+    const [container, sql, parameters] = store.queryDocs.mock.calls[0];
+    expect(container).toBe('mcp_servers');
+    expect(sql).toBe(MCP_SERVER_QUERY);
+    expect(parameters).toEqual([{ name: '@ids', value: [...MCP_SERVER_IDS] }]);
+    expect(sql).not.toMatch(/\*/);
+    // The SELECT list names no secret field; the token appears only inside
+    // the presence test Cosmos evaluates, never as a projected value.
+    const selectList = sql.slice('SELECT '.length, sql.indexOf(' FROM c'));
+    for (const field of ['oauthRefreshToken', 'oauthClientSecret', 'oauthPending', 'apiKey']) {
+      expect(selectList).not.toContain(field);
+    }
+    const withoutPresenceTest = selectList.replace(
+      '(IS_STRING(c.oauthToken) AND LENGTH(c.oauthToken) > 0) AS hasToken',
+      ''
+    );
+    expect(withoutPresenceTest).not.toContain('oauthToken');
+  });
+
+  it('projects exactly the fields the test emulation answers with, so the two cannot drift', () => {
+    const selectList = MCP_SERVER_QUERY.slice('SELECT '.length, MCP_SERVER_QUERY.indexOf(' FROM c'));
+    const names = selectList.split(/,\s*(?![^(]*\))/).map((item) => {
+      const alias = item.match(/\bAS\s+(\w+)\s*$/);
+      return alias ? alias[1] : item.trim().replace(/^c\./, '');
+    });
+    expect(names).toEqual([...PROJECTED_FIELDS]);
+    expect(['id', ...MCP_RECORD_FIELDS]).toEqual([...PROJECTED_FIELDS]);
+  });
+
+  it('copies a row field by field, so a token a row carried by mistake goes no further', async () => {
+    const store = memoryStore(
+      {},
+      {
+        query: () => [
+          { id: 'replicate-mcp', oauthStatus: 'connected', hasToken: true, oauthToken: LEAK, oauthRefreshToken: LEAK },
+        ],
+      }
+    );
+    const { sources } = await readCredentialSources(store);
+    expect(Object.keys(sources.mcp['replicate-mcp']).sort()).toEqual([...MCP_RECORD_FIELDS].sort());
+    expect(JSON.stringify(sources)).not.toContain(LEAK);
+  });
+});
+
+describe('a present but malformed source is unavailable, never empty (review of #1039)', () => {
+  it.each([
+    ['a string', 'not a map'],
+    ['a list', [{ lastWriteAt: AT }]],
+    ['a map with a non-record in it', { 'ANTHROPIC-API-KEY': 'x' }],
+    ['missing', undefined],
+  ])('secret_state whose secrets is %s', async (_label, secrets) => {
+    const store = withMcp({ 'admin_config/secret_state': { id: 'secret_state', secrets } });
+    const { sources, unavailable } = await readCredentialSources(store);
+    expect(unavailable).toEqual(['secret-state']);
+    expect(sources.secrets).toEqual({});
+  });
+
+  it.each([
+    ['a string', 'nope'],
+    ['a map with a non-record in it', { 'lab-agent-certificate': '2026-09-29' }],
+  ])('credential_register whose credentials is %s', async (_label, credentials) => {
+    const store = withMcp({ 'admin_config/credential_register': { id: CREDENTIAL_REGISTER_DOC_ID, credentials } });
+    const { unavailable } = await readCredentialSources(store);
+    expect(unavailable).toEqual(['credential-register']);
+  });
+
+  it('a sheet whose reminders is not a list', async () => {
+    const store = withMcp({ 'admin_config/reminders': { id: 'reminders', reminders: { a: 1 } } });
+    const { sources, unavailable, reminderDoc } = await readCredentialSources(store);
+    expect(unavailable).toEqual(['reminders']);
+    expect(sources.reminders).toBeNull();
+    expect(reminderDoc).toBeNull();
+  });
+
+  it('while an absent document, or a sheet with no rows yet, reads as empty', async () => {
+    const store = withMcp({ 'admin_config/reminders': { id: 'reminders' } });
+    const { sources, unavailable } = await readCredentialSources(store);
+    expect(unavailable).toEqual([]);
+    expect(sources).toMatchObject({ secrets: {}, records: {}, reminders: [] });
   });
 
   it('labels a source in the tab’s words', () => {
@@ -150,7 +265,9 @@ describe('recordRotation', () => {
   });
 
   it('gives up with CONFLICT after every attempt lost, and names no credential', async () => {
-    const store = memoryStore({ 'admin_config/credential_register': { id: CREDENTIAL_REGISTER_DOC_ID } });
+    const store = memoryStore({
+      'admin_config/credential_register': { id: CREDENTIAL_REGISTER_DOC_ID, credentials: {} },
+    });
     store.fail(
       'admin_config',
       CREDENTIAL_REGISTER_DOC_ID,
@@ -161,6 +278,16 @@ describe('recordRotation', () => {
     const error = await recordRotation(store, change(), { attempts: 3, sleep: noSleep }).catch((e) => e);
     expect(error.code).toBe('CONFLICT');
     expect(error.message).not.toContain('lab-agent');
+  });
+
+  it('refuses to write over a malformed document, which it would otherwise replace with one record', async () => {
+    const malformed = { id: CREDENTIAL_REGISTER_DOC_ID, credentials: 'hand-edited' };
+    const store = memoryStore({ 'admin_config/credential_register': malformed });
+    const error = await recordRotation(store, change(), { sleep: noSleep }).catch((e) => e);
+    expect(error.code).toBe('MALFORMED');
+    expect(error.message).not.toContain('lab-agent');
+    expect(store.get('admin_config', CREDENTIAL_REGISTER_DOC_ID).credentials).toBe('hand-edited');
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
   });
 
   it('throws any other store error at once', async () => {

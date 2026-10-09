@@ -33,14 +33,21 @@
  * counts only for a hand-renewed credential, which is the only kind the tab
  * lets them record.
  *
- * NOTHING HERE TOUCHES A VALUE. The sources are documents that sit beside
- * credentials (an mcp_servers record holds its tokens), so every read below
- * names the one field it wants, and a token field is only ever asked whether
- * it is present.
+ * ## A source that could not be read
+ *
+ * A credential whose dates come from a source sources.js could not read, or
+ * read and found malformed, is `unknown`, with no age, expiry or reminder:
+ * a status computed from the sources that DID answer would be a guess
+ * presented as a fact (review of #1039: an owner-recorded date standing in
+ * for a Key Vault write nobody could see).
+ *
+ * NOTHING HERE TOUCHES A VALUE. An mcp_servers record holds its tokens, so
+ * it reaches this module only as the projection sources.js asks Cosmos for:
+ * dates, states and a `hasToken` boolean. Every other source is read by the
+ * one field it is wanted for.
  */
 
 import { dateOnly, daysUntil, parseDateOnly } from '../reminders/calendar.js';
-import { oauthConnectionState } from '../ai/mcp-oauth.js';
 import { CREDENTIAL_REGISTER, CREDENTIAL_STORES, isRecordable } from './register.js';
 
 export const CREDENTIAL_STATES = Object.freeze(['ok', 'due-soon', 'overdue', 'unknown']);
@@ -74,33 +81,35 @@ function recordedOn(entry, records) {
 }
 
 /**
- * An mcp_servers document's connection: `connected`, `expired` (a refresh
- * failed, so someone must sign in again) or `not_connected`. Null when the
- * document could not be read, which is not the same as absent.
+ * An MCP server's connection, from its projected record (sources.js
+ * MCP_SERVER_QUERY): `connected`, `expired` (a refresh failed, so someone
+ * must sign in again) or `not_connected`. Null when the record could not be
+ * read, which is not the same as absent.
  *
  * Plaud's token is pasted, not obtained through Connect, and its timer marks
- * the document `disconnected` when a refresh fails (lib/timers/plaud-token.js);
- * the others are OAuth Connect servers and say so on `oauth.status`
- * (lib/ai/mcp-oauth.js). Either way the token is asked whether it is there,
- * never what it is.
+ * the document `disconnected` when a refresh fails (lib/timers/plaud-token.js).
+ * The others are OAuth Connect servers, and this is mcp-oauth.js's
+ * oauthConnectionState rule read off the projection: `oauth.status`, and
+ * whether a token is there. status.test.js holds the two to the same answer.
  */
-function mcpConnection(serverId, mcp) {
+export function mcpConnection(serverId, mcp) {
   if (!mcp || !Object.hasOwn(mcp, serverId)) return null;
-  const doc = mcp[serverId];
-  if (!doc) return 'not_connected';
+  const record = mcp[serverId];
+  if (!record) return 'not_connected';
   if (serverId === 'plaud') {
-    if (doc.status === 'disconnected') return 'expired';
-    return doc.oauthToken ? 'connected' : 'not_connected';
+    if (record.status === 'disconnected') return 'expired';
+    return record.hasToken ? 'connected' : 'not_connected';
   }
-  return oauthConnectionState(doc);
+  if (record.oauthStatus === 'connected' && record.hasToken) return 'connected';
+  return record.oauthStatus === 'disconnected' ? 'expired' : 'not_connected';
 }
 
-/** When an mcp_servers document's token was last renewed, or null. */
+/** When an MCP server's token was last renewed, from its projected record, or null. */
 function mcpRenewedAt(serverId, mcp) {
-  const doc = mcp?.[serverId];
-  if (!doc) return null;
-  if (serverId === 'plaud') return instant(doc.lastTokenRefresh);
-  return instant(doc.oauth?.refreshedAt) ?? instant(doc.oauth?.connectedAt);
+  const record = mcp?.[serverId];
+  if (!record) return null;
+  if (serverId === 'plaud') return instant(record.lastTokenRefresh);
+  return instant(record.oauthRefreshedAt) ?? instant(record.oauthConnectedAt);
 }
 
 /** The Coder automation report's dates for one of its two tokens. */
@@ -119,7 +128,7 @@ function coderDates(which, coder) {
  * @param {object} sources
  * @param {Record<string, object>} [sources.secrets] admin_config/secret_state's `secrets`
  * @param {object|null} [sources.coder] admin_config/coder_automation
- * @param {Record<string, object|null>} [sources.mcp] mcp_servers documents by id, a failed read absent
+ * @param {Record<string, object|null>} [sources.mcp] projected mcp_servers records by id, a failed read absent
  * @param {Record<string, object>} [sources.records] admin_config/credential_register's `credentials`
  */
 export function resolveLive(entry, sources = {}) {
@@ -237,14 +246,57 @@ export function computeCredentialStatus(entry, live, nowMs = Date.now()) {
   return { ...base, ...judged };
 }
 
+/** What each source gives a credential, in the sentence for one that could not be read. */
+const SOURCE_WORDS = Object.freeze({
+  'secret-state': 'Key Vault write date',
+  'coder-automation': 'lab host report',
+  'credential-register': 'recorded rotation date',
+});
+
+/**
+ * The sources (sources.js ids) one entry's dates come from: its Key Vault
+ * record, its Coder report, its MCP record, and, for one the owner may
+ * record, the register document.
+ */
+export function sourcesOf(entry) {
+  const source = entry.source ?? {};
+  return [
+    ...(source.secret ? ['secret-state'] : []),
+    ...(source.coder ? ['coder-automation'] : []),
+    ...(source.mcpServer ? [`mcp:${source.mcpServer}`] : []),
+    ...(isRecordable(entry) ? ['credential-register'] : []),
+  ];
+}
+
+/** The status of an entry whose source could not be read: unknown, with nothing computed. */
+function unreadableStatus(sourceId) {
+  const words = SOURCE_WORDS[sourceId] ?? 'connection record';
+  return {
+    lastRotatedAt: null,
+    lastRotatedSource: null,
+    ageDays: null,
+    expiresAt: null,
+    expiryEstimated: false,
+    daysLeft: null,
+    connection: null,
+    state: 'unknown',
+    reason: `Its ${words} could not be read, so its age and expiry are not shown.`,
+  };
+}
+
 /**
  * One credential as the API answers it: the register's metadata and the
  * computed status, field by field. Named rather than spread, so nothing a
  * future source carries can reach the answer unreviewed.
+ *
+ * `unavailable` is sources.js's list of sources it could not read. When one
+ * of this entry's is among them the entry is unknown, with no age, expiry or
+ * reminder, and `sourceUnavailable` names the source (review of #1039).
  */
-export function presentCredential(entry, sources, nowMs = Date.now()) {
+export function presentCredential(entry, sources, nowMs = Date.now(), unavailable = []) {
   const live = resolveLive(entry, sources);
-  const status = computeCredentialStatus(entry, live, nowMs);
+  const missing = sourcesOf(entry).find((id) => unavailable.includes(id)) ?? null;
+  const status = missing ? unreadableStatus(missing) : { ...live, ...computeCredentialStatus(entry, live, nowMs) };
   return {
     id: entry.id,
     name: entry.name,
@@ -256,16 +308,18 @@ export function presentCredential(entry, sources, nowMs = Date.now()) {
     rotate: entry.rotate,
     recordable: isRecordable(entry),
     dueSoonDays: dueSoonDays(entry),
-    lastRotatedAt: live.lastRotatedAt,
-    lastRotatedSource: live.lastRotatedSource,
-    recordedOn: live.recordedOn,
-    connection: live.connection,
+    lastRotatedAt: status.lastRotatedAt,
+    lastRotatedSource: status.lastRotatedSource,
+    // A fact about the register document, shown whenever that was read.
+    recordedOn: unavailable.includes('credential-register') ? null : live.recordedOn,
+    connection: status.connection,
     ageDays: status.ageDays,
     expiresAt: status.expiresAt,
     expiryEstimated: status.expiryEstimated,
     daysLeft: status.daysLeft,
     state: status.state,
     reason: status.reason,
+    sourceUnavailable: missing,
   };
 }
 
@@ -276,8 +330,8 @@ export function countStates(credentials) {
   return counts;
 }
 
-/** Every credential in the register, presented, with the counts. */
-export function buildRegisterView(sources, nowMs = Date.now()) {
-  const credentials = CREDENTIAL_REGISTER.map((entry) => presentCredential(entry, sources, nowMs));
+/** Every credential in the register, presented, with the counts taken after any unreadable source. */
+export function buildRegisterView(sources, nowMs = Date.now(), unavailable = []) {
+  const credentials = CREDENTIAL_REGISTER.map((entry) => presentCredential(entry, sources, nowMs, unavailable));
   return { stores: CREDENTIAL_STORES, credentials, counts: countStates(credentials) };
 }

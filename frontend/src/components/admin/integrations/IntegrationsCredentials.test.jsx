@@ -70,7 +70,7 @@ const overdueKey = row({
   store: 'key-vault',
   consumer: 'AI router',
   issuer: 'Anthropic Console',
-  lifetimeDays: 365,
+  lifetimeDays: 180,
   ageDays: 400,
   lastRotatedSource: 'key-vault',
   expiresAt: '2026-09-04T00:00:00.000Z',
@@ -116,8 +116,8 @@ describe('the register', () => {
     expect(within(key).getByText('2026-09-04')).toBeTruthy();
     expect(within(key).getByText('rotation due')).toBeTruthy();
     expect(within(key).getByText('By hand')).toBeTruthy();
-    expect(within(key).getByText('every 365 days')).toBeTruthy();
-    expect(within(key).getByText('Reminder set for 2026-09-04')).toBeTruthy();
+    expect(within(key).getByText('every 180 days')).toBeTruthy();
+    expect(within(key).getByText('Rotation reminder, due 2026-09-04')).toBeTruthy();
   });
 
   it('shows an overdue credential in red, with the word as well as the colour', async () => {
@@ -141,6 +141,26 @@ describe('the register', () => {
     });
     expect(screen.queryByText('ANTHROPIC-API-KEY')).toBeNull();
     expect(screen.getByRole('region', { name: 'Lab host file' })).toBeTruthy();
+  });
+
+  it('shows the reminder that asks for a date on a credential with a rule and none yet (#1026)', async () => {
+    getJSON.mockResolvedValue(
+      payload([
+        row({
+          reminder: {
+            id: 'credential-lab-agent-certificate',
+            kind: 'record',
+            dueDate: '2026-10-09',
+            leadDays: 0,
+            inSheet: true,
+          },
+        }),
+      ])
+    );
+    render(<IntegrationsCredentials />);
+    await waitFor(() =>
+      expect(screen.getByText('Reminder to record its rotation date, due 2026-10-09')).toBeTruthy()
+    );
   });
 
   it('names a source it could not read', async () => {
@@ -232,7 +252,7 @@ describe('recording a rotation', () => {
         rotatedOn: '2026-09-29',
       })
     );
-    await waitFor(() => expect(screen.getByText('Reminder set for 2028-09-28')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Rotation reminder, due 2028-09-28')).toBeTruthy());
     expect(screen.getByText('recorded')).toBeTruthy();
     expect(screen.queryByLabelText(/Rotation date for/)).toBeNull();
     expect(toast).toHaveBeenCalledWith(
@@ -242,14 +262,22 @@ describe('recording a rotation', () => {
     expect(getJSON).toHaveBeenCalledTimes(1);
   });
 
-  it('defaults the date to today, and clears a recorded date with null', async () => {
+  it('defaults the date to this browser’s day, allows the API’s day of grace, and clears with null', async () => {
     getJSON.mockResolvedValue(payload([row({ recordedOn: '2026-09-29' })]));
     sendJSON.mockResolvedValue(payload([row()]));
     render(<IntegrationsCredentials />);
     await waitFor(() => expect(screen.getByText(/labs-agent\.pem/)).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: /Record rotation of/ }));
-    expect(screen.getByLabelText(/Rotation date for/).value).toBe(
-      new Date().toISOString().slice(0, 10)
+    const input = screen.getByLabelText(/Rotation date for/);
+    const local = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    expect(input.value).toBe(
+      `${local.getFullYear()}-${pad(local.getMonth() + 1)}-${pad(local.getDate())}`
+    );
+    // The API accepts up to the UTC day plus one (handlers.js parseRotationBody),
+    // so the picker does too, and an owner ahead of or behind UTC can pick their day.
+    expect(input.getAttribute('max')).toBe(
+      new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)
     );
     fireEvent.click(screen.getByRole('button', { name: 'Clear recorded date' }));
     await waitFor(() =>
@@ -328,14 +356,16 @@ describe('Update reminders', () => {
     });
     render(<IntegrationsCredentials />);
     await waitFor(() =>
-      expect(screen.getByText('Reminder for 2028-09-28 not on the sheet yet')).toBeTruthy()
+      expect(
+        screen.getByText('Rotation reminder, due 2028-09-28, not on the sheet yet')
+      ).toBeTruthy()
     );
     expect(screen.getByText(/1 reminder is not on the reminders sheet yet/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Update reminders' }));
     await waitFor(() =>
       expect(sendJSON).toHaveBeenCalledWith('cms/credentials/reminders', 'POST', {})
     );
-    await waitFor(() => expect(screen.getByText('Reminder set for 2028-09-28')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Rotation reminder, due 2028-09-28')).toBeTruthy());
     expect(screen.queryByRole('button', { name: 'Update reminders' })).toBeNull();
   });
 });

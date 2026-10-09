@@ -1,35 +1,38 @@
 /**
  * The credential reminders on the owner's sheet (#1026): which rows, how
- * they merge, and that the owner's own rows, the timer's stamps and a
- * concurrent save all survive a sync.
+ * they merge, and that the owner's own rows, the timer's stamps, a
+ * concurrent save and a rotation recorded mid-sync all survive a sync.
  */
 import { describe, it, expect, vi } from 'vitest';
 
 import { memoryStore } from '../../../test/memory-store.js';
 import { MAX_REMINDERS, normalizeReminders, readStoredReminders } from '../reminders/settings.js';
 import { CREDENTIAL_REGISTER } from './register.js';
+import { recordRotation } from './sources.js';
 import { buildRegisterView } from './status.js';
 import {
   CREDENTIALS_TAB_URL,
   CREDENTIAL_REMINDER_PREFIX,
   isCredentialReminder,
   mergeCredentialReminders,
+  recordTitle,
   reminderIdFor,
+  reminderKind,
+  rotateTitle,
   syncCredentialReminders,
   wantedReminders,
 } from './reminders.js';
 
 const NOW = new Date('2026-10-09T12:00:00.000Z');
+const TODAY = '2026-10-09';
 const now = () => NOW;
 const noSleep = () => Promise.resolve();
 
-/** Every reminder-bearing credential with a date, as the owner would record them. */
-const ALL_RECORDED = Object.fromEntries(
-  CREDENTIAL_REGISTER.filter((entry) => entry.renewal === 'hand' && entry.lifetimeDays).map((entry) => [
-    entry.id,
-    { rotatedOn: '2026-09-29' },
-  ])
-);
+/** Every hand credential with a rule: the issue's list. */
+const RULED = CREDENTIAL_REGISTER.filter((entry) => entry.renewal === 'hand' && entry.lifetimeDays);
+
+/** Every one of them with a date, as the owner would record them. */
+const ALL_RECORDED = Object.fromEntries(RULED.map((entry) => [entry.id, { rotatedOn: '2026-09-29' }]));
 
 const ownerRow = (id, overrides = {}) => ({
   id,
@@ -45,20 +48,51 @@ const ownerRow = (id, overrides = {}) => ({
 
 const view = (records = {}, secrets = {}) =>
   buildRegisterView({ records, secrets, mcp: {}, coder: null }, NOW.getTime()).credentials;
+const byId = (rows) => Object.fromEntries(rows.map((row) => [row.id, row]));
+const credential = (credentials, id) => credentials.find((c) => c.id === id);
 
 describe('wantedReminders', () => {
-  it('wants one row per hand credential with a due date, and none without one', () => {
-    expect(wantedReminders(view())).toEqual([]);
-    const rows = wantedReminders(view(ALL_RECORDED));
-    expect(rows.map((row) => row.id).sort()).toEqual(
-      Object.keys(ALL_RECORDED).map(reminderIdFor).sort()
-    );
-    // Exactly the issue's list: two GitHub App keys among the eight.
-    expect(rows).toHaveLength(8);
+  it('wants a reminder for EVERY hand credential with a rule: the issue’s eight, dated or not', () => {
+    const undated = wantedReminders(view(), { today: TODAY });
+    const dated = wantedReminders(view(ALL_RECORDED), { today: TODAY });
+    const ids = RULED.map((entry) => reminderIdFor(entry.id)).sort();
+    expect(undated.map((row) => row.id).sort()).toEqual(ids);
+    expect(dated.map((row) => row.id).sort()).toEqual(ids);
+    expect(ids).toHaveLength(8);
   });
 
-  it('is due on the expiry’s day, says it first when the tab turns amber, and links to the tab', () => {
-    const [swa] = wantedReminders(view({ 'azure-swa-deployment-token': { rotatedOn: '2026-09-29' } }));
+  it('asks for the date, due today, when no date is known', () => {
+    const rows = byId(wantedReminders(view(), { today: TODAY }));
+    const row = rows['credential-kv-anthropic-api-key'];
+    expect(row).toEqual({
+      id: 'credential-kv-anthropic-api-key',
+      url: CREDENTIALS_TAB_URL,
+      done: false,
+      notified: {},
+      title: 'Record when ANTHROPIC-API-KEY was last rotated',
+      dueDate: TODAY,
+      leadDays: 0,
+      notes: expect.stringContaining('It is rotated every 180 days, and no date is known'),
+    });
+    expect(row.notes).toContain('Record that date on Integrations → Credentials');
+  });
+
+  it('keeps a RECORD row’s first due date rather than moving it to each day’s sync', () => {
+    const credentials = view();
+    const stored = [{ id: 'credential-kv-anthropic-api-key', title: recordTitle(credential(credentials, 'kv-anthropic-api-key')), dueDate: '2026-10-01' }];
+    const rows = byId(wantedReminders(credentials, { today: TODAY, stored }));
+    expect(rows['credential-kv-anthropic-api-key'].dueDate).toBe('2026-10-01');
+    // Any other stored row for it (an old ROTATE row) is not a RECORD row: due today.
+    const old = [{ id: 'credential-kv-anthropic-api-key', title: 'Rotate ANTHROPIC-API-KEY', dueDate: '2026-01-01' }];
+    expect(byId(wantedReminders(credentials, { today: TODAY, stored: old }))['credential-kv-anthropic-api-key'].dueDate).toBe(
+      TODAY
+    );
+  });
+
+  it('is the rotation reminder once a date is known: due on the expiry’s day, said first when the tab turns amber', () => {
+    const [swa] = wantedReminders(view({ 'azure-swa-deployment-token': { rotatedOn: '2026-09-29' } }), {
+      today: TODAY,
+    }).filter((row) => row.id === 'credential-azure-swa-deployment-token');
     expect(swa).toEqual({
       id: 'credential-azure-swa-deployment-token',
       title: 'Rotate Static Web App deployment token',
@@ -71,27 +105,46 @@ describe('wantedReminders', () => {
     });
     expect(swa.notes).toContain('Reset it on the Static Web App');
     expect(swa.notes).toContain('record the rotation on Integrations → Credentials');
-    const [cert] = wantedReminders(view({ 'lab-agent-certificate': { rotatedOn: '2026-09-29' } }));
+    const cert = byId(wantedReminders(view({ 'lab-agent-certificate': { rotatedOn: '2026-09-29' } }), { today: TODAY }))[
+      'credential-lab-agent-certificate'
+    ];
     expect(cert).toMatchObject({ dueDate: '2028-09-28', leadDays: 30 });
   });
 
-  it('follows a Keys-tab write, the later of it and the record', () => {
-    const [anthropic] = wantedReminders(
-      view(
-        { 'kv-anthropic-api-key': { rotatedOn: '2026-01-01' } },
-        { 'ANTHROPIC-API-KEY': { lastWriteAt: '2026-10-01T09:00:00.000Z' } }
+  it('follows a Keys-tab write: the later of it and the record, 180 days on', () => {
+    const rows = byId(
+      wantedReminders(
+        view(
+          { 'kv-anthropic-api-key': { rotatedOn: '2026-01-01' } },
+          { 'ANTHROPIC-API-KEY': { lastWriteAt: '2026-10-01T09:00:00.000Z' } }
+        ),
+        { today: TODAY }
       )
     );
-    expect(anthropic.dueDate).toBe('2027-10-01');
+    expect(rows['credential-kv-anthropic-api-key']).toMatchObject({
+      title: 'Rotate ANTHROPIC-API-KEY',
+      dueDate: '2027-03-30',
+      leadDays: 30,
+    });
   });
 
-  it('writes rows the sheet’s own normalizer accepts', () => {
-    expect(() => normalizeReminders({ reminders: wantedReminders(view(ALL_RECORDED)) })).not.toThrow();
+  it('wants none for a credential whose source could not be read, nor for one with no rule', () => {
+    const credentials = buildRegisterView({ records: ALL_RECORDED }, NOW.getTime(), ['secret-state']).credentials;
+    expect(reminderKind(credential(credentials, 'kv-anthropic-api-key'))).toBeNull();
+    expect(reminderKind(credential(credentials, 'lab-agent-certificate'))).toBe('rotate');
+    expect(reminderKind(credential(view(), 'kv-openai-api-key'))).toBeNull();
+  });
+
+  it('writes rows the sheet’s own normalizer accepts, both kinds', () => {
+    expect(() => normalizeReminders({ reminders: wantedReminders(view(), { today: TODAY }) })).not.toThrow();
+    expect(() => normalizeReminders({ reminders: wantedReminders(view(ALL_RECORDED), { today: TODAY }) })).not.toThrow();
   });
 });
 
 describe('mergeCredentialReminders', () => {
-  const wanted = wantedReminders(view({ 'lab-agent-certificate': { rotatedOn: '2026-09-29' } }));
+  const wanted = wantedReminders(view({ 'lab-agent-certificate': { rotatedOn: '2026-09-29' } }), {
+    today: TODAY,
+  }).filter((row) => row.id === 'credential-lab-agent-certificate');
   const id = 'credential-lab-agent-certificate';
 
   it('passes the owner’s rows through untouched and in place, and appends a new credential row', () => {
@@ -101,9 +154,9 @@ describe('mergeCredentialReminders', () => {
     expect(merged[2].id).toBe(id);
   });
 
-  it('keeps done and the timer’s stamps while the due date stands', () => {
+  it('keeps done and the timer’s stamps while it is the same cycle', () => {
     const notified = { ahead: '2028-08-29T13:00:00.000Z' };
-    const stored = [{ ...wanted[0], title: 'edited by hand', done: true, notified }];
+    const stored = [{ ...wanted[0], notes: 'edited by hand', done: true, notified }];
     const [row] = mergeCredentialReminders(stored, wanted);
     expect(row).toEqual({ ...wanted[0], done: true, notified });
   });
@@ -114,12 +167,19 @@ describe('mergeCredentialReminders', () => {
     expect(row).toEqual(wanted[0]);
   });
 
-  it('replaces a credential row in place, and removes one whose credential has no due date', () => {
+  it('starts a fresh cycle when a RECORD row becomes a ROTATE row, even on the same date', () => {
+    const stored = [
+      { ...wanted[0], title: 'Record when it was last rotated', leadDays: 0, done: true, notified: { due: '2028-09-28T13:00:00.000Z' } },
+    ];
+    expect(mergeCredentialReminders(stored, wanted)).toEqual(wanted);
+  });
+
+  it('replaces a credential row in place, and removes one whose credential no longer wants one', () => {
     const stored = [
       ownerRow('a'),
       { ...wanted[0], dueDate: '2027-01-01' },
       ownerRow('b'),
-      { ...wanted[0], id: 'credential-kv-anthropic-api-key' },
+      { ...wanted[0], id: 'credential-kv-openai-api-key' },
     ];
     expect(mergeCredentialReminders(stored, wanted).map((row) => row.id)).toEqual(['a', id, 'b']);
   });
@@ -143,12 +203,42 @@ describe('syncCredentialReminders', () => {
       ...(reminders ? { 'admin_config/reminders': { id: 'reminders', configScope: 'admin_config', reminders } } : {}),
     });
   const sheet = (store) => store.get('admin_config', 'reminders');
+  const rowsOf = (store) => byId(sheet(store).reminders);
 
   it('creates the sheet when there is none, with a row per reminder-bearing credential', async () => {
     const store = seeded(null);
     expect(await syncCredentialReminders({ store, now })).toEqual({ synced: true, changed: true, reminders: 8 });
     expect(sheet(store)).toMatchObject({ id: 'reminders', configScope: 'admin_config' });
     expect(readStoredReminders(sheet(store)).reminders).toHaveLength(8);
+  });
+
+  it('gives every undated one a RECORD row due today, and turns it into the rotation row once a date is recorded', async () => {
+    const store = seeded(null, {});
+    expect(await syncCredentialReminders({ store, now })).toMatchObject({ synced: true, reminders: 8 });
+    const first = rowsOf(store)['credential-lab-agent-certificate'];
+    expect(first).toMatchObject({ title: recordTitle({ name: '/etc/hcw/labs-agent.pem (sp-labs-agent-lab-hybrid-prod-cus-01)' }), dueDate: TODAY, leadDays: 0 });
+
+    // The timer said it, and the owner marked it done; a later day's sync keeps all of that.
+    const stamped = sheet(store);
+    await store.replaceDocIfMatch('admin_config', {
+      ...stamped,
+      reminders: stamped.reminders.map((row) =>
+        row.id === first.id ? { ...row, done: true, notified: { due: '2026-10-09T13:00:00.000Z' } } : row
+      ),
+    });
+    await syncCredentialReminders({ store, now: () => new Date('2026-10-12T13:00:00.000Z') });
+    expect(rowsOf(store)[first.id]).toMatchObject({ dueDate: TODAY, done: true, notified: { due: '2026-10-09T13:00:00.000Z' } });
+
+    // The date is recorded: a date move, so a fresh cycle at the real due date.
+    await recordRotation(store, { credentialId: 'lab-agent-certificate', rotatedOn: '2026-09-29', actor: 'o', at: NOW.toISOString() });
+    await syncCredentialReminders({ store, now });
+    expect(rowsOf(store)[first.id]).toMatchObject({
+      title: rotateTitle({ name: '/etc/hcw/labs-agent.pem (sp-labs-agent-lab-hybrid-prod-cus-01)' }),
+      dueDate: '2028-09-28',
+      leadDays: 30,
+      done: false,
+      notified: {},
+    });
   });
 
   it('never touches the owner’s rows, and keeps the document’s other fields', async () => {
@@ -185,7 +275,7 @@ describe('syncCredentialReminders', () => {
     let raced = false;
     store.readDoc.mockImplementation(async (container, id, pk) => {
       const doc = await realRead(container, id, pk);
-      if (id === 'reminders' && !raced && store.readDoc.mock.calls.filter((c) => c[1] === 'reminders').length === 2) {
+      if (id === 'reminders' && !raced) {
         raced = true;
         // The owner adds a row between the sync's read and its write.
         const current = store.get('admin_config', 'reminders');
@@ -200,12 +290,42 @@ describe('syncCredentialReminders', () => {
     expect(ids).toHaveLength(10);
   });
 
-  it('leaves a sheet that does not validate alone, and says so', async () => {
+  it('a rotation recorded mid-sync is never overwritten by its old due date (review of #1039)', async () => {
+    // The sync reads the sheet and then the register; between its read of
+    // the register and its write, the owner records a new date and that
+    // record's own sync completes. This sync's write must lose and go round
+    // again with the new date, never put the old one back.
+    const store = seeded([ownerRow('a')], { 'lab-agent-certificate': { rotatedOn: '2026-01-01' } });
+    const realRead = store.readDoc.getMockImplementation();
+    let interleaved = false;
+    store.readDoc.mockImplementation(async (container, id, pk) => {
+      const doc = await realRead(container, id, pk);
+      if (id === 'credential_register' && !interleaved) {
+        interleaved = true;
+        await recordRotation(store, {
+          credentialId: 'lab-agent-certificate',
+          rotatedOn: '2026-09-29',
+          actor: 'owner',
+          at: NOW.toISOString(),
+        });
+        await syncCredentialReminders({ store, now });
+      }
+      return doc;
+    });
+    const result = await syncCredentialReminders({ store, now, sleep: noSleep });
+    expect(result).toMatchObject({ synced: true });
+    expect(rowsOf(store)['credential-lab-agent-certificate'].dueDate).toBe('2028-09-28');
+    // It went round: the register was read again after the interleaved record.
+    expect(store.readDoc.mock.calls.filter((call) => call[1] === 'credential_register').length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('leaves a sheet that does not validate alone, and says so without quoting it', async () => {
     const store = seeded([{ id: 'broken', title: '' }]);
     const log = { warn: vi.fn() };
     expect(await syncCredentialReminders({ store, now, log })).toEqual({ synced: false, reason: 'invalid' });
     expect(sheet(store).reminders).toEqual([{ id: 'broken', title: '' }]);
     expect(log.warn).toHaveBeenCalledOnce();
+    expect(log.warn.mock.calls[0][0]).not.toContain('broken');
   });
 
   it('leaves the sheet alone when the credential rows would pass its limit', async () => {
@@ -227,9 +347,21 @@ describe('syncCredentialReminders', () => {
     );
   });
 
+  it('leaves every credential row in place when a date source is present but malformed (review of #1039)', async () => {
+    const store = seeded(null);
+    await syncCredentialReminders({ store, now });
+    const before = sheet(store).reminders;
+    await store.replaceDocIfMatch('admin_config', {
+      ...store.get('admin_config', 'credential_register'),
+      credentials: 'hand-edited',
+    });
+    expect(await syncCredentialReminders({ store, now, log: {} })).toEqual({ synced: false, reason: 'unreadable' });
+    expect(sheet(store).reminders).toEqual(before);
+  });
+
   it('still syncs when only an MCP record or the Coder report is unreadable', async () => {
     const store = seeded(null);
-    store.fail('mcp_servers', 'plaud', 'readDoc', Object.assign(new Error('x'), { code: 503 }));
+    store.fail('mcp_servers', '*', 'queryDocs', Object.assign(new Error('x'), { code: 503 }));
     store.fail('admin_config', 'coder_automation', 'readDoc', Object.assign(new Error('x'), { code: 503 }));
     expect(await syncCredentialReminders({ store, now })).toMatchObject({ synced: true, reminders: 8 });
   });

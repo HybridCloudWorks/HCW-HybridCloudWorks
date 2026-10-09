@@ -26,7 +26,7 @@ import { dateOnly, daysUntil, parseDateOnly } from '../reminders/calendar.js';
 import { findCredential, isRecordable } from './register.js';
 import { readCredentialSources, recordRotation, sourceLabel } from './sources.js';
 import { buildRegisterView } from './status.js';
-import { reminderIdFor, syncCredentialReminders } from './reminders.js';
+import { reminderIdFor, reminderKind, syncCredentialReminders, wantedReminders } from './reminders.js';
 
 /** The role every route here needs: admin-secrets.js SECRETS_ROLE, held equal by the test. */
 export const CREDENTIALS_ROLE = 'super_admin';
@@ -83,26 +83,40 @@ export function parseRotationBody(body, today) {
 }
 
 /**
- * Whether each credential's reminder is on the sheet, by its due date: a
- * row with the same id and the same date. Null when the sheet could not be
- * read, so the tab says "unknown" rather than "missing".
+ * Each credential's reminder as the sync would write it (reminders.js
+ * wantedReminders, from the same read), and whether the sheet has it: a row
+ * with the same id, due date and title. `inSheet` is null when the sheet
+ * could not be read, so the tab says "unknown" rather than "missing".
  */
-function reminderFor(credential, sheet) {
-  if (credential.renewal !== 'hand' || !credential.expiresAt) return null;
-  const id = reminderIdFor(credential.id);
-  const dueDate = dateOnly(credential.expiresAt);
-  const row = sheet?.find((candidate) => candidate?.id === id);
-  return {
-    id,
-    dueDate,
-    leadDays: credential.dueSoonDays,
-    inSheet: sheet === null ? null : Boolean(row && row.dueDate === dueDate),
-  };
+function remindersById(credentials, sheet, nowMs) {
+  const wanted = new Map(
+    wantedReminders(credentials, { today: dateOnly(nowMs), stored: sheet ?? [] }).map((row) => [row.id, row])
+  );
+  const stored = new Map((sheet ?? []).map((row) => [row?.id, row]));
+  const out = new Map();
+  for (const credential of credentials) {
+    const row = wanted.get(reminderIdFor(credential.id));
+    if (!row) continue;
+    const held = stored.get(row.id);
+    out.set(credential.id, {
+      id: row.id,
+      kind: reminderKind(credential),
+      dueDate: row.dueDate,
+      leadDays: row.leadDays,
+      inSheet: sheet === null ? null : Boolean(held && held.dueDate === row.dueDate && held.title === row.title),
+    });
+  }
+  return out;
 }
 
-/** The whole answer for the tab, from one read of every source. */
+/**
+ * The whole answer for the tab, from one read of every source. A credential
+ * whose source could not be read is unknown, with no expiry and no reminder,
+ * and the counts are taken after that (status.js buildRegisterView).
+ */
 export function presentRegister({ sources, unavailable }, nowMs) {
-  const view = buildRegisterView(sources, nowMs);
+  const view = buildRegisterView(sources, nowMs, unavailable);
+  const reminders = remindersById(view.credentials, sources.reminders, nowMs);
   return {
     success: true,
     generatedAt: new Date(nowMs).toISOString(),
@@ -110,7 +124,7 @@ export function presentRegister({ sources, unavailable }, nowMs) {
     counts: view.counts,
     credentials: view.credentials.map((credential) => ({
       ...credential,
-      reminder: reminderFor(credential, sources.reminders),
+      reminder: reminders.get(credential.id) ?? null,
     })),
     unavailable: unavailable.map((id) => ({ id, label: sourceLabel(id) })),
   };
@@ -119,7 +133,8 @@ export function presentRegister({ sources, unavailable }, nowMs) {
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
- * @param {{ readDoc: Function, createDoc: Function, replaceDocIfMatch: Function, upsertDoc: Function }} deps.store
+ * @param {{ readDoc: Function, queryDocs: Function, createDoc: Function, replaceDocIfMatch: Function, upsertDoc: Function }} deps.store
+ *        queryDocs only for the projected mcp_servers read (sources.js)
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  * @param {Function} [deps.sync] syncCredentialReminders, injectable for tests

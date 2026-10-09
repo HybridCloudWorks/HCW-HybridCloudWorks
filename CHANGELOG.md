@@ -33,22 +33,29 @@ This project has not cut a tagged release; entries are grouped under
   the Entra and Docker identities, and the lab host's vault keys, files and
   the owner's password-manager entries. `GET /api/cms/credentials`
   (super_admin) merges in the live dates — the Keys tab's `lastWriteAt`,
-  the lab host's Coder token report, each MCP connection's state — and
-  answers each credential's age, expiry (reported, or the last rotation
-  plus its rule for a hand-renewed one), and a state: ok, due soon,
-  overdue (red), or unknown. `PUT /api/cms/credentials` records, under the
+  the lab host's Coder token report, each MCP connection's state, read as
+  a Cosmos projection so no token field is ever fetched — and answers each
+  credential's age, expiry (reported, or the last rotation plus its rule
+  for a hand-renewed one), and a state: ok, due soon, overdue (red), or
+  unknown. A source that cannot be read, or is present but malformed, is
+  never read as empty: the credentials that depend on it show unknown, with
+  no expiry or reminder. `PUT /api/cms/credentials` records, under the
   document's ETag, when a hand-renewed credential the site cannot read was
   last rotated (`admin_config/credential_register`, a date per credential).
-  Each hand credential with a due date gets the reminder row
+  Every hand credential with a rotation rule gets the reminder row
   `credential-<id>` on the existing Reminders sheet, said by the existing
   `sendReminders` timer: the Anthropic key, the Telegram bot token, both
-  GitHub App private keys and the Coder GitHub OAuth secret (a year each,
-  until the owner sets another rule), the Static Web Apps token's 90-day
-  reset and the two 730-day lab host certificates. The sync owns only those
-  rows: the owner's own reminders pass through untouched, `done` and the
-  timer's stamps are kept while a due date stands and reset when it moves,
-  and every write is conditional on the sheet's ETag. It runs when a
-  rotation is recorded, from the tab's Update reminders
+  GitHub App private keys and the Coder GitHub OAuth secret (every 180
+  days, the owner's rule of 2026-10-09), the Static Web Apps token's 90-day
+  reset and the two 730-day lab host certificates. With a known date it is
+  "Rotate …" at the due date; without one it is "Record when … was last
+  rotated", due the day it was added, until the date is recorded. The sync
+  owns only those rows: the owner's own reminders pass through untouched,
+  `done` and the timer's stamps are kept while a row's due date and title
+  stand and reset when either changes, and every attempt re-reads the sheet
+  and then the dates and writes under the sheet's ETag, so a rotation
+  recorded mid-sync is never overwritten. It runs when a rotation is
+  recorded, from the tab's Update reminders
   (`POST /api/cms/credentials/reminders`), and at the start of every
   `sendReminders` run. No value is read, stored or returned anywhere.
 

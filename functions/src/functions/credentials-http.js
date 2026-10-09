@@ -11,15 +11,17 @@
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { createDoc, readDoc, replaceDocIfMatch, upsertDoc } from '../lib/cosmos-client.js';
+import { createDoc, queryDocs, readDoc, replaceDocIfMatch, upsertDoc } from '../lib/cosmos-client.js';
 import { createCredentialRegisterHandlers } from '../lib/credentials/handlers.js';
 
 // createDoc and replaceDocIfMatch: the register's record and the reminders
 // sheet are both written under their ETags. upsertDoc only for the audit row.
+// queryDocs only for the mcp_servers read, which is a projection so the
+// tokens on those documents are never read (lib/credentials/sources.js).
 const handlers = () =>
   createCredentialRegisterHandlers({
     guard: getDefaultGuard(),
-    store: { readDoc, createDoc, replaceDocIfMatch, upsertDoc },
+    store: { readDoc, queryDocs, createDoc, replaceDocIfMatch, upsertDoc },
   });
 
 httpRouteByMethod('cmsCredentials', {
