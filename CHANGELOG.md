@@ -19,6 +19,54 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Lab host: Coder automation. The host renews the site's Coder status
+  token and publishes the `hcw-lab` template on its own, with one rotation
+  credential the owner seeds once (owner approval 2026-10-08).**
+  `hcw-coder-automation-seed` takes the owner's short-lived token on stdin
+  and creates the rotation credential: an unscoped, year-long token of
+  `hcw-status`, which must be a Template Admin and must not be an Owner, so
+  it cannot manage users or act as anyone else. It is a root-only file,
+  `/etc/hcw/coder/automation/rotation-token`, not a vault secret, because
+  nothing on the host can read HashiCorp Vault unattended (no auth method,
+  sealed after a reboot under Shamir keys) and the Ansible vault's password
+  is a root-only file beside it. The daily `hcw-coder-automation.timer`
+  renews the site's status token when the one the site holds expires within
+  30 days or is over 60 days old: a 90-day token with exactly
+  `template:read`, `workspace:read`, `api_key:read` and `user:read` (the
+  last so the token can read its own expiry, which the site checks), checked against
+  Coder, then handed to the site through the lab agent's CLI
+  (`vps-agent/bin/report-coder-automation.js`, run with `systemd-run` as
+  the agent's user with its `EnvironmentFile`), live only once the CLI
+  answers `stored: true`. It deletes `hcw-status`'s older status tokens,
+  keeping the newest two, the one before the live one and any younger than
+  48 hours, renews the rotation credential under 60 days, and reports
+  `checkedAt`, both expiries, the rotation and the template's publish, and a
+  content-free `lastError`, every run; a failure fails the unit, which the
+  `hcw-unit-failed@` notifier turns into the lab alert. Every `bootstrap.sh`
+  run publishes the template with the credential when a file
+  `hcw-coder-template-push` copies, or the default autostop, changed since
+  its last publish, before `lab_images` removes the old version's images;
+  with no credential it says how to seed one and carries on. Coder v2.38's
+  token API was read from its docs and source: `lifetime` is a Go duration
+  in nanoseconds, no scope means `coder:all`, and a Template Admin's tokens
+  may live a year where an Owner's stop at 168 hours. The owner's lines,
+  what success looks like and how to rotate by hand are in
+  `docs/runbooks/labs-host.md`, "Automatic renewal"; the design is in
+  `lab-host/ansible/roles/coder/README.md`, "Coder automation". Tests:
+  `lab-host/ansible/roles/coder/tests/hcw-coder-automation.test.py`, run in
+  the `ansible-lint (lab-host)` job against a fake Coder API, a fake
+  `systemd-run` and a fake site CLI, with no token in any output, state or
+  report. The seed keeps a stored credential only while `hcw-status` is
+  still a Template Admin and not an Owner, and every run refuses one that
+  is not a Template Admin; a new credential that fails before it is stored,
+  and that Coder will not delete, is recorded by id and deleted by every
+  later run until it is gone (review of #1035). A replaced credential is
+  listed the same way, before the new one is written, so an interruption
+  cannot leave it usable and forgotten; `hcw-coder-automation revoke`
+  turns the automation off by deleting the credential in Coder before the
+  file, and comes before any revert of this code; a suspected leak is
+  contained on the account, by deleting `hcw-status`, which deletes every
+  API key it has, successors included (CodeRabbit, #1035).
 - **Coder automation, the site's half: the lab host can hand the site a
   renewed Coder status token through the lab agent, and the site stores it
   only after Coder vouches for it as a working, read-only key of the status

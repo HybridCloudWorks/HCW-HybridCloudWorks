@@ -4,7 +4,9 @@ How to reach the Hostinger lab host from a desktop over SSH and VS Code (the
 first section); how to reinstall it, and what the first `bootstrap.sh` run
 checks before it changes anything; how the lab agent goes live, which is one
 PowerShell line; the order of the run after a merge (the playbook, then the
-Coder template, at once); how to check, after the run that turns it on, that the
+Coder template, at once); how the host renews the site's Coder status token
+and publishes the template on its own once the owner seeds one credential
+("Automatic renewal"); how to check, after the run that turns it on, that the
 container runtime is privilege-separated and how to take that back (LAB-5);
 how the owner reaches Portainer and
 initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26),
@@ -722,6 +724,243 @@ closes the gap, so it follows the run, not the next day.
    from /opt/hcw-src/lab-host/coder/templates/hcw-lab. Active version:` and
    ending `Default autostop: 1h0m0s.` Anything else, and what it means, is
    the table under "Publishing the template" in `lab-host/README.md`.
+
+   Once the rotation credential is seeded ("Automatic renewal", below),
+   step 1's run has already published the template, so this step is not
+   needed: its `coder` role runs **Publish the hcw-lab template with the
+   rotation credential when it changed** before `lab_images` removes
+   anything. Good is that task `changed`, with a line
+   `hcw-coder-automation: published hcw-lab with the rotation credential;
+   active version` in its output, or `ok` with `nothing was published` when
+   the template did not change.
+
+## Automatic renewal
+
+Owner approval 2026-10-08. The lab host renews the site's Coder status
+token (`CODER-STATUS-TOKEN`) and publishes the `hcw-lab` template on its
+own, with one credential the owner seeds once: the **rotation credential**,
+an unscoped Coder token of `hcw-status`, which is a Template Admin and never
+an Owner, kept root-only at `/etc/hcw/coder/automation/rotation-token`.
+After the seed:
+
+- `hcw-coder-automation.timer` runs `hcw-coder-automation.service` daily at
+  05:45 UTC (up to 30 minutes later). It renews the site's status token when
+  the one the site holds expires within 30 days or is more than 60 days
+  old: a new token with the three read scopes and `user:read` for 90 days, checked
+  against Coder, then handed to the site through the lab agent's CLI, which
+  stores it in Key Vault. It deletes `hcw-status`'s older status tokens,
+  keeping the newest two and any younger than 48 hours. It renews the
+  rotation credential itself when it has under 60 days left. And every run
+  reports to the site when it checked, when each token expires, when the
+  template was last published and the last error, if any.
+- Every `bootstrap.sh` run publishes the template with the rotation
+  credential when its files changed.
+
+The design, and why the credential is a root-only file rather than a vault
+secret, is in `lab-host/ansible/roles/coder/README.md`, "Coder automation".
+The status token was renewed by hand before this ("The status token for
+the site" in `lab-host/README.md`); that still works, and is the fallback.
+
+**Before you start.** The `bootstrap.sh` run that installs it has run
+(it installs `/usr/local/sbin/hcw-coder-automation-seed`); `hcw-status`
+exists with the Template Admin role (step 2 of "The status token for the
+site"); and the lab agent is configured and runs a commit that has
+`vps-agent/bin/report-coder-automation.js`, the site's CLI this uses.
+
+**1. Seed the rotation credential, once.** Make the short-lived `hcw-setup`
+token in a pane as step 1 of "The status token for the site" in
+`lab-host/README.md` shows, then hold it in PowerShell: paste this line,
+then paste the token at the masked prompt.
+
+```powershell
+$t = [Net.NetworkCredential]::new('', (Read-Host 'hcw-setup token' -AsSecureString)).Password
+```
+
+Then seed, PowerShell:
+
+```powershell
+$t | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-coder-automation-seed"
+```
+
+`sudo -n` works as it does for `hcw-coder-template-push`: `hcwadmin` has
+passwordless sudo (`/etc/sudoers.d/90-hcw-admin`, the `hardening` role), so
+neither helper needs a sudoers entry of its own. Success is one line:
+
+```text
+hcw-coder-automation-seed: stored the rotation credential hcw-status-rotation-<today> for hcw-status; it expires on <a year from today>.
+```
+
+A second run prints `a working rotation credential for hcw-status is already
+stored (it expires on …); nothing was changed. --force replaces it`. Then
+clear the variable, PowerShell, and delete `hcw-setup` in the pane (step 5
+of "The status token for the site"):
+
+```powershell
+Remove-Variable t
+```
+
+| Message | Means |
+| --- | --- |
+| `pipe the owner's Coder token in on stdin` | The line ran without `$t` piped into it, or `$t` is empty |
+| `the first line on stdin is not a Coder token` | `$t` holds something else; repeat the `Read-Host` line. What it held is not shown |
+| `Coder refused the token on stdin (HTTP 401)` | The `hcw-setup` token expired or was deleted; make another |
+| `Coder has no user hcw-status` | Step 2 of "The status token for the site" has not run |
+| `hcw-status holds the Owner role` / `is not a Template Admin` | Its role is wrong; step 2 of the same section sets Template Admin, and Owner must be removed in Coder's **Users** page. A stored credential is not kept while either is wrong, so the seed says this even when one is already stored |
+| `deleting the new rotation credential … failed too` | Coder made the new credential but it failed before it was stored, and Coder did not delete it. The stored one is unchanged; the next run deletes the new one |
+
+**2. Run it once now, and read what it did.** PowerShell:
+
+```powershell
+ssh hcw-lab "sudo -n systemctl start hcw-coder-automation.service; sudo -n journalctl -u hcw-coder-automation.service -n 20 --no-pager -o cat"
+```
+
+Success is a last line starting `hcw-coder-automation: checked:` and ending
+`reported to the site`. While the site still holds the token made by hand
+and it is younger than 60 days, that line says `the site still holds a
+status token made by hand`, and the timer takes over when it turns 60 days
+old. To hand over now, rotate by hand (below). A `Job for
+hcw-coder-automation.service failed` line means the run failed; the
+journal's lines above it say why (the table below).
+
+**Checking it afterwards.** The timer, PowerShell:
+
+```powershell
+ssh hcw-lab "systemctl list-timers hcw-coder-automation.timer --no-pager"
+```
+
+Success is one row with a `NEXT` time on the next day and a `LAST` time once
+it has run. The last runs, PowerShell:
+
+```powershell
+ssh hcw-lab "sudo -n systemctl status hcw-coder-automation.service --no-pager; sudo -n journalctl -u hcw-coder-automation.service -n 30 --no-pager -o cat"
+```
+
+Success is `Active: inactive (dead)` with `status=0/SUCCESS` (a oneshot
+that finished; `failed` is a failed run), and each day's run ending with the
+`checked: … reported to the site` line. On a day it renewed, two lines come
+before it: `renewing the site's status token: …` and `the site stored the
+new status token hcw-status-site-<that day>; it expires on …`. What it last
+recorded, content-free (token names and dates, never a token), PowerShell:
+
+```powershell
+ssh hcw-lab "sudo -n cat /var/lib/hcw-coder-automation/state.json"
+```
+
+A failed run is also an Azure alert: the unit's `OnFailure=` logs `unit
+hcw-coder-automation.service entered the failed state`, which
+`alert-lab-unit-failed` pages on, and the site's report carries the same
+`lastError`.
+
+| Journal line | Means | Do |
+| --- | --- | --- |
+| `Coder refused the rotation credential (HTTP 401)` | It expired or was deleted | Seed again with `--force` (below) |
+| `Coder did not answer at http://127.0.0.1:7080` | Coder is down | `sudo docker compose --project-directory /etc/hcw/coder ps`, bash, on the host |
+| `the lab agent is not configured` | `/etc/hcw/labs-agent.env` is missing | "The lab agent's go-live", above |
+| `site CLI: …` then `the site's CLI exited with 1` | The site's CLI failed, and its one line names the class: `HTTP <status>` (the site answered that), `MISSING_CONFIG` (the agent's environment lacks a value), `INVALID_INPUT`, `INPUT_TOO_LARGE` or `UNEXPECTED_ANSWER` | `HTTP` and `MISSING_CONFIG` are the site's or the agent's side; the other three are a fault in this helper or the CLI. A new token was kept, and the next run tries again |
+| `the site answered that it did not store the new status token` | The site declined it; the new token was deleted | The site side |
+| `hcw-status holds the Owner role` | Someone granted it Owner; nothing ran | Remove Owner from `hcw-status` |
+| `hcw-status is not a Template Admin` | Someone removed the role; nothing ran | Give `hcw-status` Template Admin again (`lab-host/README.md`, "The status token for the site", step 2) |
+| `deleting the new rotation credential … failed too` | A renewed credential failed before it was stored and Coder did not delete it; the stored one is unchanged and its id is in the state | Nothing: every run deletes it until it is gone |
+| `Coder did not delete the previous one; the next run deletes it` | A renewal stored the new credential, and Coder did not delete the one it replaced; its id is on the state's deletion list | Nothing: every run deletes it until it is gone |
+| `Coder did not delete 1 rotation credential(s) an earlier run replaced or never stored` | That deletion failed again | Nothing while it clears within a day or two; if it repeats, Coder is failing deletes generally, and `coder tokens list --all` (`lab-host/README.md`, "The status token for the site") shows the stray `hcw-status-rotation-` token |
+
+**Rotating by hand.** The site's status token, now, PowerShell:
+
+```powershell
+ssh hcw-lab "sudo -n /usr/local/libexec/hcw-coder-automation run --rotate-now"
+```
+
+Success is `the site stored the new status token hcw-status-site-<today>;
+it expires on <90 days on>` and then the `checked:` line. The site picks up
+the new Key Vault version within 24 hours, and the old token is kept
+meanwhile. The rotation credential, renewed with itself, PowerShell:
+
+```powershell
+ssh hcw-lab "sudo -n /usr/local/libexec/hcw-coder-automation run --rotate-credential"
+```
+
+Success is `stored a new rotation credential, hcw-status-rotation-<today>;
+it expires on <a year on>`. When Coder refuses the credential (it lapsed or
+was deleted), seed it again: step 1 with this line in place of the seed
+line, PowerShell:
+
+```powershell
+$t | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-coder-automation-seed --force"
+```
+
+Publishing the template now, without waiting for a change, PowerShell:
+
+```powershell
+ssh hcw-lab "sudo -n /usr/local/libexec/hcw-coder-automation push-template --force"
+```
+
+Success ends `hcw-coder-automation: published hcw-lab with the rotation
+credential; active version <name>`.
+
+**Stopping it.** Revoke the credential, PowerShell:
+
+```powershell
+ssh hcw-lab "sudo -n /usr/local/libexec/hcw-coder-automation revoke"
+```
+
+Success is one line, `hcw-coder-automation: revoked the rotation credential
+in Coder and removed it; …`. It deletes the credential in Coder first, along
+with any on the state's deletion list, and removes the file only once Coder
+confirms, so no unscoped token outlives the automation. Deleting the file
+alone would leave that token valid in Coder for up to a year. A line ending
+`run this again` means Coder did not confirm a deletion; nothing that
+could finish the job was removed, so run the same line again. Afterwards
+the daily run is skipped, not failed (`systemctl status` shows a
+`Condition:` line naming `ConditionPathExists`), `bootstrap.sh` stops
+publishing and says how to seed again, and the site keeps the last status
+token it was given until that token expires; renew it by hand as before
+("The status token for the site" in `lab-host/README.md`). Seeding again
+turns it all back on.
+
+**Before reverting the automation's code,** run the line above first. The
+revert removes the helper that knows how to revoke the credential, and the
+file it leaves behind would still be a valid unscoped token.
+
+**If the rotation credential may have leaked** (someone else may have read
+`/etc/hcw/coder/automation/rotation-token`, or a backup or copy of the host
+holding it went astray), contain it on the account, not the token. Its year
+is that one token's lifetime, not a bound on access: whoever holds it can
+mint more unscoped, year-long tokens of `hcw-status`, which are neither the
+stored credential nor status tokens, so neither `revoke` nor the daily
+clean-up would touch them. Deleting the user removes every API key it has
+at once, copies and successors alike: Coder v2.38's schema deletes a
+deleted user's `api_keys` in the `delete_deleted_user_resources` trigger.
+`hcw-status` owns no workspaces, which Coder requires before deleting a
+user, and its username can be created again at once (Coder's unique index
+on usernames skips deleted users) (review of #1035).
+
+1. Make the `hcw-setup` token and hold it in `$t`, as step 1 of "The status
+   token for the site" in `lab-host/README.md` shows. Then delete the user,
+   PowerShell:
+
+   ```powershell
+   $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder users delete hcw-status; }'"
+   ```
+
+   Success is `Successfully deleted hcw-status.` From here the Hybrid Lab
+   card stops listing templates and counting workspaces until step 3,
+   because the site's status token went with the user.
+2. Clear the host's copy, PowerShell:
+
+   ```powershell
+   ssh hcw-lab "sudo -n /usr/local/libexec/hcw-coder-automation revoke"
+   ```
+
+   Success starts `hcw-coder-automation: Coder no longer accepts the
+   rotation credential (HTTP 401), so there was nothing to delete in Coder;
+   removed it`.
+3. Make the user again with step 2 of "The status token for the site" (the
+   same `$t`), then seed (step 1 of this section) and run once (step 2). The
+   run finds that the token the site was given is no longer in Coder and
+   gives the site a new one at once: success is `the site stored the new
+   status token hcw-status-site-<today>` above the `checked:` line. Then
+   `Remove-Variable t`, and delete `hcw-setup` in the pane (step 5 of "The
+   status token for the site").
 
 ## Container-runtime privilege separation (LAB-5)
 

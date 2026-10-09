@@ -1,0 +1,24 @@
+{#
+  The configuration /usr/local/libexec/hcw-coder-automation reads (files/hcw-coder-automation.py):
+  paths, names and the lab agent's user, never a secret. JSON has no comments, so this
+  note stays in the template; README.md beside this role, "Coder automation", has each key.
+#}
+{
+  "coder_url": {{ ('http://127.0.0.1:' ~ coder_http_port) | to_json }},
+  "status_user": {{ coder_automation_status_user | to_json }},
+  "credential_file": {{ coder_automation_credential_file | to_json }},
+  "state_dir": {{ coder_automation_state_dir | to_json }},
+  "template_name": "hcw-lab",
+  "template_dir": {{ (coder_automation_src_dir ~ '/lab-host/coder/templates/hcw-lab') | to_json }},
+  "src_dir": {{ coder_automation_src_dir | to_json }},
+  "template_default_ttl": {{ coder_template_default_ttl | to_json }},
+  "push_helper": "/usr/local/sbin/hcw-coder-template-push",
+  "systemd_run": "/usr/bin/systemd-run",
+  "node": "/usr/bin/node",
+  "agent_user": {{ coder_automation_agent_user | to_json }},
+  "agent_group": {{ coder_automation_agent_group | to_json }},
+  "agent_env_file": {{ coder_automation_agent_env_file | to_json }},
+  "agent_app_dir": {{ coder_automation_agent_app_dir | to_json }},
+  "report_cli": {{ coder_automation_report_cli | to_json }},
+  "report_timeout_seconds": {{ coder_automation_report_timeout_seconds | int }}
+}

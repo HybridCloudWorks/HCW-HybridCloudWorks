@@ -457,6 +457,17 @@ jobs:
         if: steps.changes.outputs.relevant == 'true'
         run: bash roles/coder/tests/hcw-coder-template-push.test.sh
 
+      # /usr/local/libexec/hcw-coder-automation holds a Coder token that can
+      # publish templates and mints the site's status token, so the file the
+      # coder role installs is run as it ships against a fake Coder API, a
+      # fake systemd-run and a fake site CLI: renewal only when due, the
+      # read scopes plus user:read and nanosecond lifetimes, the clean-up's 48-hour
+      # and newest-two rules, a token never in any output, state or report.
+      # Needs neither root nor Docker.
+      - name: hcw-coder-automation test
+        if: steps.changes.outputs.relevant == 'true'
+        run: python roles/coder/tests/hcw-coder-automation.test.py
+
       # The daily held-package report the hardening role installs (LAB-3,
       # #949), rendered with the role's defaults and run against stub
       # apt-mark, apt and logger: one daemon.warning line per held package

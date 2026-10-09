@@ -24,7 +24,7 @@ the host has not run yet is
 | `node_exporter` | node_exporter 1.12.1, host-native, SHA256-verified, `127.0.0.1:9100` only | `/usr/local/bin/node_exporter`, `node_exporter.service` |
 | `caddy` | Caddy 2.11.4 built with `caddy-dns/cloudflare` 0.2.4, host-native under systemd; TLS for `lab.hybridcloudworks.com`, `*.lab.hybridcloudworks.com` and `*.coder.lab.hybridcloudworks.com` via DNS-01; placeholder response at the apex. Panes only (owner decision 2026-09-28): every name can be framed by the site alone, and a top-level browser visit is redirected to `https://hybridcloudworks.com/education/labs` (`roles/caddy/README.md`, "Panes only") | `/usr/local/bin/caddy`, `/opt/caddy/bin/` (versioned binary and its `.provenance`), `/etc/caddy/Caddyfile`, `/etc/caddy/conf.d/`, `/etc/caddy/env` (root:caddy, 0640), `caddy.service` running as `caddy` |
 | `coder_sandbox` | A **rootless** Docker daemon for Coder's workspaces, run by the unprivileged system user `hcw-coder-docker` from a systemd user unit kept up by lingering, with its own subordinate id range and the cpu, memory and pids controllers delegated so the workspace limits hold (LAB-5). Every workspace runs here, and a privileged container a compromised Coder server asks for is that user's, never root's. Off while Coder is | User `hcw-coder-docker` (home `/var/lib/hcw-coder-docker`, the daemon's data under `~/.local/share/docker`), `/etc/systemd/user/hcw-coder-docker.service`, socket `/run/hcw-coder-docker/docker.sock` (directory from `/etc/tmpfiles.d/hcw-coder-docker.conf`), `/etc/systemd/system/user@.service.d/delegate.conf` |
-| `coder` | Coder Community edition v2.37.3, PostgreSQL 18.6 and a Docker socket proxy (tecnativa/docker-socket-proxy 0.3.0, read-only, holding the `coder_sandbox` daemon's socket and never the host's; LAB-5) under Docker Compose from `../coder/docker-compose.yml`, all by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days; `hcw-coder-template-push`, which publishes the workspace template from the checkout ("Publishing the template", below). On since 2026-09-28, for members of the `HybridCloudWorks` GitHub organisation only | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `/usr/local/sbin/hcw-coder-template-push` (root:root, 0750), `coder-postgres-backup.timer`, `/var/backups/coder/` |
+| `coder` | Coder Community edition v2.37.3, PostgreSQL 18.6 and a Docker socket proxy (tecnativa/docker-socket-proxy 0.3.0, read-only, holding the `coder_sandbox` daemon's socket and never the host's; LAB-5) under Docker Compose from `../coder/docker-compose.yml`, all by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days; `hcw-coder-template-push`, which publishes the workspace template from the checkout ("Publishing the template", below); Coder automation, which once the owner seeds a rotation credential renews the site's status token daily and publishes the template on every run that changes it (`docs/runbooks/labs-host.md`, "Automatic renewal"). On since 2026-09-28, for members of the `HybridCloudWorks` GitHub organisation only | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600, `automation.json`, and `automation/rotation-token`, root 0600 in a 0700 directory), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `/usr/local/sbin/hcw-coder-template-push` and `/usr/local/sbin/hcw-coder-automation-seed` (root:root, 0750), `/usr/local/libexec/hcw-coder-automation`, `coder-postgres-backup.timer`, `hcw-coder-automation.timer`, `/var/backups/coder/`, `/var/lib/hcw-coder-automation/` |
 | `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent`, **in no docker group** (LAB-5): it reaches Docker through `hcw-labs-agent-docker-proxy`, HAProxy 3.4.6 by digest with the allowlist in `roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2` (the calls a job makes, and no create body that asks for privilege, a host namespace, a device, a mount or a bind beyond the job's own directory), on a Unix socket only the agent's group may open. Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt`, `/etc/hcw/labs-agent-docker-proxy/haproxy.cfg`, socket `/run/hcw-labs-agent-docker/docker.sock` (root:hcw-labs-agent, 0660) |
 | `lab_images` | Every image a lab job runs, pulled by digest before any job needs it: each value of `IMAGES` in `vps-agent/lib/capabilities.js` into the host daemon, and the Coder workspace image from `../coder/templates/hcw-lab/main.tf` into the `coder_sandbox` daemon while `coder_enabled` is true. Read from the checkouts, never copied, so a pin bump needs no edit here; digests no pin names are removed from the lab's own repositories and nothing else is touched (`roles/lab_images/README.md`) | Docker's image store; the plan is `roles/lab_images/files/lab-images.mjs`, run from the playbook's checkout |
 | `portainer` | Portainer Business Edition 2.45.1 (LTS) by digest, one container with the Docker socket (and `--userns=host`, which the socket needs under the remap), HTTPS on **127.0.0.1:9443 only**, plain HTTP off, no Caddy route; reached through an SSH tunnel. Nothing until `portainer_enabled` is true | Container `portainer`, volume `portainer-data` |
@@ -659,6 +659,13 @@ lock file or the template's README changes on `main`, after the
 `bootstrap.sh` run that checks the change out. `../coder/README.md`,
 "Updating", lists the changes that need it.
 
+**Or not at all, once the rotation credential is seeded** (owner approval
+2026-10-08; `docs/runbooks/labs-host.md`, "Automatic renewal"). Every
+`bootstrap.sh` run then publishes the template itself, with that credential
+on this same helper's stdin, whenever one of the files above or the default
+autostop changed since its last successful publish, and says so in the
+`coder` role's output. The line above stays the way to publish by hand.
+
 **What a workspace from it looks like.** It is what a lab's pane on the
 site creates, through the lab launcher: for example
 https://hybridcloudworks.com/education/labs/terraform-validate-walkthrough,
@@ -799,7 +806,7 @@ appears on a command line.
    it is never on the screen, and success prints nothing:
 
    ```powershell
-   $s = $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read --scope api_key:read; }'"
+   $s = $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read --scope api_key:read --scope user:read; }'"
    ```
 
    Check what `$s` holds, PowerShell:
@@ -852,11 +859,16 @@ appears on a command line.
 `EXPECTED_UNRESOLVED` in `scripts/check-unresolved-secrets.mjs` the same
 day, so an unresolved reference now fails the monitor like any other.
 
-The token expires a year after step 3, and nothing renews it: the one
-seeded on 2026-09-28 expires on 2027-09-28, and #763 is the reminder,
-due a month before. If it lapses first, the panes keep opening and the
-card stops listing templates and counting workspaces until it is renewed.
-To renew, run steps 1, 3, 4 and 5 again. Step 3 makes a
+The token expires a year after step 3: the one seeded on 2026-09-28
+expires on 2027-09-28, and #763 is the reminder, due a month before. If it
+lapses first, the panes keep opening and the card stops listing templates
+and counting workspaces until it is renewed. **Since 2026-10-08 the host
+renews it** once the owner has seeded the rotation credential
+(`docs/runbooks/labs-host.md`, "Automatic renewal"): a 90-day token with the
+three read scopes and `user:read`, handed to the site and stored in Key Vault without the
+clipboard, from the day the token the site holds turns 60 days old. Step 2
+above still makes `hcw-status`, which that needs. To renew by hand, run
+steps 1, 3, 4 and 5 again. Step 3 makes a
 new token each time (Coder names each one, which is why the line gives no
 `--name`), and the old one stops working at its own expiry.
 `coder tokens list --all` lists both, with `hcw-status` as their owner.
@@ -1299,6 +1311,28 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd)/lab-host:/work:ro" -w /work/ansibl
 A passing result has no `not ok` line and ends with
 `hcw-coder-template-push.test.sh: all` and the number of checks, then
 `checks passed`.
+
+The same job runs the test of Coder automation
+(`ansible/roles/coder/README.md`, "Tests"): `hcw-coder-automation` run
+against a fake Coder API, a fake `systemd-run`, a fake site CLI and a fake
+push helper, and the role's templates rendered with its defaults. It needs
+neither root nor Docker on a host with Python, Jinja2 and PyYAML; in a
+container, PowerShell, from the repository root:
+
+```powershell
+docker run --rm -v "${PWD}:/repo:ro" -w /repo python:3.14-slim bash -c "pip install -q jinja2 pyyaml && python3 lab-host/ansible/roles/coder/tests/hcw-coder-automation.test.py"
+```
+
+The same in bash (Git Bash or Linux), from the repository root:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "$(pwd):/repo:ro" -w /repo python:3.14-slim bash -c "pip install -q jinja2 pyyaml && python3 lab-host/ansible/roles/coder/tests/hcw-coder-automation.test.py"
+```
+
+A passing result has no `not ok` line and ends with
+`hcw-coder-automation.test.py:` and the number of checks, then `passed, 0
+failed`. The whole repository is mounted, because one check reads the
+runbook in `docs/`; with `lab-host/` alone that line reads `skip -`.
 
 The same job runs the test of the daily held-package report
 (`ansible/roles/hardening/README.md`, "Tests"): the script and its units

@@ -279,6 +279,111 @@
     daemon_reload: true
   when: not coder_enabled | bool
 
+# Coder automation (README.md beside this role, "Coder automation"): the
+# site's status token renewed daily, and the template published by this role,
+# both with the rotation credential the owner seeds once. Installed enabled or
+# not, like the push helper; the timer runs only while Coder does. The paths
+# of the two helpers are written here, not variables, because the unit, the
+# seed wrapper and the owner's lines in docs/runbooks/labs-host.md name them.
+- name: Create the rotation credential's directory, root-only
+  ansible.builtin.file:
+    path: "{{ coder_automation_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Create the automation's state directory, root-only
+  ansible.builtin.file:
+    path: "{{ coder_automation_state_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Write the automation's configuration (paths and names, no secret)
+  ansible.builtin.template:
+    src: hcw-coder-automation.json.j2
+    dest: "{{ coder_automation_config_file }}"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Install hcw-coder-automation, which renews the status token, publishes the template and reports
+  ansible.builtin.copy:
+    src: hcw-coder-automation.py
+    dest: /usr/local/libexec/hcw-coder-automation
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install hcw-coder-automation-seed, the owner's one-time step
+  ansible.builtin.template:
+    src: hcw-coder-automation-seed.j2
+    dest: /usr/local/sbin/hcw-coder-automation-seed
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the automation's service and timer units
+  ansible.builtin.template:
+    src: "hcw-coder-automation.{{ item }}.j2"
+    dest: "/etc/systemd/system/hcw-coder-automation.{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - service
+    - timer
+  notify: Reload systemd for the coder automation units
+
+- name: Enable the daily automation timer
+  ansible.builtin.systemd_service:
+    name: hcw-coder-automation.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: coder_enabled | bool
+
+- name: Stop the automation timer while Coder is disabled
+  ansible.builtin.systemd_service:
+    name: hcw-coder-automation.timer
+    enabled: false
+    state: stopped
+    daemon_reload: true
+  when: not coder_enabled | bool
+
+# The template, published by this run when its files (or the default
+# autostop) differ from what the helper last published: it keeps a SHA-256
+# of exactly what hcw-coder-template-push copies, and publishes again only
+# when that changes or the last publish failed. It hands the push helper the
+# rotation credential on stdin, as the owner's line does with the owner's
+# token. Here, before lab_images removes the images the previous template
+# version names, so no workspace starts in between (docs/runbooks/labs-host.md,
+# "After a merge"). Exit 3 is "no working rotation credential yet": the run
+# goes on and the next task says how to seed one.
+- name: Publish the hcw-lab template with the rotation credential when it changed
+  ansible.builtin.command:
+    argv:
+      - /usr/local/libexec/hcw-coder-automation
+      - --config
+      - "{{ coder_automation_config_file }}"
+      - push-template
+  register: coder_automation_push
+  changed_when: "'hcw-coder-automation: published' in coder_automation_push.stdout"
+  failed_when: coder_automation_push.rc not in [0, 3]
+  when:
+    - coder_enabled | bool
+    - not ansible_check_mode
+
+- name: Say how to let bootstrap.sh publish the template
+  ansible.builtin.debug:
+    msg: "{{ coder_automation_push.stdout }}"
+  when:
+    - coder_enabled | bool
+    - not ansible_check_mode
+    - coder_automation_push.rc | default(0) == 3
+
 - name: Say why Coder is not running
   ansible.builtin.debug:
     msg: >-

@@ -1,0 +1,34 @@
+# {{ ansible_managed }}
+#
+# Coder automation, once a day from hcw-coder-automation.timer: renews the
+# site's Coder status token when it is due and hands it to the site through
+# the lab agent's CLI, deletes the old ones, renews the rotation credential
+# itself, and reports how it stands (roles/coder/README.md, "Coder
+# automation"). Nothing it logs holds a token.
+[Unit]
+Description=Renew the site's Coder status token and report to the site (hcw-coder-automation)
+Documentation=https://github.com/saulpatinojr/HCW-HybridCloudWorks/tree/main/lab-host/ansible/roles/coder
+After=docker.service network-online.target
+Wants=network-online.target
+# Until the owner has run hcw-coder-automation-seed there is nothing to renew
+# with, and the run is skipped rather than failed, so no alert fires every day
+# before then (docs/runbooks/labs-host.md, "Automatic renewal").
+ConditionPathExists={{ coder_automation_credential_file }}
+# A failed renewal or report is one syslog line and an Azure alert, not a
+# token quietly running out (LAB-2). The notifier is the hardening role's.
+OnFailure=hcw-unit-failed@%n.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/hcw-coder-automation --config {{ coder_automation_config_file }} run
+TimeoutStartSec=15min
+UMask=0077
+# Root, because the rotation credential is root-only and systemd-run, which
+# starts the agent's CLI as the agent's user, needs it. Everything is
+# read-only to it except the credential's directory (a renewed credential is
+# renamed into place there) and its own state.
+ProtectSystem=strict
+ReadWritePaths={{ coder_automation_dir }} {{ coder_automation_state_dir }}
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
