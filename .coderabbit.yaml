@@ -14,14 +14,15 @@
 #
 # Reviews arrive on their own on every push (since #1034, 2026-10-08), so
 # auto_review below is live; "@coderabbitai review" still asks for one by hand.
-# .claude/CLAUDE.md says how a session works them: every thread answered and
-# resolved, the summary's checklist worked by hand and recorded on the pull
-# request, its trigger checkboxes and Autopilot never ticked, three rounds at
-# most.
+# .claude/CLAUDE.md says how a session handles them, in two separate tasks:
+# each review finding is fixed or answered on its thread and the thread
+# resolved; and the summary comment's checklist is worked by hand and recorded
+# on the pull request, its trigger checkboxes and Autopilot never ticked.
+# Three rounds at most.
 #
-# The profile stays "chill" on purpose (owner decision 2026-10-09): every
-# comment is a thread that must be answered before a merge, and the tone below
-# asks for the findings that matter rather than more of them.
+# The profile stays "chill" on purpose (owner decision 2026-10-09): each
+# finding is a thread that must be fixed or answered before a merge, and the
+# tone below asks for the findings that matter rather than more of them.
 language: "en-US"
 tone_instructions: >-
   Put security, correctness and data integrity first. Skip style points that
