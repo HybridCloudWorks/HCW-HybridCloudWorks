@@ -78,16 +78,21 @@ def _image(src: str) -> str:
 
 
 def _rewrite(markdown: str) -> str:
+    """The page with every image and link pointed where it lives once on the site."""
+
     def sub(match: re.Match) -> str:
+        """One link, its target rewritten."""
         return f"[{match.group(1)}]({_target(match.group(2))})"
 
     def image(match: re.Match) -> str:
+        """One image, its source rewritten."""
         return f"![{match.group(1)}]({_image(match.group(2))})"
 
     return LINK.sub(sub, IMAGE.sub(image, markdown))
 
 
 def on_files(files: Files, config) -> Files:
+    """Add the root README, CHANGELOG and TODO as generated pages, links rewritten."""
     for source, target in SOURCES.items():
         content = (ROOT / source).read_text(encoding="utf-8")
         files.append(File.generated(config, target, content=_rewrite(content)))
