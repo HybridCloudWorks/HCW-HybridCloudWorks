@@ -64,7 +64,9 @@ This project has not cut a tagged release; entries are grouped under
   listed the same way, before the new one is written, so an interruption
   cannot leave it usable and forgotten; `hcw-coder-automation revoke`
   turns the automation off by deleting the credential in Coder before the
-  file, and comes before any revert of this code (CodeRabbit, #1035).
+  file, and comes before any revert of this code; a suspected leak is
+  contained on the account, by deleting `hcw-status`, which deletes every
+  API key it has, successors included (CodeRabbit, #1035).
 - **Coder automation, the site's half: the lab host can hand the site a
   renewed Coder status token through the lab agent, and the site stores it
   only after Coder vouches for it as a working, read-only key of the status

@@ -921,6 +921,47 @@ turns it all back on.
 revert removes the helper that knows how to revoke the credential, and the
 file it leaves behind would still be a valid unscoped token.
 
+**If the rotation credential may have leaked** (someone else may have read
+`/etc/hcw/coder/automation/rotation-token`, or a backup or copy of the host
+holding it went astray), contain it on the account, not the token. Its year
+is that one token's lifetime, not a bound on access: whoever holds it can
+mint more unscoped, year-long tokens of `hcw-status`, which are neither the
+stored credential nor status tokens, so neither `revoke` nor the daily
+clean-up would touch them. Deleting the user removes every API key it has
+at once, copies and successors alike: Coder v2.38's schema deletes a
+deleted user's `api_keys` in the `delete_deleted_user_resources` trigger.
+`hcw-status` owns no workspaces, which Coder requires before deleting a
+user, and its username can be created again at once (Coder's unique index
+on usernames skips deleted users) (review of #1035).
+
+1. Make the `hcw-setup` token and hold it in `$t`, as step 1 of "The status
+   token for the site" in `lab-host/README.md` shows. Then delete the user,
+   PowerShell:
+
+   ```powershell
+   $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder users delete hcw-status; }'"
+   ```
+
+   Success is `Successfully deleted hcw-status.` From here the Hybrid Lab
+   card stops listing templates and counting workspaces until step 3,
+   because the site's status token went with the user.
+2. Clear the host's copy, PowerShell:
+
+   ```powershell
+   ssh hcw-lab "sudo -n /usr/local/libexec/hcw-coder-automation revoke"
+   ```
+
+   Success starts `hcw-coder-automation: Coder no longer accepts the
+   rotation credential (HTTP 401), so there was nothing to delete in Coder;
+   removed it`.
+3. Make the user again with step 2 of "The status token for the site" (the
+   same `$t`), then seed (step 1 of this section) and run once (step 2). The
+   run finds that the token the site was given is no longer in Coder and
+   gives the site a new one at once: success is `the site stored the new
+   status token hcw-status-site-<today>` above the `checked:` line. Then
+   `Remove-Variable t`, and delete `hcw-setup` in the pane (step 5 of "The
+   status token for the site").
+
 ## Container-runtime privilege separation (LAB-5)
 
 Estate review 2026-10-06, finding LAB-5; ADR 0032, amendment of 2026-10-07.

@@ -245,7 +245,8 @@ it cannot manage users, change deployment settings or act as anyone else.
 The seed and every run refuse it if `hcw-status` holds Owner or is not a
 Template Admin, which reading every workspace and publishing need; the seed
 keeps a stored credential only while both still hold, never on its username
-alone. Its lifetime is a year, which Coder allows a
+alone. Its lifetime is a year (that one token's: whoever holds it can mint
+successors, so containment works on the account, below), which Coder allows a
 Template Admin: an Owner's tokens are capped by `--max-admin-token-lifetime`
 (168 hours by default), everyone else's by `--max-token-lifetime` (876,600
 hours), and the cap is the user's the token is for (`getMaxTokenLifetime` in
@@ -411,7 +412,15 @@ accepts). It stops with the credential still in place when either deletion
 is not confirmed, because the stored credential is the only thing that can
 delete the others, and a second run finishes the job. Removing the file
 alone would leave an unscoped token valid in Coder for up to a year, so
-`revoke` comes before any revert of this code (review of #1035).
+`revoke` comes before any revert of this code (review of #1035). A credential
+Coder no longer accepts (401: expired, or it or its user deleted) has nothing
+left in Coder to delete, so `revoke` removes the file and clears the list.
+
+A leak is contained on the account, not the token: deleting `hcw-status`
+deletes every API key it has, copies and successors alike (the
+`delete_deleted_user_resources` trigger in Coder v2.38's schema), then
+`revoke` clears the dead file and the user is made again and seeded. The
+runbook's "If the rotation credential may have leaked" has the lines.
 
 ### Coder's API
 
@@ -687,7 +696,7 @@ defaults. No root, no Docker, no network. It checks:
 - `revoke` changes nothing without a credential; stops, keeping the
   credential, when a listed one or the credential itself is not deleted;
   and otherwise deletes the listed ones, then the credential in Coder, then
-  the file;
+  the file; and removes the file of a credential Coder no longer accepts;
 - `push-template` skips with exit 3 and the seed line without a credential
   or with a refused one, publishes with the credential on the push helper's
   stdin and the configured checkout, records the version, publishes again

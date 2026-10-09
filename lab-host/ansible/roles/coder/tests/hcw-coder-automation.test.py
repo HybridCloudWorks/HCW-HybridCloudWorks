@@ -1051,6 +1051,16 @@ check("revoke deletes the credential in Coder, then its file, and clears its exp
       result.returncode == 0 and "revoked the rotation credential" in result.stdout and world.credential() is None
       and world.fake.key_of(credential) is None and "rotationTokenExpiresAt" not in world.state()
       and "discardedRotationIds" not in world.state(), result.stdout + result.stderr)
+world.seed()
+dead = world.credential()
+world.fake.keys.pop(dead.split("-")[0])
+planted = world.state()
+planted["discardedRotationIds"] = ["gone000000"]
+(world.state_dir / "state.json").write_text(json.dumps(planted), encoding="utf-8")
+result = world.helper("revoke")
+check("revoke of a credential Coder no longer accepts (its user deleted) removes the file and clears the list",
+      result.returncode == 0 and "no longer accepts the rotation credential (HTTP 401)" in result.stdout
+      and world.credential() is None and "discardedRotationIds" not in world.state(), result.stdout + result.stderr)
 leaks = world.leaks()
 check("no token leaks from a revoke", not leaks, ", ".join(leaks))
 world.close()

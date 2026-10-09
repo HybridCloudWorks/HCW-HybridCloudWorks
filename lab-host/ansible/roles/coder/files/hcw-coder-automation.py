@@ -1071,29 +1071,34 @@ def revoke(config, args):
         if token is None:
             say("there is no rotation credential to revoke; nothing was changed")
             return 0
-        # The listed credentials first: once the stored one is gone, nothing
-        # is left that could delete them.
-        try:
-            retry_discards(coder, token, state)
-        except Failure as error:
-            save_state(config, state)
-            raise Failure(f"{error}; the rotation credential is kept so that this can run again") from None
-        # 401: Coder no longer accepts it (deleted or expired), which is the
-        # end this aims at; anything else but deleted leaves the file in place.
-        status, _ = coder.call("DELETE", f"/api/v2/users/me/keys/{key_id(token)}", token)
-        if status not in (204, 404, 401):
-            save_state(config, state)
-            raise Failure(
-                f"Coder did not delete the rotation credential (HTTP {status}); it is still stored and "
-                "still valid, so run this again"
-            )
+        # 401: Coder no longer accepts it (it expired, or it or its user was
+        # deleted, as the runbook's leak containment does), so nothing is
+        # left in Coder for it to delete: only the file goes.
+        status, _ = coder.call("GET", "/api/v2/users/me", token)
+        refused = status == 401
+        if not refused:
+            # The listed credentials first: once the stored one is gone,
+            # nothing is left that could delete them.
+            try:
+                retry_discards(coder, token, state)
+            except Failure as error:
+                save_state(config, state)
+                raise Failure(f"{error}; the rotation credential is kept so that this can run again") from None
+            status, _ = coder.call("DELETE", f"/api/v2/users/me/keys/{key_id(token)}", token)
+            if status not in (204, 404, 401):
+                save_state(config, state)
+                raise Failure(
+                    f"Coder did not delete the rotation credential (HTTP {status}); it is still stored and "
+                    "still valid, so run this again"
+                )
         os.unlink(path)
+        state[DISCARDED] = None
         state["rotationTokenExpiresAt"] = None
         save_state(config, state)
-    say(
-        "revoked the rotation credential in Coder and removed it; the daily run is now skipped and bootstrap.sh "
-        "no longer publishes. hcw-coder-automation-seed turns it back on"
-    )
+    done = ("Coder no longer accepts the rotation credential (HTTP 401), so there was nothing to delete in Coder; "
+            "removed it" if refused else "revoked the rotation credential in Coder and removed it")
+    say(f"{done}; the daily run is now skipped and bootstrap.sh no longer publishes. "
+        "hcw-coder-automation-seed turns it back on")
     return 0
 
 
