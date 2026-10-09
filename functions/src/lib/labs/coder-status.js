@@ -187,8 +187,12 @@ export function tokenKeyId(token) {
  * but 2xx, a redirect included: Coder's API does not redirect, and fetch
  * following one to another origin would carry `Coder-Session-Token` along,
  * because it drops only Authorization, Cookie and Proxy-Authorization.
+ * `exactly200` narrows that to 200 alone, for the reads that decide whether
+ * a token may be stored (verifyStatusToken): every one of them is documented
+ * as 200, and a 201 or a 204 there is not the answer the check was written
+ * against.
  */
-async function coderGet(fetchImpl, config, path, token) {
+async function coderGet(fetchImpl, config, path, token, { exactly200 = false } = {}) {
   const headers = { Accept: 'application/json' };
   if (token) headers['Coder-Session-Token'] = token;
   const response = await fetchWithTimeout(fetchImpl, `${config.base}${path}`, {
@@ -197,12 +201,213 @@ async function coderGet(fetchImpl, config, path, token) {
     redirect: 'error',
     timeoutMs: CODER_TIMEOUT_MS,
   });
-  if (!response.ok) {
+  if (!response.ok || (exactly200 && response.status !== 200)) {
     throw Object.assign(new Error(`Coder answered ${response.status} for ${path}`), {
       status: response.status,
     });
   }
   return response.json();
+}
+
+/**
+ * The exact shape of a Coder API key: a 10-character key id, a dash, and a
+ * 22-character secret, both drawn from letters and digits. From Coder
+ * v2.38.0's source, read 2026-10-08: `apikey.Generate` makes the id with
+ * `cryptorand.String(10)` and the secret with `GenerateSecret(22)`, joined
+ * by `fmt.Sprintf("%s-%s", keyID, keySecret)`; `cryptorand.String` draws
+ * from `Default`, which is `Numeric + Alpha`. Stricter than `tokenKeyId`,
+ * which only has to find the id in something already stored; this one
+ * decides what may be stored at all (lib/labs/coder-automation.js).
+ */
+export const CODER_API_KEY_PATTERN = /^[A-Za-z0-9]{10}-[A-Za-z0-9]{22}$/;
+
+/** The Coder user a status token must belong to, when CODER_STATUS_USER says nothing (lab-host/README.md). */
+export const DEFAULT_CODER_STATUS_USER = 'hcw-status';
+
+/**
+ * The scopes a status token must carry, every one of them: the card's three
+ * reads, and its own record for the expiry (TOKEN_SCOPE_FOR_EXPIRY).
+ */
+export const STATUS_TOKEN_SCOPES = Object.freeze(['template:read', 'workspace:read', 'api_key:read']);
+
+/**
+ * The one more it may carry: `user:read`. Coder v2.38 answers both identity
+ * reads below (`/users/me` and `/users/me/keys/{id}`) through
+ * `httpmw.ExtractUserParam`, which loads the caller's own user through the
+ * authorizing store, and a low-level scope grants exactly its own
+ * resource:action (`rbac.expandLowLevel`). So without `user:read` both reads
+ * answer 404 however right the token is (source read 2026-10-08; not yet
+ * measured against the lab's Coder). It reads users, and nothing else.
+ */
+export const STATUS_TOKEN_EXTRA_SCOPES = Object.freeze(['user:read']);
+
+/**
+ * Scope names that mean "whatever the user can do": `coder:all` and
+ * `coder:application_connect` as Coder v2.38 stores them, and `all` and
+ * `application_connect`, which its deprecated `scope` field still reports
+ * for them (`convertAPIKey`).
+ */
+export const UNSCOPED_SCOPES = Object.freeze([
+  'all',
+  'coder:all',
+  'application_connect',
+  'coder:application_connect',
+]);
+
+/** CODER_STATUS_USER, or the default. A name, not a secret. */
+export function readStatusUser(env = process.env) {
+  return readSetting(env, 'CODER_STATUS_USER') || DEFAULT_CODER_STATUS_USER;
+}
+
+const RUNNING_READ = 'the running-workspaces read';
+
+/**
+ * Whether a candidate status token may become CODER-STATUS-TOKEN, before
+ * anything stores it (Coder automation, 2026-10-08; review of #1030). Three
+ * checks, each a read made with the candidate's header through the same
+ * guarded GET as every other call here (https only, no redirect, five
+ * seconds), and each required to answer exactly 200:
+ *
+ *   works   `GET /api/v2/workspaces?q=status:running` answers an integer
+ *           `count`. The token is live and serves the card.
+ *   user    `GET /api/v2/users/me` names `expectedUser` (CODER_STATUS_USER,
+ *           default hcw-status). A working key of the owner's, or of anyone
+ *           else, is not the status token, however well it reads.
+ *   scopes  `GET /api/v2/users/me/keys/{id}` lists `scopes` that hold every
+ *           one of STATUS_TOKEN_SCOPES and nothing beyond them and
+ *           STATUS_TOKEN_EXTRA_SCOPES. An unscoped key (`coder:all`, or the
+ *           deprecated `scope` saying `all`) of a Template Admin can change
+ *           and delete templates (the table in lab-host/README.md), and
+ *           storing one would quietly undo the least privilege the status
+ *           token exists for (secret-catalog.js: "Read-only in Coder").
+ *
+ * `{ ok: true, running }`, or `{ ok: false, check, reason }` with `check`
+ * one of `works`, `user`, `scopes` and `reason` a sentence naming the check
+ * and a status or a cause: never the token, never Coder's address, and
+ * never the name of a user the token turned out to belong to. Never throws.
+ */
+export async function verifyStatusToken({
+  fetchImpl,
+  config,
+  token,
+  expectedUser = DEFAULT_CODER_STATUS_USER,
+}) {
+  const running = new URLSearchParams({ q: 'status:running' });
+  const works = await verifiedRead(fetchImpl, config, `/api/v2/workspaces?${running}`, token);
+  if (works.error) return failed('works', runningReadFailure(works.error));
+  if (!Number.isInteger(works.body?.count)) {
+    return failed('works', `Coder answered ${RUNNING_READ} without a count`);
+  }
+
+  const me = await verifiedRead(fetchImpl, config, '/api/v2/users/me', token);
+  if (me.error) {
+    return failed('user', `User check: ${identityReadFailure(me.error, 'its own user', 'user:read')}`);
+  }
+  if (me.body?.username !== expectedUser) {
+    return failed('user', `User check: the token does not belong to ${expectedUser}`);
+  }
+
+  const keyPath = `/api/v2/users/me/keys/${encodeURIComponent(tokenKeyId(token))}`;
+  const key = await verifiedRead(fetchImpl, config, keyPath, token);
+  if (key.error) {
+    return failed(
+      'scopes',
+      `Scope check: ${identityReadFailure(key.error, 'its own key record', 'api_key:read and user:read')}`
+    );
+  }
+  const problem = statusScopeProblem(key.body);
+  if (problem) return failed('scopes', `Scope check: ${problem}`);
+
+  // The key's own expiry, read from the record the scope check already
+  // fetched: the card shows the stored token's date from this, never the
+  // previous token's (CodeRabbit review of #1030). Null when Coder gave none.
+  // An ISO date-time only (Date.parse reads "42" as the year 2042), and
+  // Coder writes nanoseconds, so Date.parse is given milliseconds at most.
+  const raw = key.body?.expires_at;
+  const expires =
+    typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(raw)
+      ? Date.parse(raw.replace(/(\.\d{3})\d+/, '$1'))
+      : Number.NaN;
+  return {
+    ok: true,
+    running: works.body.count,
+    expiresAt: Number.isFinite(expires) ? new Date(expires).toISOString() : null,
+  };
+}
+
+const failed = (check, reason) => ({ ok: false, check, reason });
+
+/** One exactly-200 read: `{ body }` or `{ error }`. */
+async function verifiedRead(fetchImpl, config, path, token) {
+  try {
+    return { body: await coderGet(fetchImpl, config, path, token, { exactly200: true }) };
+  } catch (error) {
+    return { error };
+  }
+}
+
+/** Why the running-workspaces read failed, in words that carry no token and no URL. */
+function runningReadFailure(error) {
+  if (error?.status === 401 || error?.status === 403) {
+    return `Coder refused the token (HTTP ${error.status})`;
+  }
+  if (Number.isInteger(error?.status)) return `Coder answered HTTP ${error.status} to ${RUNNING_READ}`;
+  return transportFailure(error);
+}
+
+/**
+ * Why an identity read failed. 403 and 404 are how Coder refuses a token the
+ * scope that read needs (it counts an authorization failure as not found;
+ * see SCOPE_REFUSAL_STATUSES), so they name the scope.
+ */
+function identityReadFailure(error, what, scope) {
+  if (error?.status === 401) return 'Coder refused the token (HTTP 401)';
+  if (SCOPE_REFUSAL_STATUSES.includes(error?.status)) {
+    return `Coder would not show the token ${what} (HTTP ${error.status}), which it refuses a token without ${scope}`;
+  }
+  if (Number.isInteger(error?.status)) {
+    return `Coder answered HTTP ${error.status} when the token asked for ${what}`;
+  }
+  return transportFailure(error);
+}
+
+function transportFailure(error) {
+  if (error?.code === 'FETCH_TIMEOUT') return `Coder did not answer within ${CODER_TIMEOUT_MS / 1000} s`;
+  if (error instanceof SyntaxError) return 'Coder answered with something that is not JSON';
+  return 'Coder could not be reached';
+}
+
+/** A scope name as Coder spells one, fit to repeat in a sentence; anything else is not repeated. */
+const SCOPE_NAME = /^[a-z_]{1,40}(:[a-z_*]{1,40})?$/;
+
+/**
+ * What is wrong with a key record's scopes for a status token, or null.
+ * Reads `scopes`, Coder v2.38's list, and refuses outright when it or the
+ * deprecated `scope` names an unscoped key; a record with no list at all is
+ * refused too, because what such a token can do cannot be checked.
+ */
+export function statusScopeProblem(record) {
+  const scopes = Array.isArray(record?.scopes)
+    ? record.scopes.filter((scope) => typeof scope === 'string')
+    : null;
+  const legacy = typeof record?.scope === 'string' ? record.scope : '';
+  if (UNSCOPED_SCOPES.includes(legacy) || scopes?.some((scope) => UNSCOPED_SCOPES.includes(scope))) {
+    return 'the token is unscoped, so it can do whatever its user can; a status token must be scoped to reading';
+  }
+  if (!scopes || scopes.length === 0) {
+    return "Coder's record of the token lists no scopes, so what it can do could not be checked";
+  }
+  const permitted = new Set([...STATUS_TOKEN_SCOPES, ...STATUS_TOKEN_EXTRA_SCOPES]);
+  const beyond = [...new Set(scopes.filter((scope) => !permitted.has(scope)))];
+  if (beyond.length) {
+    const named = beyond.filter((scope) => SCOPE_NAME.test(scope));
+    const unnamed = beyond.length - named.length;
+    const list = [...named, ...(unnamed ? [`${unnamed} unrecognised`] : [])].join(', ');
+    return `the token carries scopes beyond reading: ${list}`;
+  }
+  const missing = STATUS_TOKEN_SCOPES.filter((scope) => !scopes.includes(scope));
+  if (missing.length) return `the token lacks ${missing.join(', ')}`;
+  return null;
 }
 
 /** Whether Coder answers: the unauthenticated build info, in its documented shape. Throws otherwise. */

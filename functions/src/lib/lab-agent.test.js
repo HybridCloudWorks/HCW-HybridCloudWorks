@@ -42,7 +42,15 @@ const make = (guard, store) => createLabAgentHandlers({ guard, store, now: () =>
 const parse = (res) => JSON.parse(res.body);
 
 describe('every handler is guarded', () => {
-  it.each(['claimLabJob', 'heartbeatAgent', 'completeLabJob'])(
+  // The fourth since 2026-10-08; its own containment tests, the vault and
+  // Coder included, are in labs/coder-automation.test.js.
+  const HANDLERS = ['claimLabJob', 'heartbeatAgent', 'completeLabJob', 'reportCoderAutomation'];
+
+  it('is exactly these four', () => {
+    expect(Object.keys(make(allowGuard(), emptyStore())).sort()).toEqual([...HANDLERS].sort());
+  });
+
+  it.each(HANDLERS)(
     '%s makes zero store calls when the guard denies',
     async (name) => {
       const store = emptyStore();
@@ -57,7 +65,7 @@ describe('every handler is guarded', () => {
     }
   );
 
-  it.each(['claimLabJob', 'heartbeatAgent', 'completeLabJob'])(
+  it.each(HANDLERS)(
     '%s rejects a malformed body before authenticating',
     async (name) => {
       const guard = allowGuard();

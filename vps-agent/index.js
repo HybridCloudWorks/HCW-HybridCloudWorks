@@ -36,6 +36,7 @@ import { readFileSync } from 'node:fs';
 import { CAPABILITIES } from './lib/capabilities.js';
 import { runInDocker } from './lib/docker-runner.js';
 import { createApiClient } from './lib/api.js';
+import { missingConfig, readApiConfig } from './lib/config.js';
 import { createLogger } from './lib/log.js';
 
 const AGENT_VERSION = JSON.parse(
@@ -45,12 +46,12 @@ const AGENT_VERSION = JSON.parse(
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const config = {
-  apiBase: (process.env.LABS_AGENT_API_BASE || '').replace(/\/+$/, ''),
-  tenantId: process.env.LABS_AGENT_TENANT_ID,
-  clientId: process.env.LABS_AGENT_CLIENT_ID,
-  certificatePath: process.env.LABS_AGENT_CERT_PATH,
-  scope: process.env.LABS_AGENT_API_SCOPE,
-  agentId: process.env.LABS_AGENT_ID || os.hostname(),
+  // The API client's settings, from lib/config.js, which
+  // bin/report-coder-automation.js reads too, so the two cannot disagree
+  // about which API or which agent this host is. The limits below stay here:
+  // lab-image/sandbox-check.mjs and scripts/lab-job-limits.test.mjs read
+  // their defaults from this file's text.
+  ...readApiConfig(),
   heartbeatIntervalMs: 30 * 1000,
   pollIntervalMs: Number(process.env.LABS_AGENT_POLL_MS || 15000),
   maxConcurrentJobs: Number(process.env.LABS_AGENT_MAX_CONCURRENT || 1),
@@ -78,16 +79,10 @@ const config = {
 // what they may say is content-free, so a failure goes through log.fault.
 const log = createLogger();
 
-const missing = [
-  ['LABS_AGENT_API_BASE', config.apiBase],
-  ['LABS_AGENT_TENANT_ID', config.tenantId],
-  ['LABS_AGENT_CLIENT_ID', config.clientId],
-  ['LABS_AGENT_CERT_PATH', config.certificatePath],
-  ['LABS_AGENT_API_SCOPE', config.scope],
-].filter(([, v]) => !v);
+const missing = missingConfig(config);
 
 if (missing.length > 0) {
-  log.error(`Missing required configuration: ${missing.map(([k]) => k).join(', ')}`);
+  log.error(`Missing required configuration: ${missing.join(', ')}`);
   process.exit(1);
 }
 

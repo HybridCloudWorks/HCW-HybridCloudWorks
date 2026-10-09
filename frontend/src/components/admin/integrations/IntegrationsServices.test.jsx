@@ -388,6 +388,136 @@ describe('what a card says about itself (ADR 0033)', () => {
   });
 });
 
+describe('the Hybrid Lab card: everything Coder in one box (2026-10-08)', () => {
+  const labsPayload = {
+    success: true,
+    sections: [{ id: 'labs', title: 'Hybrid Lab', blurb: 'b' }],
+    secrets: [
+      item({ secret: 'CODER-URL', section: 'labs', label: 'Coder address' }),
+      item({ secret: 'CODER-STATUS-TOKEN', section: 'labs', label: 'Coder status token' }),
+      item({ secret: 'TURNSTILE-SECRET-KEY', section: 'labs', label: 'Turnstile', state: 'never' }),
+    ],
+  };
+  const inDays = (days) => new Date(Date.now() + days * 86_400_000).toISOString();
+  const report = (over = {}) => ({
+    agentId: 'vps-hostinger-01',
+    reportedAt: inDays(-0.01),
+    checkedAt: inDays(-0.01),
+    statusTokenRotatedAt: '2026-10-08T04:30:00.000Z',
+    statusTokenExpiresAt: inDays(365),
+    rotationTokenExpiresAt: '2099-04-01T00:00:00.000Z',
+    templatePushedAt: '2026-10-07T21:00:00.000Z',
+    templateVersion: 'brave_turing4',
+    lastError: null,
+    ...over,
+  });
+  /** The key status for the card, and `automation` for the report read. */
+  const answering = (automation) => async (route) => {
+    if (route !== 'cms/labs/coder-automation') return labsPayload;
+    if (automation instanceof Error) throw automation;
+    return automation;
+  };
+  const coderBox = () => waitFor(() => screen.getByRole('region', { name: 'Coder' }));
+  const automationBox = async () => {
+    const box = await waitFor(() => screen.getByTestId('coder-automation'));
+    await waitFor(() => expect(box.textContent).not.toMatch(/Reading what the lab host/));
+    return box;
+  };
+
+  it('puts both Coder keys and the automatic renewal under Coder, and Turnstile in a box of its own', async () => {
+    getJSON.mockImplementation(answering({ report: report(), warningDays: 30 }));
+    render(<Harness group="labs" />);
+
+    const coder = await coderBox();
+    await waitFor(() => expect(within(coder).getByText('CODER-STATUS-TOKEN')).toBeTruthy());
+    expect(within(coder).getByText('CODER-URL')).toBeTruthy();
+    expect(within(coder).queryByText('TURNSTILE-SECRET-KEY')).toBeNull();
+    expect(within(coder).getByTestId('coder-automation')).toBeTruthy();
+
+    const turnstile = screen.getByRole('region', { name: 'Turnstile' });
+    expect(within(turnstile).getByText('TURNSTILE-SECRET-KEY')).toBeTruthy();
+    expect(within(turnstile).queryByTestId('coder-automation')).toBeNull();
+    expect(getJSON).toHaveBeenCalledWith('cms/labs/coder-automation');
+  });
+
+  it('lists the renewal, the rotation credential, the template and the last check, healthy', async () => {
+    getJSON.mockImplementation(answering({ report: report(), warningDays: 30 }));
+    render(<Harness group="labs" />);
+    const box = await automationBox();
+
+    const rows = [...box.querySelectorAll('li')].map((li) => li.textContent);
+    expect(rows[0]).toMatch(
+      /^Status token renewed on 2026-10-08 \(by the lab host\); it expires on \d{4}-\d{2}-\d{2}\.$/
+    );
+    expect(rows[1]).toBe('Rotation credential expires on 2099-04-01.');
+    expect(rows[2]).toBe('Template last published 2026-10-07 (brave_turing4).');
+    expect(rows[3]).toMatch(/^Last automation check \d{4}-\d{2}-\d{2}, reported \d+ min ago\.$/);
+    expect(box.querySelector('[data-status]').getAttribute('data-status')).toBe('healthy');
+    expect(within(box).queryByTestId('coder-automation-problem')).toBeNull();
+  });
+
+  it('says "Automatic renewal not set up yet" before any report, with no badge and no error styling', async () => {
+    getJSON.mockImplementation(answering({ report: null, warningDays: 30 }));
+    render(<Harness group="labs" />);
+    const box = await automationBox();
+
+    expect(within(box).getByText('Automatic renewal not set up yet')).toBeTruthy();
+    expect(within(box).getByText('Automatic renewal not set up yet').className).toMatch(
+      /text-muted-foreground/
+    );
+    expect(box.querySelector('[data-status]')).toBeNull();
+    expect(box.querySelector('li')).toBeNull();
+    expect(box.innerHTML).not.toMatch(/destructive|amber/);
+  });
+
+  it('shows lastError amber while the token is far from expiry', async () => {
+    getJSON.mockImplementation(
+      answering({ report: report({ lastError: 'template push failed' }), warningDays: 30 })
+    );
+    render(<Harness group="labs" />);
+    const box = await automationBox();
+
+    const problem = within(box).getByTestId('coder-automation-problem');
+    expect(problem.textContent).toBe('Last check failed: template push failed');
+    expect(problem.getAttribute('data-status')).toBe('degraded');
+    expect(problem.className).toMatch(/amber/);
+    expect(box.querySelector('[data-status]').getAttribute('data-status')).toBe('degraded');
+  });
+
+  it('shows lastError red once the token is inside the renewal window', async () => {
+    getJSON.mockImplementation(
+      answering({
+        report: report({
+          lastError: 'Coder refused the token (HTTP 401); the token was not stored',
+          statusTokenExpiresAt: inDays(10),
+        }),
+        warningDays: 30,
+      })
+    );
+    render(<Harness group="labs" />);
+    const box = await automationBox();
+
+    const problem = within(box).getByTestId('coder-automation-problem');
+    expect(problem.getAttribute('data-status')).toBe('critical');
+    expect(problem.className).toMatch(/text-destructive/);
+    expect(box.querySelector('[data-status]').getAttribute('data-status')).toBe('critical');
+  });
+
+  it('keeps the keys, and the way to paste one by hand, when the report cannot be read', async () => {
+    getJSON.mockImplementation(answering(new Error('HTTP 403')));
+    render(<Harness group="labs" />);
+    const box = await automationBox();
+
+    expect(box.textContent).toMatch(/could not be read: HTTP 403/);
+    expect(box.querySelector('[data-status]')).toBeNull();
+    const coder = await coderBox();
+    await waitFor(() => expect(within(coder).getByText('CODER-STATUS-TOKEN')).toBeTruthy());
+    const card = cardFor('Hybrid Lab (Coder and Turnstile)');
+    fireEvent.click(within(card).getByRole('button', { name: /Rotate or replace the key/ }));
+    expect(onOpenKeys).toHaveBeenCalled();
+  });
+});
+
 describe('loading on its own', () => {
   it('keeps the cards and their tests when the key status cannot be read', async () => {
     getJSON.mockRejectedValue(new Error('HTTP 503'));

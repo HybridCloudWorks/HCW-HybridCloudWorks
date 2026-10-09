@@ -1,6 +1,7 @@
 /**
- * lab-agent-http.js — the three routes the Labs VPS agent may call.
- * Registration only; semantics in lib/lab-agent.js, authorization in
+ * lab-agent-http.js — the four routes the Labs VPS agent may call.
+ * Registration only; semantics in lib/lab-agent.js (and, for the Coder
+ * automation report, lib/labs/coder-automation.js), authorization in
  * lib/auth/require-agent.js.
  *
  * These are guarded, but not by `requireRole`: the agent is a machine identity
@@ -11,17 +12,28 @@
  */
 import { httpRoute } from '../lib/auth/http-route.js';
 import { getDefaultAgentGuard } from '../lib/auth/default-agent-guard.js';
-import { queryDocs, readDoc, patchDoc, replaceDocIfMatch, upsertDoc } from '../lib/cosmos-client.js';
+import {
+  createDoc,
+  queryDocs,
+  readDoc,
+  patchDoc,
+  replaceDocIfMatch,
+  upsertDoc,
+} from '../lib/cosmos-client.js';
 import { createLabAgentHandlers } from '../lib/lab-agent.js';
 import { createNotifier } from '../lib/notify.js';
 
 // The notifier is how the owner hears that an agent announced its own
 // shutdown (lib/lab-agent.js, heartbeat); it reads and writes the cooldown
 // document in `system`, hence upsertDoc beside the agent store's verbs.
+// createDoc and upsertDoc are also the Coder automation report's: the first
+// write of the report document and of the secret state document (both then
+// replaceDocIfMatch, under their ETags), and the audit row
+// (lib/labs/coder-automation.js).
 const handlers = (context) =>
   createLabAgentHandlers({
     guard: getDefaultAgentGuard(),
-    store: { queryDocs, readDoc, patchDoc, replaceDocIfMatch },
+    store: { queryDocs, readDoc, patchDoc, replaceDocIfMatch, createDoc, upsertDoc },
     notifier: createNotifier({ store: { readDoc, upsertDoc, patchDoc }, log: context }),
   });
 
@@ -44,4 +56,15 @@ httpRoute('completeLabJob', {
   authLevel: 'anonymous',
   route: 'agent/completeLabJob',
   handler: (request, context) => handlers(context).completeLabJob(request, context),
+});
+
+// The lab host's Coder upkeep (2026-10-08): a report, and a renewed status
+// token handed over for the site to verify and store. Named after its
+// handler, as claimLabJob and completeLabJob are; the lab host calls it
+// through vps-agent/bin/report-coder-automation.js.
+httpRoute('reportCoderAutomation', {
+  methods: ['POST'],
+  authLevel: 'anonymous',
+  route: 'agent/reportCoderAutomation',
+  handler: (request, context) => handlers(context).reportCoderAutomation(request, context),
 });

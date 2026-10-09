@@ -861,6 +861,31 @@ new token each time (Coder names each one, which is why the line gives no
 `--name`), and the old one stops working at its own expiry.
 `coder tokens list --all` lists both, with `hcw-status` as their owner.
 
+**The lab host can renew it instead (2026-10-08).** The host mints the new
+token itself and hands it to the site through the lab agent's own
+certificate, never Key Vault, which still refuses the host:
+`vps-agent/bin/report-coder-automation.js` posts it to `POST
+/api/agent/reportCoderAutomation`, and the site stores it as
+`CODER-STATUS-TOKEN` only after three reads with it answer exactly 200: the
+running-workspaces read above gives a count, `GET /api/v2/users/me` names
+`hcw-status` (or `CODER_STATUS_USER`), and the token's own key record lists
+`template:read`, `workspace:read` and `api_key:read`, with `user:read` the
+one more it may carry. An unscoped key, a key with any other scope, or
+another user's key is refused (`functions/src/lib/labs/coder-status.js`,
+`verifyStatusToken`). Coder v2.38 shows a token its own user and key record
+only with `user:read` (both reads load the caller's user through its
+authorizing store), so the host should mint with `--scope user:read` added
+to the three on step 3's line; that is from Coder's source and not yet
+measured on the lab's Coder. Each run also
+says how it went, and the Hybrid Lab card at
+https://hybridcloudworks.com/admin/integrations?tab=services&group=labs
+shows that under **Coder**: when the token was last renewed, when the
+host's rotation credential expires, when the template was last published,
+the last check, and its last error in amber or red. Until the host is set
+up the card reads `Automatic renewal not set up yet`, and the steps above
+stay the way to renew by hand either way. Setting the host up is
+"Automatic renewal".
+
 ### Kill switches
 
 Two, in ADR 0032's words, and emptying the allowlist is neither.

@@ -5,8 +5,12 @@ import {
   CODER_STATUS_CACHE_ID,
   CODER_STATUS_CACHE_SECONDS,
   CODER_TIMEOUT_MS,
+  CODER_API_KEY_PATTERN,
   DEFAULT_CODER_MAX_WORKSPACES,
+  DEFAULT_CODER_STATUS_USER,
   MAX_TEMPLATES,
+  STATUS_TOKEN_EXTRA_SCOPES,
+  STATUS_TOKEN_SCOPES,
   SCOPE_REFUSAL_STATUSES,
   TOKEN_RENEW_WARNING_DAYS,
   TOKEN_SCOPE_FOR_EXPIRY,
@@ -14,8 +18,11 @@ import {
   readCoderConfig,
   readMaxWorkspaces,
   readSetting,
+  readStatusUser,
   readTokenExpiry,
+  statusScopeProblem,
   tokenKeyId,
+  verifyStatusToken,
 } from './coder-status.js';
 
 const NOW = Date.parse('2026-09-25T12:00:00Z');
@@ -497,5 +504,241 @@ describe('the status token\'s own expiry (#763)', () => {
     // Without a guard the read refuses to run rather than answer anonymously.
     const unguarded = createCoderStatusHandlers({ store: makeStore(), fetchImpl, env: KEY_ENV, now: () => NOW });
     expect((await unguarded.getCoderToken(request(), context)).status).toBe(500);
+  });
+});
+
+
+describe('verifying a renewed status token before it is stored (Coder automation)', () => {
+  // Shaped like a Coder key and plainly not one. Every key-shaped value here,
+  // near misses included, is built at run time: a literal in Coder's API key
+  // shape reads as a leaked token to secret scanners (GitGuardian flagged
+  // these on #1030).
+  const ID = 'FAKEKEYID0';
+  const SECRET = 'FAKESECRETFAKESECRET00';
+  const CANDIDATE = [ID, SECRET].join('-');
+  const config = { base: 'https://coder.lab.example', token: 'the-stored-one', max: 5 };
+  const RUNNING = '/api/v2/workspaces?q=status%3Arunning';
+  const ME = '/api/v2/users/me';
+  const KEY = `/api/v2/users/me/keys/${ID}`;
+  const READ_SCOPES = [...STATUS_TOKEN_SCOPES, ...STATUS_TOKEN_EXTRA_SCOPES];
+
+  /** A Coder whose three answers are right unless a test says otherwise. */
+  const coder = (over = {}) =>
+    coderFetch({
+      [RUNNING]: { count: 3, workspaces: [] },
+      [ME]: { id: 'u1', username: DEFAULT_CODER_STATUS_USER },
+      [KEY]: { id: ID, scopes: READ_SCOPES, scope: '', token_name: 'renewed' },
+      ...over,
+    });
+  const status = (code) => () => ({ ok: code >= 200 && code < 300, status: code, json: async () => ({ count: 1 }) });
+  const verify = (fetchImpl, extra = {}) => verifyStatusToken({ fetchImpl, config, token: CANDIDATE, ...extra });
+
+  it('knows the shape of a Coder API key: ten letters or digits, a dash, twenty-two more', () => {
+    expect(CODER_API_KEY_PATTERN.test(CANDIDATE)).toBe(true);
+    for (const wrong of [
+      [ID.slice(1), SECRET].join('-'), // nine-character id
+      [`${ID}0`, SECRET.slice(1)].join('-'), // eleven
+      [ID, SECRET.slice(1)].join('-'), // twenty-one-character secret
+      [ID, SECRET].join('_'),
+      [ID, SECRET.slice(0, 10), SECRET.slice(11)].join('-'),
+      ` ${CANDIDATE}`,
+      `${CANDIDATE}\n`,
+      'read-only-token',
+    ]) {
+      expect(CODER_API_KEY_PATTERN.test(wrong), wrong).toBe(false);
+    }
+  });
+
+  it('passes a working, read-only key of the status user, asking each read with the candidate', async () => {
+    const fetchImpl = coder();
+    await expect(verify(fetchImpl)).resolves.toEqual({ ok: true, running: 3, expiresAt: null });
+    expect(fetchImpl.calls.map(({ url }) => url)).toEqual([
+      `https://coder.lab.example${RUNNING}`,
+      `https://coder.lab.example${ME}`,
+      `https://coder.lab.example${KEY}`,
+    ]);
+    for (const { options } of fetchImpl.calls) {
+      // The candidate, not the stored token; and no redirect may carry it on.
+      expect(options.headers['Coder-Session-Token']).toBe(CANDIDATE);
+      expect(options.redirect).toBe('error');
+      expect(options.signal).toBeDefined();
+    }
+    // Without user:read too, as Coder may issue it: the three are required, user:read is permitted.
+    await expect(verify(coder({ [KEY]: { scopes: [...STATUS_TOKEN_SCOPES] } }))).resolves.toMatchObject({ ok: true });
+  });
+
+  it('reports the key’s own expiry from Coder’s nanosecond expires_at, and null for anything unreadable', async () => {
+    const withExpiry = (expires_at) => coder({ [KEY]: { scopes: [...STATUS_TOKEN_SCOPES], expires_at } });
+    expect((await verify(withExpiry('2027-11-30T00:00:00.123456789Z'))).expiresAt).toBe('2027-11-30T00:00:00.123Z');
+    expect((await verify(withExpiry('2027-11-30T00:00:00Z'))).expiresAt).toBe('2027-11-30T00:00:00.000Z');
+    for (const bad of ['never', '', null, 42]) {
+      expect((await verify(withExpiry(bad))).expiresAt, String(bad)).toBeNull();
+    }
+  });
+
+  it('accepts zero, and nothing that is not an integer count', async () => {
+    expect(await verify(coder({ [RUNNING]: { count: 0 } }))).toEqual({ ok: true, running: 0, expiresAt: null });
+    for (const answer of [{}, { count: '2' }, { count: 1.5 }, { workspaces: [{ id: 'w' }] }, null]) {
+      const verdict = await verify(coder({ [RUNNING]: () => okJson(answer) }));
+      expect(verdict, JSON.stringify(answer)).toEqual({
+        ok: false,
+        check: 'works',
+        reason: 'Coder answered the running-workspaces read without a count',
+      });
+    }
+  });
+
+  it('requires exactly 200 from every read: a 201 with a count is not the documented answer', async () => {
+    expect(await verify(coder({ [RUNNING]: status(201) }))).toEqual({
+      ok: false,
+      check: 'works',
+      reason: 'Coder answered HTTP 201 to the running-workspaces read',
+    });
+    expect(await verify(coder({ [ME]: status(204) }))).toMatchObject({
+      check: 'user',
+      reason: 'User check: Coder answered HTTP 204 when the token asked for its own user',
+    });
+    expect(await verify(coder({ [KEY]: status(203) }))).toMatchObject({
+      check: 'scopes',
+      reason: 'Scope check: Coder answered HTTP 203 when the token asked for its own key record',
+    });
+  });
+
+  it('refuses a working key that belongs to someone else, without naming them', async () => {
+    const verdict = await verify(coder({ [ME]: { username: 'some-learner' } }));
+    expect(verdict).toEqual({
+      ok: false,
+      check: 'user',
+      reason: 'User check: the token does not belong to hcw-status',
+    });
+    expect(verdict.reason).not.toContain('some-learner');
+  });
+
+  it('checks the user CODER_STATUS_USER names, and hcw-status when it names none', async () => {
+    expect(readStatusUser({})).toBe('hcw-status');
+    expect(readStatusUser({ CODER_STATUS_USER: ' lab-status ' })).toBe('lab-status');
+    const fetchImpl = coder({ [ME]: { username: 'lab-status' } });
+    await expect(verify(fetchImpl, { expectedUser: 'lab-status' })).resolves.toMatchObject({ ok: true });
+    await expect(verify(fetchImpl)).resolves.toMatchObject({ ok: false, check: 'user' });
+  });
+
+  it('says which scope its own user needs when Coder hides it (404, or 403)', async () => {
+    for (const code of [404, 403]) {
+      expect(await verify(coder({ [ME]: () => ({ ok: false, status: code, json: async () => ({}) }) }))).toEqual({
+        ok: false,
+        check: 'user',
+        reason: `User check: Coder would not show the token its own user (HTTP ${code}), which it refuses a token without user:read`,
+      });
+    }
+  });
+
+  it('refuses an unscoped key, whether Coder says coder:all or the deprecated scope says all', async () => {
+    const unscoped = 'Scope check: the token is unscoped, so it can do whatever its user can; a status token must be scoped to reading';
+    for (const record of [
+      { scopes: ['coder:all'], scope: 'all' },
+      { scopes: ['coder:all'] },
+      { scope: 'all' },
+      { scopes: [...READ_SCOPES], scope: 'all' },
+      { scopes: ['coder:application_connect'], scope: 'application_connect' },
+    ]) {
+      expect(await verify(coder({ [KEY]: record })), JSON.stringify(record)).toEqual({
+        ok: false,
+        check: 'scopes',
+        reason: unscoped,
+      });
+    }
+  });
+
+  it('refuses a key that can do more than read, naming the extra scopes', async () => {
+    expect(
+      await verify(coder({ [KEY]: { scopes: [...READ_SCOPES, 'template:update', 'workspace:delete'] } }))
+    ).toEqual({
+      ok: false,
+      check: 'scopes',
+      reason: 'Scope check: the token carries scopes beyond reading: template:update, workspace:delete',
+    });
+    // A wildcard is not reading, and a name Coder never spells is counted, not repeated.
+    expect(await verify(coder({ [KEY]: { scopes: [...READ_SCOPES, 'workspace:*', 'Not A Scope!'] } }))).toMatchObject({
+      reason: 'Scope check: the token carries scopes beyond reading: workspace:*, 1 unrecognised',
+    });
+  });
+
+  it('refuses a key without api_key:read, from its record or from Coder hiding the record', async () => {
+    expect(await verify(coder({ [KEY]: { scopes: ['template:read', 'workspace:read', 'user:read'] } }))).toEqual({
+      ok: false,
+      check: 'scopes',
+      reason: 'Scope check: the token lacks api_key:read',
+    });
+    expect(await verify(coder({ [KEY]: () => ({ ok: false, status: 404, json: async () => ({}) }) }))).toEqual({
+      ok: false,
+      check: 'scopes',
+      reason:
+        'Scope check: Coder would not show the token its own key record (HTTP 404), which it refuses a token without api_key:read and user:read',
+    });
+  });
+
+  it('refuses a record with no scopes list, since what the key can do cannot be checked', async () => {
+    for (const record of [{}, { scopes: [] }, { scopes: 'template:read' }, { scope: '' }]) {
+      expect(await verify(coder({ [KEY]: record })), JSON.stringify(record)).toMatchObject({
+        check: 'scopes',
+        reason: "Scope check: Coder's record of the token lists no scopes, so what it can do could not be checked",
+      });
+    }
+    expect(statusScopeProblem(null)).toMatch(/lists no scopes/);
+  });
+
+  it('says why in words that carry neither the token nor Coder’s address', async () => {
+    const cases = [
+      [() => ({ ok: false, status: 401, json: async () => ({}) }), 'Coder refused the token (HTTP 401)'],
+      [() => ({ ok: false, status: 403, json: async () => ({}) }), 'Coder refused the token (HTTP 403)'],
+      [
+        () => ({ ok: false, status: 502, json: async () => ({}) }),
+        'Coder answered HTTP 502 to the running-workspaces read',
+      ],
+      [
+        () => ({ ok: true, status: 200, json: async () => JSON.parse('<html>') }),
+        'Coder answered with something that is not JSON',
+      ],
+      [
+        () => {
+          throw new TypeError(`fetch failed for ${CANDIDATE} at https://coder.lab.example`);
+        },
+        'Coder could not be reached',
+      ],
+    ];
+    for (const [answer, reason] of cases) {
+      const verdict = await verify(coder({ [RUNNING]: answer }));
+      expect(verdict).toEqual({ ok: false, check: 'works', reason });
+      expect(verdict.reason).not.toContain(CANDIDATE);
+      expect(verdict.reason).not.toContain('coder.lab.example');
+    }
+    // Nor in the later checks' sentences.
+    const later = await verify(
+      coder({
+        [ME]: () => {
+          throw new TypeError(`fetch failed for ${CANDIDATE}`);
+        },
+      })
+    );
+    expect(later).toEqual({ ok: false, check: 'user', reason: 'User check: Coder could not be reached' });
+  });
+
+  it('gives up after the same five seconds as every other Coder call', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn(
+      (_url, { signal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener('abort', () =>
+            reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+          );
+        })
+    );
+    const pending = verify(fetchImpl);
+    await vi.advanceTimersByTimeAsync(CODER_TIMEOUT_MS);
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      check: 'works',
+      reason: 'Coder did not answer within 5 s',
+    });
   });
 });
