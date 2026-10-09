@@ -20,4 +20,4 @@ details, tokens, endpoints, or tenant identifiers.
 - Any secret value that appears in a commit, issue, log, or the docs site is
   treated as disclosed and rotated (`TODO.md` policy).
 - Dependency vulnerabilities are tracked by Dependabot and CodeQL; accepted
-  residual risks are recorded in the root `README.md` and `TODO.md`.
+  residual risks are recorded in the root `TODO.md`.

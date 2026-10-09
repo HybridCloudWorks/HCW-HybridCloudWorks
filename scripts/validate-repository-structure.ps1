@@ -228,12 +228,15 @@ foreach ($markdownFile in $markdownFiles) {
     $relativePath.StartsWith('.github/skills/', [System.StringComparison]::OrdinalIgnoreCase) -or
     $relativePath -eq '.github/pull_request_template.md' -or
     # Tooling-adjacent documentation, allowed by the same README clause that
-    # keeps Markdown "next to that tooling": GitHub renders CONTRIBUTING and
-    # SECURITY from .github/, and infra/README.md is the Terraform-standard
-    # module doc for the deployment source of truth. Narrative documentation
-    # still belongs under docs/.
+    # keeps Markdown "next to that tooling": GitHub renders CONTRIBUTING,
+    # SECURITY, SUPPORT and CODE_OF_CONDUCT from .github/ as the repository's
+    # community health files (the last two by owner decision, #1033), and
+    # infra/README.md is the Terraform-standard module doc for the deployment
+    # source of truth. Narrative documentation still belongs under docs/.
     $relativePath -eq '.github/CONTRIBUTING.md' -or
     $relativePath -eq '.github/SECURITY.md' -or
+    $relativePath -eq '.github/SUPPORT.md' -or
+    $relativePath -eq '.github/CODE_OF_CONDUCT.md' -or
     $relativePath -eq 'infra/README.md' -or
     # infra-lab/README.md is the same Terraform-standard module doc for the
     # hcw-lab root module (#661), and carries the owner's adoption steps and

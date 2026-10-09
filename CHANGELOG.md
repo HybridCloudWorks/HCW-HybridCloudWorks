@@ -3351,6 +3351,41 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **README: the repository's front door, for a visitor and a contributor
+  (#1033).** The README opened as "HybridCloudWorks Website" and read as a
+  migration-era record. It now says what the site is and who it is for, shows
+  the running architecture as a draw.io diagram with the official Azure
+  icons (`docs/assets/architecture/hcw-architecture.drawio`, exported to SVG so
+  GitHub and the docs site show it alike), with the same picture in words
+  beneath it (built from `infra/`, `docs/runbooks/edge-dns-verification.md`
+  and `docs/architecture/labs-host.md`, so Cloudflare proxies the API hostname
+  only), maps every top-level directory with a link to its README or its docs
+  page (`.vscode/` and `.qlty/` included), gives each package's install, test,
+  CI and start commands from its `package.json`, names the runtime lines and
+  leaves the exact floors to `scripts/version-floors.json`, says which checks
+  CI runs for which package and that the docs site deploys only on a merge
+  that changes its sources, and links CONTRIBUTING, SECURITY, SUPPORT, the
+  code of conduct, the docs site and the licence. Open work is pointed at
+  GitHub issues and `TODO.md` at the accepted risks. The badge rows are
+  unchanged. The dated history is gone from the page; the migration record
+  was already under `docs/history/` and is linked once. The owner chose
+  draw.io over Mermaid, whose boxes are generic and whose layout tangles; the
+  docs hook (`scripts/docs/hooks.py`) now rewrites an image under `docs/` to
+  the site's own copy, so the README's diagram shows on the docs site too.
+  **Community health files (owner decisions, #1033):**
+  `.github/CODE_OF_CONDUCT.md` is the Contributor Covenant 2.1, verbatim from
+  contributor-covenant.org with the enforcement contact filled in as the
+  owner gave it (the two hybridcloudworks.com addresses), and `.github/SUPPORT.md` sends bugs and requests to the issue
+  templates, documentation questions to the docs site and vulnerabilities to
+  SECURITY's private reporting. CONTRIBUTING links both, and the
+  repository-structure policy allows both beside CONTRIBUTING and SECURITY.
+  Two fixes found on the way: `scripts/docs/hooks.py` stripped a leading `.`
+  from every repository path (`lstrip("./")` takes a set of characters), so
+  the README's link to `.github/CONTRIBUTING.md` on the docs site pointed at
+  `github/CONTRIBUTING.md` and returned 404; it now strips only a leading
+  `./` or `/`. And `.github/SECURITY.md` said accepted risks were recorded in
+  the README, which has not held them; they are in `TODO.md`.
+
 - **Terraform identity, SEC-1 step two: subscription Contributor comes off
   once the narrow grants are read back (estate review 2026-10-06, finding
   SEC-1; #971).** `scripts/bootstrap-terraform-oidc.ps1` gains
