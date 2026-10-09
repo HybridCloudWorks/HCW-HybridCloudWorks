@@ -139,22 +139,25 @@ The reasoning behind each choice is in the
 | [`edge/`](edge/) | The Cloudflare Worker that probes the API's availability | [Availability probe](docs/runbooks/availability-probe.md) |
 | [`scripts/`](scripts/) | Operations tooling and its tests: deployment smoke checks, monitors, content manifests, restore and bootstrap scripts, the docs-site build hook, and tests that hold workflows and Terraform to the repository's rules | — |
 | [`docs/`](docs/) | The documentation source: decisions, architecture, runbooks, standards, articles and history | [Docs site](https://docs.hybridcloudworks.com) |
-| [`.github/`](.github/) | Workflows, issue and pull request templates, and the contributing and security policies | [CONTRIBUTING](.github/CONTRIBUTING.md) |
+| [`.github/`](.github/) | Workflows, issue and pull request templates, and the contributing, security, support and conduct policies | [CONTRIBUTING](.github/CONTRIBUTING.md) |
 | [`.azure/`](.azure/) | Machine-readable contracts: the API surface the website depends on, and the approved infrastructure plan | — |
+| [`.vscode/`](.vscode/) | The Azure Functions dev loop for VS Code: tasks that start the Functions host and a launch configuration that attaches the debugger | — |
+| [`.qlty/`](.qlty/) | Configuration for Qlty, which reports maintainability and coverage | — |
 | `.claude/`, `hooks/`, `tooling/` | The agent harness that Claude Code sessions in this repository use | — |
 
 At the root, [CHANGELOG.md](CHANGELOG.md) records completed work,
-[TODO.md](TODO.md) keeps the accepted risks and an index of the open issues,
-and `mkdocs.yml` configures the docs site.
+[TODO.md](TODO.md) records the accepted risks, and `mkdocs.yml` configures
+the docs site. Open work is tracked as
+[GitHub issues](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues).
 
 ## Run it locally
 
-You need Git and Node.js 26 (26.8.0 or later) with npm 10 or later. The API
-in `functions/` runs on Node.js 24 (24.19.0 or later), the newest line Azure
-Functions Flex Consumption supports. The docs site needs Python 3.14,
-infrastructure work needs Terraform 1.6 or later, and the lab image needs
-Docker. Every version floor is in `scripts/version-floors.json`, and CI fails
-a pin below it.
+You need Git and Node.js 26 with npm 10 or later. The API in `functions/`
+runs on Node.js 24, the newest line Azure Functions Flex Consumption
+supports. The docs site needs Python 3.14, infrastructure work needs
+Terraform 1.16, and the lab image needs Docker. The oldest release of each
+that the repository accepts is in `scripts/version-floors.json`, which a
+weekly workflow re-checks, and CI fails a pin below it.
 
 Each Node.js package installs and tests the same way, from its own directory:
 
@@ -163,7 +166,7 @@ Each Node.js package installs and tests the same way, from its own directory:
 | `frontend/` | 26 | `npm ci` | `npm test` | `npm run lint`, `npm run format:check`, `npm run build` | `npm run dev` |
 | `functions/` | 24 | `npm ci` | `npm test` | `npm run lint` | `npm start` |
 | `scripts/` | 26 | `npm ci` | `npm test` | `npm run lint` | — |
-| `vps-agent/` | 26 | `npm ci` | `npm test` | — | — |
+| `vps-agent/` | 26 | `npm ci` | `npm test` | — | `npm start` |
 | `edge/availability-probe/` | 26 | `npm ci` | `npm test` | — | — |
 
 For example, the website, in PowerShell or bash alike:
@@ -187,6 +190,11 @@ Vite prints the local address to open. A few packages need more than that:
   and a `functions/local.settings.json` copied from
   `local.settings.json.example`. The example points at local storage and
   Cosmos DB emulators.
+- **Lab job runner.** `npm start` runs `node index.js`, which reads the
+  variables named in `vps-agent/.env.example` from its environment. They
+  include the agent's own Entra identity and certificate, so in practice it
+  runs on the lab host as a service, and its tests are the way to work on it
+  elsewhere.
 - **Infrastructure.** Plans and applies run only in HCP Terraform. The
   formatting, validation and test checks you can run without credentials are
   in [infra/README.md](infra/README.md) and
@@ -215,11 +223,14 @@ repository root and work both on GitHub and on the site.
 
 Every pull request runs these workflows, all on GitHub-hosted runners:
 
-- **CI** ([`ci.yml`](.github/workflows/ci.yml)): install, lint, format, build
-  and test for each Node.js package; ansible-lint and a syntax check for the
-  lab host; checks for the Coder workspace template; tests for the agent
-  harness; and the Playwright browser suites as an advisory job. A job whose
-  component did not change skips its heavy steps and still reports.
+- **CI** ([`ci.yml`](.github/workflows/ci.yml)): a lockfile-strict install
+  and the tests for each Node.js package, plus that package's own checks from
+  the table above (lint for `frontend/`, `functions/` and `scripts/`, and the
+  format check and build for `frontend/` alone); ansible-lint and a syntax
+  check for the lab host; checks for the Coder workspace template; tests for
+  the agent harness; and the Playwright browser suites as an advisory job. A
+  job whose component did not change skips its heavy steps and still
+  reports.
 - **CodeQL** for JavaScript and TypeScript, GitHub Actions and Python.
 - **IaC Validation**: `terraform fmt`, `terraform validate`, TFLint and a
   Trivy misconfiguration scan for `infra/` and `infra-lab/`.
@@ -233,10 +244,12 @@ Every pull request runs these workflows, all on GitHub-hosted runners:
 
 Delivery always involves a person. The site and the API deploy through
 workflows that are started by hand and sign in to Azure with OIDC rather than
-a stored credential. Terraform changes are planned in HCP
-Terraform and applied only after someone reviews the plan. The docs site
-deploys to GitHub Pages on every merge to `main`. Scheduled workflows watch
-delivery health, unresolved secrets, published pages and pinned versions.
+a stored credential. Terraform changes are planned in HCP Terraform and
+applied only after someone reviews the plan. The docs site deploys to GitHub
+Pages when a merge to `main` changes `docs/`, `mkdocs.yml`, `scripts/docs/`,
+this README, the changelog, the TODO file or the workflow itself. Scheduled
+workflows watch delivery health, unresolved secrets, published pages and
+pinned versions.
 
 ## Documentation
 
@@ -261,6 +274,9 @@ to merge, and the extra rules for infrastructure. In short:
 - Every change arrives as a pull request that follows the template, with CI
   green.
 - Narrative documentation goes under `docs/`, not beside the code.
+
+Everyone taking part follows the [code of conduct](.github/CODE_OF_CONDUCT.md).
+For where to ask for help, see [SUPPORT](.github/SUPPORT.md).
 
 ## Security
 
