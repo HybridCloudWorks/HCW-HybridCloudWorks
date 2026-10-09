@@ -51,13 +51,22 @@ This project has not cut a tagged release; entries are grouped under
   "Rotate …" at the due date; without one it is "Record when … was last
   rotated", due the day it was added, until the date is recorded. The sync
   owns only those rows: the owner's own reminders pass through untouched,
-  `done` and the timer's stamps are kept while a row's due date and title
-  stand and reset when either changes, and every attempt re-reads the sheet
-  and then the dates and writes under the sheet's ETag, so a rotation
-  recorded mid-sync is never overwritten. It runs when a rotation is
-  recorded, from the tab's Update reminders
+  the timer's stamps are kept while a row's due date and title stand and
+  reset when either changes, and every attempt re-reads the sheet and then
+  the dates and writes under the sheet's ETag, so a rotation recorded
+  mid-sync is never overwritten. Recording the rotation is the only way a
+  register row's cycle ends: the sync reopens one found marked done, the
+  Platform Settings save (editor) carries every `credential-` row through
+  exactly as stored and cannot add, change or remove one, and the Reminders
+  sheet shows them read-only, "Managed by Integrations → Credentials". It
+  runs when a rotation is recorded, from the tab's Update reminders
   (`POST /api/cms/credentials/reminders`), and at the start of every
   `sendReminders` run. No value is read, stored or returned anywhere.
+  `sendReminders` also binds each Telegram stamp to the cycle it was said
+  for, the row's due date and title: after an ETag conflict it re-applies a
+  stamp only to a row still in that cycle, so a reminder re-dated or
+  renamed meanwhile is said afresh. This applies to every reminder, and
+  nothing changes when there is no conflict.
 
 - **Lab host: Coder automation. The host renews the site's Coder status
   token and publishes the `hcw-lab` template on its own, with one rotation

@@ -154,11 +154,14 @@ describe('mergeCredentialReminders', () => {
     expect(merged[2].id).toBe(id);
   });
 
-  it('keeps done and the timer’s stamps while it is the same cycle', () => {
+  it('keeps the timer’s stamps while it is the same cycle, and reopens a row marked done (review of #1039)', () => {
+    // Only the register says a credential row is handled, by moving its
+    // date: a `done` that reached the sheet any other way is undone, and a
+    // hand edit to its content is replaced.
     const notified = { ahead: '2028-08-29T13:00:00.000Z' };
     const stored = [{ ...wanted[0], notes: 'edited by hand', done: true, notified }];
     const [row] = mergeCredentialReminders(stored, wanted);
-    expect(row).toEqual({ ...wanted[0], done: true, notified });
+    expect(row).toEqual({ ...wanted[0], done: false, notified });
   });
 
   it('starts a fresh cycle when the due date moves', () => {
@@ -218,7 +221,8 @@ describe('syncCredentialReminders', () => {
     const first = rowsOf(store)['credential-lab-agent-certificate'];
     expect(first).toMatchObject({ title: recordTitle({ name: '/etc/hcw/labs-agent.pem (sp-labs-agent-lab-hybrid-prod-cus-01)' }), dueDate: TODAY, leadDays: 0 });
 
-    // The timer said it, and the owner marked it done; a later day's sync keeps all of that.
+    // The timer said it, and someone marked it done in the document; a
+    // later day's sync keeps the date and the stamp, and reopens the row.
     const stamped = sheet(store);
     await store.replaceDocIfMatch('admin_config', {
       ...stamped,
@@ -227,7 +231,7 @@ describe('syncCredentialReminders', () => {
       ),
     });
     await syncCredentialReminders({ store, now: () => new Date('2026-10-12T13:00:00.000Z') });
-    expect(rowsOf(store)[first.id]).toMatchObject({ dueDate: TODAY, done: true, notified: { due: '2026-10-09T13:00:00.000Z' } });
+    expect(rowsOf(store)[first.id]).toMatchObject({ dueDate: TODAY, done: false, notified: { due: '2026-10-09T13:00:00.000Z' } });
 
     // The date is recorded: a date move, so a fresh cycle at the real due date.
     await recordRotation(store, { credentialId: 'lab-agent-certificate', rotatedOn: '2026-09-29', actor: 'o', at: NOW.toISOString() });

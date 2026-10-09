@@ -952,6 +952,99 @@ describe('handlers', () => {
     expect(plain.readDoc).not.toHaveBeenCalled();
   });
 
+  describe('the credential register’s rows on the reminders sheet (review of #1039)', () => {
+    const stamp = '2026-10-09T13:00:00.000Z';
+    // As the register's sync writes them (lib/credentials/reminders.js).
+    const registerRow = {
+      id: 'credential-lab-agent-certificate',
+      title: 'Rotate /etc/hcw/labs-agent.pem',
+      dueDate: '2028-09-28',
+      leadDays: 30,
+      notes: 'Generate the next pair on the host.',
+      url: 'https://hybridcloudworks.com/admin/integrations?tab=credentials',
+      done: false,
+      notified: { due: stamp },
+    };
+    const ownerRow = { id: 'a', title: 'T', dueDate: '2027-01-04', leadDays: 7, notified: { ahead: stamp } };
+    const storedSheet = () => ({ id: 'reminders', reminders: [ownerRow, registerRow] });
+
+    async function save(rows) {
+      const store = makeStore({ readDoc: vi.fn(async () => storedSheet()) });
+      const h = createPlatformSettingsHandlers({ guard: allowGuard, store, ...fixed });
+      const put = await h.putSetting(
+        makeRequest({ params: { setting: 'reminders' }, body: { reminders: rows } }),
+        context
+      );
+      const written = store.upsertDoc.mock.calls.find(([c]) => c === 'admin_config')?.[1];
+      return { put, written };
+    }
+    const registerRowOf = (written) => written.reminders.find((r) => r.id === registerRow.id);
+
+    it('is saved at editor, the role an edit here needs', async () => {
+      const store = makeStore({ readDoc: vi.fn(async () => storedSheet()) });
+      const guard = { requireRole: vi.fn(allowGuard.requireRole) };
+      await createPlatformSettingsHandlers({ guard, store, ...fixed }).putSetting(
+        makeRequest({ params: { setting: 'reminders' }, body: { reminders: [ownerRow] } }),
+        context
+      );
+      expect(guard.requireRole).toHaveBeenCalledWith(expect.anything(), 'editor');
+    });
+
+    it('cannot mark one done, re-date it, rewrite it or forge a stamp on it', async () => {
+      const { put, written } = await save([
+        ownerRow,
+        {
+          ...registerRow,
+          title: 'Silenced',
+          dueDate: '2099-01-01',
+          leadDays: 0,
+          notes: 'nothing to see',
+          url: 'https://example.com/elsewhere',
+          done: true,
+          notified: { overdue: '2099-01-01T00:00:00.000Z' },
+        },
+      ]);
+      expect(put.status).toBe(200);
+      expect(registerRowOf(written)).toEqual(registerRow);
+      expect(registerRowOf(parse(put).value)).toEqual(registerRow);
+    });
+
+    it('cannot remove one: a save that leaves it out keeps it as stored', async () => {
+      const { written } = await save([ownerRow]);
+      expect(registerRowOf(written)).toEqual(registerRow);
+    });
+
+    it('cannot add one: a register row the sheet does not hold is dropped', async () => {
+      const forged = { ...registerRow, id: 'credential-kv-anthropic-api-key', title: 'Made up' };
+      const { written } = await save([ownerRow, registerRow, forged]);
+      expect(written.reminders.map((r) => r.id)).toEqual(['a', registerRow.id]);
+    });
+
+    it('leaves the owner’s own rows exactly as before: edits saved, stamps merged, removals kept', async () => {
+      const { written } = await save([
+        { ...ownerRow, title: 'T renamed', done: true, notified: {} },
+        { id: 'b', title: 'New', dueDate: '2027-02-01' },
+      ]);
+      expect(written.reminders.find((r) => r.id === 'a')).toMatchObject({
+        title: 'T renamed',
+        done: true,
+        notified: { ahead: stamp },
+      });
+      expect(written.reminders.find((r) => r.id === 'b').notified).toEqual({});
+
+      const { written: removed } = await save([registerRow]);
+      expect(removed.reminders.map((r) => r.id)).toEqual([registerRow.id]);
+    });
+
+    it('answers 400, and writes nothing, when the owner’s rows and the register’s pass the limit', async () => {
+      const rows = Array.from({ length: 200 }, (_, i) => ({ id: `r${i}`, title: 'T', dueDate: '2027-01-04' }));
+      const { put, written } = await save(rows);
+      expect(put.status).toBe(400);
+      expect(parse(put).error).toMatch(/at most 200 entries, the credential register's rows included/);
+      expect(written).toBeUndefined();
+    });
+  });
+
   it('selects the saved newsletter template in the template cache, so a different one shows on the next preview', async () => {
     const templateCache = { select: vi.fn() };
     const h = createPlatformSettingsHandlers({

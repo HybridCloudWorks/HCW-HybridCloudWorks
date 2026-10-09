@@ -122,12 +122,14 @@ describe('createReminderCheck', () => {
 
   it('on a 412 re-reads and re-applies the stamps onto the rows as the sheet left them (review of #910)', async () => {
     const first = doc([
-      { id: 'cf-token', title: 'Old title', dueDate: '2027-01-04', leadDays: 7 },
+      { id: 'cf-token', title: 'Cloudflare token', dueDate: '2027-01-04', leadDays: 7 },
       { id: 'removed', title: 'Removed meanwhile', dueDate: '2026-12-28' },
     ]);
-    // The owner renamed one row and removed the other between read and write.
+    // The owner edited one row's notes and removed the other between read
+    // and write. The edit keeps the row's date and title, so it is the same
+    // cycle and the stamp still belongs to it.
     const second = doc(
-      [{ id: 'cf-token', title: 'New title', dueDate: '2027-01-04', leadDays: 7, notes: 'edited' }],
+      [{ id: 'cf-token', title: 'Cloudflare token', dueDate: '2027-01-04', leadDays: 7, notes: 'edited' }],
       '"v2"'
     );
     const s = {
@@ -142,10 +144,49 @@ describe('createReminderCheck', () => {
     expect(written._etag).toBe('"v2"');
     expect(written.reminders).toHaveLength(1);
     expect(written.reminders[0]).toMatchObject({
-      title: 'New title',
+      title: 'Cloudflare token',
       notes: 'edited',
       notified: { ahead: NOW.toISOString() },
     });
+  });
+
+  it('on a 412 drops a stamp whose row moved to a new cycle meanwhile, so the new cycle is said afresh (review of #1039)', async () => {
+    const first = doc([
+      { id: 'retitled', title: 'Old title', dueDate: '2027-01-04', leadDays: 7 },
+      { id: 'redated', title: 'Redated', dueDate: '2026-12-28' },
+      { id: 'credential-lab-agent-certificate', title: 'Record when the agent certificate was last rotated', dueDate: '2026-12-28', leadDays: 0 },
+      { id: 'kept', title: 'Kept', dueDate: '2026-12-28' },
+    ]);
+    // Between the timer's read and its write: the owner renamed one row and
+    // re-dated another, and a rotation recorded on Integrations → Credentials
+    // started the register row's next cycle.
+    const second = doc(
+      [
+        { id: 'retitled', title: 'New title', dueDate: '2027-01-04', leadDays: 7 },
+        { id: 'redated', title: 'Redated', dueDate: '2027-02-01' },
+        { id: 'credential-lab-agent-certificate', title: 'Rotate the agent certificate', dueDate: '2028-12-27', leadDays: 30 },
+        { id: 'kept', title: 'Kept', dueDate: '2026-12-28' },
+      ],
+      '"v2"'
+    );
+    const s = {
+      readDoc: vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second),
+      replaceDocIfMatch: vi.fn().mockRejectedValueOnce(precondition()).mockImplementation(async (_c, d) => d),
+    };
+    const result = await createReminderCheck({ store: s, notifier: sending(), now }).run();
+    expect(result).toMatchObject({ sent: 4, stamped: true });
+    const byId = Object.fromEntries(s.replaceDocIfMatch.mock.calls[1][1].reminders.map((r) => [r.id, r]));
+    expect(byId.retitled.notified).toBeUndefined();
+    expect(byId.redated.notified).toBeUndefined();
+    expect(byId['credential-lab-agent-certificate'].notified).toBeUndefined();
+    expect(byId.kept.notified).toEqual({ due: NOW.toISOString() });
+  });
+
+  it('without a conflict stamps every row it said, as before', async () => {
+    const s = store(doc([{ id: 'a', title: '  Spaced title  ', dueDate: '2026-12-28' }]));
+    await createReminderCheck({ store: s, notifier: sending(), now }).run();
+    expect(s.replaceDocIfMatch).toHaveBeenCalledTimes(1);
+    expect(s.replaceDocIfMatch.mock.calls[0][1].reminders[0].notified).toEqual({ due: NOW.toISOString() });
   });
 
   it('gives up stamping after the attempts run out, says so without naming a reminder, and does not throw', async () => {

@@ -387,10 +387,36 @@ export function NewReminderForm({ saving, onAdd }) {
   );
 }
 
+/**
+ * The credential register's rows (#1026), by their reserved id prefix: kept
+ * by Integrations → Credentials, and read-only here. The server keeps them as
+ * stored whatever a save sends (functions/src/lib/reminders/settings.js,
+ * mergeStoredStamps; review of #1039), so offering Edit, Done or the X on
+ * one would offer a change that is silently undone.
+ */
+export const CREDENTIAL_ROW_PREFIX = 'credential-';
+export const isRegisterRow = (reminder) =>
+  typeof reminder?.id === 'string' && reminder.id.startsWith(CREDENTIAL_ROW_PREFIX);
+export const CREDENTIALS_TAB_HREF = '/admin/integrations?tab=credentials';
+
+/** In place of the controls on a register row: who keeps it, and how it moves. */
+function ManagedNote() {
+  return (
+    <p className="max-w-xs text-xs text-muted-foreground">
+      Managed by{' '}
+      <a href={CREDENTIALS_TAB_HREF} className="underline">
+        Integrations → Credentials
+      </a>
+      . Record the rotation there to move it; it cannot be edited, marked done or removed here.
+    </p>
+  );
+}
+
 /** One listed reminder: its details, Edit, Done, and the red X that cancels it after one confirmation. */
 function ReminderItem({ reminder, today, saving, onEdit, onToggleDone, onCancel }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
+  const managed = isRegisterRow(reminder);
   // `?reminder=<id>` (the dashboard's Decision Center) scrolls to this one and rings it.
   const { ref, linkedProps, linkedClassName } = useLinkedItem(LINK_PARAMS.reminder, reminder.id);
   const due = describeDue(reminder, today);
@@ -454,63 +480,67 @@ function ReminderItem({ reminder, today, saving, onEdit, onToggleDone, onCancel 
           {said ?? 'Telegram has not said this one yet.'}
         </p>
       </div>
-      <div className="flex items-center gap-3">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={saving}
-          aria-label={`Edit reminder: ${reminder.title}`}
-          onClick={() => setEditing(true)}
-        >
-          <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
-        </Button>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            aria-label={`Done: ${reminder.title}`}
-            checked={Boolean(reminder.done)}
-            disabled={saving}
-            onChange={(event) => onToggleDone(event.target.checked)}
-            className="h-4 w-4"
-          />
-          Done
-        </label>
-        {confirming ? (
-          <span className="flex items-center gap-2 text-xs">
-            <span className="text-destructive">Cancel this reminder?</span>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              disabled={saving}
-              onClick={onCancel}
-            >
-              Yes, cancel
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={saving}
-              onClick={() => setConfirming(false)}
-            >
-              Keep
-            </Button>
-          </span>
-        ) : (
-          <button
+      {managed ? (
+        <ManagedNote />
+      ) : (
+        <div className="flex items-center gap-3">
+          <Button
             type="button"
-            aria-label={`Cancel reminder: ${reminder.title}`}
-            title="Cancel this reminder"
+            variant="outline"
+            size="sm"
             disabled={saving}
-            onClick={() => setConfirming(true)}
-            className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+            aria-label={`Edit reminder: ${reminder.title}`}
+            onClick={() => setEditing(true)}
           >
-            <X className="h-4 w-4" aria-hidden="true" />
-          </button>
-        )}
-      </div>
+            <Pencil className="mr-2 h-3.5 w-3.5" /> Edit
+          </Button>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              aria-label={`Done: ${reminder.title}`}
+              checked={Boolean(reminder.done)}
+              disabled={saving}
+              onChange={(event) => onToggleDone(event.target.checked)}
+              className="h-4 w-4"
+            />
+            Done
+          </label>
+          {confirming ? (
+            <span className="flex items-center gap-2 text-xs">
+              <span className="text-destructive">Cancel this reminder?</span>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={saving}
+                onClick={onCancel}
+              >
+                Yes, cancel
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={saving}
+                onClick={() => setConfirming(false)}
+              >
+                Keep
+              </Button>
+            </span>
+          ) : (
+            <button
+              type="button"
+              aria-label={`Cancel reminder: ${reminder.title}`}
+              title="Cancel this reminder"
+              disabled={saving}
+              onClick={() => setConfirming(true)}
+              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-destructive text-destructive hover:bg-destructive hover:text-destructive-foreground disabled:opacity-50"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+      )}
     </li>
   );
 }

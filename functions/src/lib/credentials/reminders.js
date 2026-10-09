@@ -31,18 +31,23 @@
  * ## The rows: register-managed, by a reserved id
  *
  * A credential's reminder is the row `credential-<register id>`. The register
- * owns that row whole (title, due date, lead days, notes, link) and nothing
- * else on the sheet: every other row is the owner's and is passed through
- * untouched, in its place. A `credential-` row whose credential no longer
- * has a rule is removed; a new one is appended.
+ * owns that row whole (title, due date, lead days, notes, link, and `done`,
+ * which it never sets) and nothing else on the sheet: every other row is the
+ * owner's and is passed through untouched, in its place. A `credential-` row
+ * whose credential no longer has a rule is removed; a new one is appended.
  *
- * Two fields the owner's sheet and the timer write are KEPT while the due
- * date stands: `done` (the owner marked it handled) and `notified` (the
- * timer's stamps, so a sync never makes a stage fire twice). When the due
- * date MOVES (a rotation was recorded, or the Keys tab wrote a new value),
- * the row starts fresh, `done: false` and no stamps: it is a new cycle, and
- * the old cycle's stamps would otherwise keep its "coming up" and "due"
- * messages from ever being said.
+ * ONE FIELD IS KEPT while the cycle stands (the same due date and title):
+ * `notified`, the timer's stamps, so a sync never makes a stage fire twice.
+ * `done` is NOT kept: a register row is always open, and one found marked
+ * done is reopened (review of #1039). The sheet saves at `editor`, below
+ * the `super_admin` that records a rotation, and its save no longer changes
+ * these rows at all (reminders/settings.js mergeStoredStamps); this is the
+ * second half, for a `done` that reached the document some other way.
+ * Recording the rotation is the only way a register row's cycle ends. When
+ * the due date or the title moves (a rotation was recorded, or the Keys tab
+ * wrote a new value), the row starts fresh with no stamps: it is a new
+ * cycle, and the old cycle's stamps would otherwise keep its "coming up" and
+ * "due" messages from ever being said.
  *
  * ## When it runs
  *
@@ -85,10 +90,12 @@ import { PRODUCTION_ORIGINS } from '../auth/cors.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { dateOnly, parseDateOnly } from '../reminders/calendar.js';
 import {
+  CREDENTIAL_ROW_PREFIX,
   MAX_NOTES_LENGTH,
   MAX_TITLE_LENGTH,
   REMINDERS_CONFIG_ID,
   RemindersValidationError,
+  isCredentialRow,
   normalizeReminders,
   readStoredReminders,
 } from '../reminders/settings.js';
@@ -96,7 +103,8 @@ import { CREDENTIAL_STORES } from './register.js';
 import { readCredentialSources } from './sources.js';
 import { buildRegisterView } from './status.js';
 
-export const CREDENTIAL_REMINDER_PREFIX = 'credential-';
+/** The reserved id prefix, from the sheet's own module so the save and the sync agree. */
+export const CREDENTIAL_REMINDER_PREFIX = CREDENTIAL_ROW_PREFIX;
 
 /** Where every credential reminder links: the tab that records the rotation. */
 export const CREDENTIALS_TAB_URL = `${PRODUCTION_ORIGINS[0]}/admin/integrations?tab=credentials`;
@@ -112,8 +120,7 @@ const STORE_LABELS = new Map(CREDENTIAL_STORES.map((store) => [store.id, store.l
 export const reminderIdFor = (credentialId) => `${CREDENTIAL_REMINDER_PREFIX}${credentialId}`;
 
 /** Whether a sheet row is one the register manages. */
-export const isCredentialReminder = (row) =>
-  typeof row?.id === 'string' && row.id.startsWith(CREDENTIAL_REMINDER_PREFIX);
+export const isCredentialReminder = isCredentialRow;
 
 const clip = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
@@ -211,10 +218,11 @@ const sameCycle = (row, next) => row.dueDate === next.dueDate && row.title === n
 /**
  * The sheet's rows with the register's merged in (see the header): the
  * owner's rows untouched and in place, each credential row replaced in place
- * or removed, new ones appended. A credential row keeps `done` and
+ * or removed, new ones appended. A credential row keeps the timer's
  * `notified` only while it is the same cycle: the same due date and the same
  * title, so a RECORD row turning into a ROTATE row on the same day still
- * starts fresh.
+ * starts fresh. It never keeps `done`: the wanted row's `false` stands, so a
+ * row marked done by anyone but the register is reopened (see the header).
  */
 export function mergeCredentialReminders(stored = [], wanted = []) {
   const wantedById = new Map(wanted.map((row) => [row.id, row]));
@@ -228,7 +236,7 @@ export function mergeCredentialReminders(stored = [], wanted = []) {
     const next = wantedById.get(row.id);
     if (!next || placed.has(row.id)) continue;
     placed.add(row.id);
-    out.push(sameCycle(row, next) ? { ...next, done: row.done === true, notified: row.notified ?? {} } : next);
+    out.push(sameCycle(row, next) ? { ...next, notified: row.notified ?? {} } : next);
   }
   for (const row of wanted) if (!placed.has(row.id)) out.push(row);
   return out;

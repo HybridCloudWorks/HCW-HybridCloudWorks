@@ -660,8 +660,17 @@ export const PLATFORM_SETTINGS = Object.freeze({
     },
     empty: emptyReminders,
     // The timer stamps `notified` between the page's load and its save; the
-    // save keeps those stamps (review of #910).
-    merge: mergeStoredStamps,
+    // save keeps those stamps (review of #910). It also carries the
+    // credential register's rows through exactly as stored: a save at this
+    // page's role cannot add, change or remove one (review of #1039).
+    merge: (value, stored) => {
+      try {
+        return mergeStoredStamps(value, stored);
+      } catch (error) {
+        if (error instanceof RemindersValidationError) fail(error.message);
+        throw error;
+      }
+    },
   }),
 });
 
@@ -1043,7 +1052,17 @@ export function createPlatformSettingsHandlers({
       try {
         if (spec.merge) {
           const stored = await store.readDoc('admin_config', spec.docId, ADMIN_CONFIG_PARTITION);
-          value = spec.merge(value, stored);
+          // A merge that refuses (the reminders sheet past its limit once the
+          // register's rows are counted) is the caller's 400, like a
+          // normalizer's refusal, never a 500.
+          try {
+            value = spec.merge(value, stored);
+          } catch (error) {
+            if (error instanceof PlatformSettingValidationError) {
+              return json(400, { error: error.message });
+            }
+            throw error;
+          }
         }
         const updatedAt = now().toISOString();
         await store.upsertDoc('admin_config', {
