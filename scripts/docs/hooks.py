@@ -41,7 +41,12 @@ def _target(href: str) -> str:
         return href
     base, _, fragment = href.partition("#")
     fragment = f"#{fragment}" if fragment else ""
-    base = base.lstrip("./")
+    # Strip a leading "./" or "/", never a bare ".": `lstrip("./")` treated
+    # its argument as a set of characters and turned `.github/CONTRIBUTING.md`
+    # into `github/CONTRIBUTING.md`, a 404 on GitHub.
+    while base.startswith("./"):
+        base = base[2:]
+    base = base.lstrip("/")
     if base in SOURCES:
         target = Path(SOURCES[base]).name
     elif base in ("docs", DOCS_PREFIX):

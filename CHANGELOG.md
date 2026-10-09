@@ -3351,6 +3351,25 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **README: the repository's front door, for a visitor and a contributor
+  (#1033).** The README opened as "HybridCloudWorks Website" and read as a
+  migration-era record. It now says what the site is and who it is for, shows
+  the running architecture as a Mermaid diagram with the same picture in
+  words beneath it (built from `infra/`, `docs/runbooks/edge-dns-verification.md`
+  and `docs/architecture/labs-host.md`, so Cloudflare proxies the API hostname
+  only), maps every top-level directory with a link to its README or its docs
+  page, gives each package's install, test and start commands from its
+  `package.json`, names what CI runs on a pull request and how delivery is
+  gated, and links CONTRIBUTING, SECURITY, the docs site and the licence. The
+  badge rows are unchanged. The dated history is gone from the page; the
+  migration record was already under `docs/history/` and is linked once. Two
+  fixes found on the way: `scripts/docs/hooks.py` stripped a leading `.` from
+  every repository path (`lstrip("./")` takes a set of characters), so the
+  README's link to `.github/CONTRIBUTING.md` on the docs site pointed at
+  `github/CONTRIBUTING.md` and returned 404; it now strips only a leading
+  `./` or `/`. And `.github/SECURITY.md` said accepted risks were recorded in
+  the README, which has not held them; they are in `TODO.md`.
+
 - **Terraform identity, SEC-1 step two: subscription Contributor comes off
   once the narrow grants are read back (estate review 2026-10-06, finding
   SEC-1; #971).** `scripts/bootstrap-terraform-oidc.ps1` gains
