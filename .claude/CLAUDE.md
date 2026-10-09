@@ -223,13 +223,19 @@ so it is recorded here, where every session reads it.
     review a PR. Every finding from each is fixed, or answered on its thread
     with the reason, and the thread resolved, as the bullets above and below
     say. A finding is not optional because its bot is not a required check.
+  - **Each bot's first review is waited for.** A PR is not merge-ready
+    until Copilot and CodeRabbit have each reviewed it once and the `CodeQL`
+    check has finished on its head. If a bot's first review has not arrived
+    an hour after the required checks went green, say so on the PR, naming
+    the bot, and treat it as unavailable for that PR: reviews stopped
+    arriving altogether once before (2026-10-03), and a PR does not wait on
+    a reviewer that is not coming.
   - **At most three rounds per bot.** A round is one review of a head by one
     bot, and the fixes pushed in answer to it. Work the loop above for a
     bot's first three reviews; after the third round's fixes are pushed,
     merge once required checks are green and every thread is replied to and
-    resolved. Do not request, or wait for, a fourth review, nor a review that
-    has not arrived by the time the checks are green. A review that does
-    arrive on the final head still has its findings answered on their
+    resolved. Do not request, or wait for, a fourth review. A review that
+    does arrive on the final head still has its findings answered on their
     threads before the merge. #835 and #836 ran three and four Copilot
     rounds; the owner put a loop at "more than 3 turns".
   - **CodeRabbit's summary is a checklist to work, not to tick.** Its
@@ -254,9 +260,15 @@ so it is recorded here, where every session reads it.
     refused as a CI bypass. Give the owner the alert's page, under
     `https://github.com/saulpatinojr/HCW-HybridCloudWorks/security/code-scanning/`,
     and the reason to choose (**Used in tests**, **False positive** or
-    **Won't fix**); their dismissal closes the thread. The `CodeQL` check is
-    not one of the ruleset's required checks (the `Analyze …` jobs are), but
-    an open alert thread blocks the merge all the same.
+    **Won't fix**); their dismissal closes the thread. What GitHub enforces
+    and what this file adds differ here. The `CodeQL` check is not one of
+    the ruleset's required checks (the `Analyze …` jobs are), so an open
+    alert alone leaves the merge button enabled. Code scanning also posts
+    each alert as a review comment, though, and the ruleset's conversation
+    resolution blocks on that thread until it is resolved, as alert 398's
+    did on #1035 until the dismissal closed it. Beyond both, a session does
+    not merge with an alert open on the head, even when its thread is
+    resolved.
 
   The `copilot_code_review` rule is still absent from the `Default` ruleset
   (20680114). Its parameters were `review_on_push: true` and
