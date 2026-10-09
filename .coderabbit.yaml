@@ -12,11 +12,22 @@
 # thread resolved before a merge (.claude/CLAUDE.md), so each is answered on
 # its thread and resolved like any other reviewer's.
 #
-# On the open-source plan a public repository with few stars is reviewed only
-# when asked: comment "@coderabbitai review" on the pull request. CodeRabbit's
-# own check says so ("manual review required for this OSS repository"). The
-# auto_review settings below apply once the plan reviews on its own.
+# Reviews arrive on their own on every push (since #1034, 2026-10-08), so
+# auto_review below is live; "@coderabbitai review" still asks for one by hand.
+# .claude/CLAUDE.md says how a session handles them, in two separate tasks:
+# each review finding is fixed or answered on its thread and the thread
+# resolved; and the summary comment's checklist is worked by hand and recorded
+# on the pull request, its trigger checkboxes and Autopilot never ticked.
+# Three rounds at most.
+#
+# The profile stays "chill" on purpose (owner decision 2026-10-09): each
+# finding is a thread that must be fixed or answered before a merge, and the
+# tone below asks for the findings that matter rather than more of them.
 language: "en-US"
+tone_instructions: >-
+  Put security, correctness and data integrity first. Skip style points that
+  Prettier or ESLint already enforce. Be concise and concrete: name the
+  failure, the input that causes it, and the fix.
 
 reviews:
   profile: "chill"
