@@ -34,6 +34,14 @@ export {
 
 export const REMINDERS_CONFIG_ID = 'reminders';
 export const MAX_REMINDERS = 200;
+/**
+ * Rows kept for the credential register's own reminders, which an editor's
+ * save of the sheet cannot use (review of #1039): without the reserve, a
+ * sheet filled with the owner's rows before the register's were installed
+ * would refuse every sync, and the renewal warnings would never appear.
+ * credentials/reminders.test.js holds the register's rows under it.
+ */
+export const REGISTER_RESERVED_ROWS = 20;
 export const MAX_TITLE_LENGTH = 200;
 export const MAX_NOTES_LENGTH = 2000;
 export const MAX_URL_LENGTH = 2048;
@@ -184,19 +192,79 @@ export function mergeStamps(a, b) {
 }
 
 /**
+ * The id prefix of the rows the credential register keeps on this sheet
+ * (lib/credentials/reminders.js). Defined here, where the sheet's shape
+ * lives, so the save below and the register share one spelling of it.
+ */
+export const CREDENTIAL_ROW_PREFIX = 'credential-';
+
+/** Whether a row is one the credential register keeps, by its reserved id prefix. */
+export const isCredentialRow = (row) =>
+  typeof row?.id === 'string' && row.id.startsWith(CREDENTIAL_ROW_PREFIX);
+
+/** The stored document's register rows, normalized; none when it does not validate. */
+function storedCredentialRows(storedDoc) {
+  try {
+    return readStoredReminders(storedDoc).reminders.filter(isCredentialRow);
+  } catch (error) {
+    // A sheet that does not validate is what this save repairs. Its register
+    // rows come back, valid, at the register's next sync.
+    if (error instanceof RemindersValidationError) return [];
+    throw error;
+  }
+}
+
+/**
  * The sheet's save, with any stamp the timer wrote while the page was open
  * kept: for each incoming row that the stored document also holds, `notified`
  * is the merge of both. Rows the owner removed stay removed, rows they added
  * carry only what they sent. Review of #910: without this, a save made after
  * the 13:00 run erased that morning's stamp and the reminder was said again.
+ *
+ * THE CREDENTIAL REGISTER'S ROWS ARE NOT THE SHEET'S TO CHANGE (review of
+ * #1039). This page saves at `editor`, below the `super_admin` that records
+ * a rotation, so a save that could mark a `credential-` row done, re-date
+ * it, or remove it would let an editor silence a renewal warning. A save
+ * therefore carries every stored register row through exactly as stored,
+ * stamps included, and drops any register row the request sent, new or
+ * changed: it cannot add, remove or alter one. Their stamps are the stored
+ * ones, not a merge with the request's, because the stored row already
+ * holds every stamp the timer wrote (what the merge above exists to keep),
+ * and a request's stamp could otherwise be a forged one that silences a
+ * stage. Recording a rotation on Integrations → Credentials is the only way
+ * a register row's cycle ends. The owner's own rows behave exactly as
+ * before.
+ *
+ * Editors can still READ the register rows, and so the credential names in
+ * their titles and notes. That is accepted: those names (secret names,
+ * variable names, file paths) are public in this repository's own docs,
+ * docs/standards/required-inputs.md among them; the rows carry no value.
+ *
+ * Throws RemindersValidationError when the owner's rows and the stored
+ * register rows together pass MAX_REMINDERS.
  */
 export function mergeStoredStamps(value, storedDoc) {
-  const stored = new Map((storedDoc?.reminders ?? []).map((row) => [row?.id, row?.notified]));
-  return {
-    reminders: value.reminders.map((row) =>
+  // A stored `reminders` that is not a list (a malformed sheet) holds no rows
+  // to keep stamps from: this save repairs it, as storedCredentialRows does,
+  // rather than throwing a TypeError into a 500 (review of #1039).
+  const storedRows = Array.isArray(storedDoc?.reminders) ? storedDoc.reminders : [];
+  const stored = new Map(storedRows.map((row) => [row?.id, row?.notified]));
+  const ownRows = value.reminders
+    .filter((row) => !isCredentialRow(row))
+    .map((row) =>
       stored.has(row.id) ? { ...row, notified: mergeStamps(stored.get(row.id), row.notified) } : row
-    ),
-  };
+    );
+  const ownLimit = MAX_REMINDERS - REGISTER_RESERVED_ROWS;
+  if (ownRows.length > ownLimit) {
+    fail(
+      `reminders may hold at most ${ownLimit} of your own entries; ${REGISTER_RESERVED_ROWS} are kept for the credential register`
+    );
+  }
+  const reminders = [...ownRows, ...storedCredentialRows(storedDoc)];
+  if (reminders.length > MAX_REMINDERS) {
+    fail(`reminders may hold at most ${MAX_REMINDERS} entries, the credential register's rows included`);
+  }
+  return { reminders };
 }
 
 /** What the audit row records: counts and the next date, never titles. */

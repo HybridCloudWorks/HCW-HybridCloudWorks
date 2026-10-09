@@ -59,6 +59,31 @@ const SECRETS = {
   ],
 };
 
+// The register's answer, cut to one credential (#1026).
+const CREDENTIALS = {
+  success: true,
+  stores: [{ id: 'lab-file', label: 'Lab host file' }],
+  counts: { ok: 0, 'due-soon': 0, overdue: 0, unknown: 1 },
+  credentials: [
+    {
+      id: 'lab-agent-certificate',
+      name: '/etc/hcw/labs-agent.pem',
+      store: 'lab-file',
+      consumer: 'The lab agent',
+      issuer: 'Self-signed',
+      renewal: 'hand',
+      lifetimeDays: 730,
+      recordable: true,
+      ageDays: null,
+      expiresAt: null,
+      state: 'unknown',
+      reason: 'No rotation date is known: record when it was last rotated.',
+      reminder: null,
+    },
+  ],
+  unavailable: [],
+};
+
 // The fetch stub must not leak into later files in the same worker.
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -79,20 +104,21 @@ beforeEach(() => {
   );
   getJSON.mockReset().mockImplementation(async (route) => {
     if (route === 'cms/secrets') return SECRETS;
+    if (route === 'cms/credentials') return CREDENTIALS;
     if (route === 'getAuthExpectations') return { tenantId: 'tenant-guid' };
     throw new Error(`unexpected route ${route}`);
   });
 });
 
 describe('the header and tabs', () => {
-  it('names the page Integrations Hub and offers the five tabs, in order, the Directory last', () => {
+  it('names the page Integrations Hub and offers its tabs, in order, the Directory last', () => {
     render(<IntegrationsPage />);
     expect(screen.getByRole('heading', { name: /Integrations Hub/ })).toBeTruthy();
     expect(
       hubTabs()
         .getAllByRole('tab')
         .map((tab) => tab.textContent)
-    ).toEqual(['Overview', 'Services', 'Keys', 'Identity', 'Directory']);
+    ).toEqual(['Overview', 'Services', 'Keys', 'Credentials', 'Identity', 'Directory']);
   });
 
   it('opens on Overview with no tab in the URL, which is where an old bookmark lands', async () => {
@@ -105,6 +131,7 @@ describe('the header and tabs', () => {
     ['overview', 'Overview'],
     ['services', 'Services'],
     ['keys', 'Keys'],
+    ['credentials', 'Credentials'],
     ['identity', 'Identity'],
   ])('deep-links ?tab=%s to the %s tab', (tab, label) => {
     searchParams = `tab=${tab}`;
@@ -180,6 +207,13 @@ describe('each tab loads its own data', () => {
     expect(routes()).toEqual(['getAuthExpectations']);
   });
 
+  it('the Credentials tab reads the register and nothing else', async () => {
+    searchParams = 'tab=credentials';
+    render(<IntegrationsPage />);
+    await waitFor(() => expect(screen.getByText('/etc/hcw/labs-agent.pem')).toBeTruthy());
+    expect(routes()).toEqual(['cms/credentials']);
+  });
+
   it('a refused key-status read stays inside the Keys tab and leaves Identity whole', async () => {
     getJSON.mockImplementation(async (route) => {
       if (route === 'cms/secrets') throw new Error('HTTP 403 from cms/secrets');
@@ -191,7 +225,7 @@ describe('each tab loads its own data', () => {
     await waitFor(() => expect(screen.getByRole('alert').textContent).toMatch(/HTTP 403/));
     // The page around the tab is still there.
     expect(screen.getByRole('heading', { name: /Integrations Hub/ })).toBeTruthy();
-    expect(hubTabs().getAllByRole('tab')).toHaveLength(5);
+    expect(hubTabs().getAllByRole('tab')).toHaveLength(6);
 
     searchParams = 'tab=identity';
     rerender(<IntegrationsPage />);

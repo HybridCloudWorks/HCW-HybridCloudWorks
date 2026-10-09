@@ -19,11 +19,26 @@
  * other way (platform-settings.js, `merge`), so a stamp written while the
  * page was open survives the save. Review of #910.
  *
+ * A STAMP BELONGS TO THE CYCLE IT WAS SAID FOR (review of #1039): the row's
+ * due date and title when the message went. On a re-apply after a 412 it is
+ * written only onto a row that still has that date and title. A row that
+ * moved meanwhile (the owner re-dated it, or a rotation recorded on
+ * Integrations → Credentials started the register row's next cycle) gets no
+ * stamp, so its new cycle is said afresh rather than counted as said by a
+ * message about the old one. With no conflict the rows are the ones the
+ * stamps were computed from, so nothing changes there.
+ *
  * Telemetry carries positions and counts, never a reminder's id: ids may be
  * chosen by hand and a hand-chosen id is content.
  *
  * Each reminder is its own notifier source (`reminder:<id>`), so the
  * notifier's fifteen-minute cooldown never lets one reminder silence another.
+ *
+ * Since #1026 a run first brings the credential register's rows in line
+ * (`syncCredentials`, lib/credentials/reminders.js): a Key Vault secret
+ * rotated on the Keys tab since yesterday has moved its reminder before
+ * anything is said, so no message is built from a stale due date. A sync
+ * that fails is a warning and the run goes on with the sheet as it stands.
  */
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { dateOnly, daysUntil, stageDue } from '../reminders/calendar.js';
@@ -107,15 +122,27 @@ async function sayReminder({ notifier, log }, reminder, index, stage, today) {
   return Boolean(result?.sent);
 }
 
-/** `rows` with each stamped id's `notified` merged in; rows not in `stamps` untouched. */
-const applyStamps = (rows, stamps) =>
-  (rows ?? []).map((row) =>
-    stamps.has(row.id) ? { ...row, notified: mergeStamps(row.notified, stamps.get(row.id)) } : row
-  );
+/** Whether a row is still in the cycle a stamp was said for: the same due date and title. */
+const inCycle = (row, cycle) =>
+  row?.dueDate === cycle.dueDate && String(row?.title ?? '').trim() === cycle.title;
+
+/**
+ * `rows` with each stamped id's `notified` merged in; rows not in `stamps`
+ * untouched. With `sameCycleOnly`, a re-apply after a 412, a stamp is
+ * written only onto a row still in the cycle it was said for (see the
+ * header); the first attempt writes onto the rows the stamps came from.
+ */
+const applyStamps = (rows, stamps, { sameCycleOnly = false } = {}) =>
+  (rows ?? []).map((row) => {
+    const stamp = stamps.get(row.id);
+    if (!stamp || (sameCycleOnly && !inCycle(row, stamp.cycle))) return row;
+    return { ...row, notified: mergeStamps(row.notified, stamp.notified) };
+  });
 
 /**
  * Write the stamps onto the document as it stands now, with its ETag. On a
- * 412 the sheet saved meanwhile: re-read and re-apply onto the new rows.
+ * 412 the sheet saved meanwhile: re-read and re-apply onto the new rows,
+ * each stamp only where its row is still in the cycle it was said for.
  * False when the document is gone or the attempts run out; either way the
  * worst case is one repeated message tomorrow, never a lost edit.
  */
@@ -125,7 +152,7 @@ async function writeStamps({ store, log }, doc, stamps) {
     try {
       await store.replaceDocIfMatch(
         'admin_config',
-        { ...current, reminders: applyStamps(current.reminders, stamps) },
+        { ...current, reminders: applyStamps(current.reminders, stamps, { sameCycleOnly: attempt > 1 }) },
         { partitionKey: ADMIN_CONFIG_PARTITION }
       );
       return true;
@@ -141,14 +168,20 @@ async function writeStamps({ store, log }, doc, stamps) {
   return false;
 }
 
-/** Say every reminder whose stage has come; the stamps to write and the counts per stage. */
+/**
+ * Say every reminder whose stage has come; the stamps to write and the
+ * counts per stage. Each stamp carries the cycle it was said for.
+ */
 async function sayDue(deps, reminders, today, at) {
   const stamps = new Map();
   const stages = { ahead: 0, due: 0, overdue: 0 };
   for (const [index, reminder] of reminders.entries()) {
     const stage = stageDue(reminder, today, at.getTime());
     if (stage && (await sayReminder(deps, reminder, index, stage, today))) {
-      stamps.set(reminder.id, { [stage]: at.toISOString() });
+      stamps.set(reminder.id, {
+        cycle: { dueDate: reminder.dueDate, title: reminder.title },
+        notified: { [stage]: at.toISOString() },
+      });
       stages[stage] += 1;
     }
   }
@@ -156,15 +189,40 @@ async function sayDue(deps, reminders, today, at) {
 }
 
 /**
+ * The credential rows first; a failure is said and never stops the run. The
+ * line carries a reason or an error code, never the store's message, which
+ * can name a document.
+ */
+async function syncFirst(syncCredentials, at, log) {
+  try {
+    const summary = await syncCredentials(at);
+    if (summary && !summary.synced) {
+      log.warn?.(`[sendReminders] credential reminders not synced (${summary.reason || 'unknown'})`);
+    }
+  } catch (error) {
+    log.warn?.(`[sendReminders] credential reminders sync threw (${error?.code ?? 'error'})`);
+  }
+}
+
+/**
  * @param {object} deps
  * @param {{ readDoc: Function, replaceDocIfMatch: Function }} deps.store
  * @param {{ notifyTelegram: Function }|null} [deps.notifier]
  * @param {() => Date} [deps.now]
+ * @param {((at: Date) => Promise<{ synced: boolean, reason?: string }>)|null} [deps.syncCredentials]
+ *        the credential register's sync, run before the sheet is read
  */
-export function createReminderCheck({ store, notifier = null, now = () => new Date(), log = {} }) {
+export function createReminderCheck({
+  store,
+  notifier = null,
+  now = () => new Date(),
+  log = {},
+  syncCredentials = null,
+}) {
   async function run() {
     const at = now();
     const today = dateOnly(at);
+    if (syncCredentials) await syncFirst(syncCredentials, at, log);
     const doc = await store.readDoc('admin_config', REMINDERS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
     if (!doc) return { checked: 0, sent: 0 };
 

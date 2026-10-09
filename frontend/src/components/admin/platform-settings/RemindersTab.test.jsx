@@ -295,6 +295,34 @@ describe('ReminderList', () => {
     expect(screen.getByText(/Nothing here yet. Add the first one above/)).toBeTruthy();
   });
 
+  it('shows a credential register row read-only, with who keeps it, and the owner’s rows as before (review of #1039)', () => {
+    const registerRow = {
+      id: 'credential-lab-agent-certificate',
+      title: 'Rotate the lab agent certificate',
+      dueDate: '2028-09-28',
+      leadDays: 30,
+      notes: 'Generate the next pair on the host.',
+      url: 'https://hybridcloudworks.com/admin/integrations?tab=credentials',
+      done: false,
+      notified: {},
+    };
+    renderList({ reminders: [stored.reminders[0], registerRow] });
+    const item = screen.getByText('Rotate the lab agent certificate').closest('li');
+    expect(within(item).queryByRole('button')).toBeNull();
+    expect(within(item).queryByRole('checkbox')).toBeNull();
+    expect(within(item).getByText(/Managed by/).textContent).toMatch(
+      /Record the rotation there to move it; it cannot be edited, marked done or removed here\./
+    );
+    expect(
+      within(item).getByRole('link', { name: 'Integrations → Credentials' }).getAttribute('href')
+    ).toBe('/admin/integrations?tab=credentials');
+    // The owner's own row keeps every control.
+    const own = screen.getByText('Cloudflare DNS token for the lab host expires').closest('li');
+    expect(within(own).getByRole('button', { name: /Edit reminder/ })).toBeTruthy();
+    expect(within(own).getByRole('checkbox', { name: /Done:/ })).toBeTruthy();
+    expect(within(own).getByRole('button', { name: /Cancel reminder/ })).toBeTruthy();
+  });
+
   it('cancels only after the inline confirmation, and Keep backs out', () => {
     const onCancel = vi.fn();
     renderList({ onCancel });

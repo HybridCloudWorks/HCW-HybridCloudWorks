@@ -56,6 +56,7 @@ import { createBlogListingsScrape } from '../lib/timers/blog-listings.js';
 import { createPodcastIngest, createPodcastParser } from '../lib/timers/podcasts.js';
 import { createNewsletterAutoBuild } from '../lib/timers/newsletter-autobuild.js';
 import { createReminderCheck } from '../lib/timers/reminders.js';
+import { syncCredentialReminders } from '../lib/credentials/reminders.js';
 import { createNotifier } from '../lib/notify.js';
 import { logDisabledSkip, timerEnabled } from '../lib/timers/flag-gate.js';
 
@@ -287,12 +288,15 @@ timer('healthPulse', 'HEALTH_PULSE', '0 2-59/5 * * * *', async (context) => {
 
 // The owner's reminders sheet (Platform Settings → Reminders), said on
 // Telegram ahead of each date, on the day, and weekly while overdue until
-// marked done (owner request 2026-10-06). 13:00 UTC is 08:00 Central.
+// marked done (owner request 2026-10-06). 13:00 UTC is 08:00 Central. Each
+// run first syncs the credential register's rows (#1026), so a rotation
+// since yesterday has moved its reminder before anything is said.
 timer('sendReminders', 'SEND_REMINDERS', '0 0 13 * * *', (context) =>
   createReminderCheck({
     store,
     notifier: createNotifier({ store, log: context }),
     log: context,
+    syncCredentials: (at) => syncCredentialReminders({ store, now: () => at, log: context }),
   }).run()
 );
 

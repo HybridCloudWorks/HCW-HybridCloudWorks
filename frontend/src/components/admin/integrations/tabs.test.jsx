@@ -58,6 +58,13 @@ describe('resolveTab', () => {
     expect(resolveTab(null)).toBe('overview');
   });
 
+  it('opens the Credentials register at ?tab=credentials, its own tab since #1026', () => {
+    expect(TABS.map((tab) => tab.id)).toContain('credentials');
+    expect(resolveTab('credentials')).toBe('credentials');
+    // A real tab id is never also a moved one: the alias would shadow it.
+    for (const id of TABS.map((tab) => tab.id)) expect(Object.hasOwn(MOVED_TABS, id)).toBe(false);
+  });
+
   it('never moves a tab id to a tab that does not exist', () => {
     const ids = new Set(TABS.map((tab) => tab.id));
     for (const target of Object.values(MOVED_TABS)) expect(ids.has(target)).toBe(true);

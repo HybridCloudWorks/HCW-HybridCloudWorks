@@ -19,6 +19,63 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Credentials: one register of every credential, with its age and expiry,
+  on Admin → Integrations → Credentials, and a Telegram reminder for each
+  one only the owner can renew (#1026).** `functions/src/lib/credentials/`
+  holds a static register of every credential by name and metadata only —
+  where each lives, what uses it, its issuer, whether it renews itself
+  (`self`, `automation`, `hand`, or `none` for an identifier) and, where a
+  rule exists, its lifetime: Key Vault (built from `secret-catalog.js` so
+  the two cannot drift, which `register.test.js` holds), the three MCP
+  OAuth connections in `mcp_servers`, the GitHub Actions and Agents
+  secrets, the OIDC federations, the HCP Terraform variables of
+  `hcw/hcw-azure` and `hcw/hcw-lab`, the Static Web Apps deployment token,
+  the Entra and Docker identities, and the lab host's vault keys, files and
+  the owner's password-manager entries. `GET /api/cms/credentials`
+  (super_admin) merges in the live dates — the Keys tab's `lastWriteAt`,
+  the lab host's Coder token report, each MCP connection's state, read as
+  a Cosmos projection so no token field is ever fetched — and answers each
+  credential's age, expiry (reported, or the last rotation plus its rule
+  for a hand-renewed one), and a state: ok, due soon, overdue (red), or
+  unknown. A source that cannot be read, or is present but malformed, is
+  never read as empty: the credentials that depend on it show unknown, with
+  no expiry or reminder. `PUT /api/cms/credentials` records, under the
+  document's ETag, when a hand-renewed credential the site cannot read was
+  last rotated (`admin_config/credential_register`, a date per credential).
+  Every hand credential with a rotation rule gets the reminder row
+  `credential-<id>` on the existing Reminders sheet, said by the existing
+  `sendReminders` timer: the Anthropic key, the Telegram bot token, both
+  GitHub App private keys and the Coder GitHub OAuth secret (every 180
+  days, the owner's rule of 2026-10-09), the Static Web Apps token's 90-day
+  reset and the two 730-day lab host certificates. With a known date it is
+  "Rotate …" at the due date; without one it is "Record when … was last
+  rotated", due the day it was added, until the date is recorded. The sync
+  owns only those rows: the owner's own reminders pass through untouched,
+  the timer's stamps are kept while a row's due date and title stand and
+  reset when either changes, and every attempt re-reads the sheet and then
+  the dates and writes under the sheet's ETag, so a rotation recorded
+  mid-sync is never overwritten. Recording the rotation is the only way a
+  register row's cycle ends: the sync reopens one found marked done, the
+  Platform Settings save (editor) carries every `credential-` row through
+  exactly as stored and cannot add, change or remove one, and the Reminders
+  sheet shows them read-only, "Managed by Integrations → Credentials". It
+  runs when a rotation is recorded, from the tab's Update reminders
+  (`POST /api/cms/credentials/reminders`), and at the start of every
+  `sendReminders` run. No value is read, stored or returned anywhere.
+  `sendReminders` also binds each Telegram stamp to the cycle it was said
+  for, the row's due date and title: after an ETag conflict it re-applies a
+  stamp only to a row still in that cycle, so a reminder re-dated or
+  renamed meanwhile is said afresh. This applies to every reminder, and
+  nothing changes when there is no conflict. A Platform Settings save of the
+  sheet is written under the ETag of the read it merged from (412 or 409
+  re-reads, three attempts, then 409), so a sync or a stamp that lands
+  between the read and the write is never written over. A Keys-tab write
+  syncs the credential reminders at once, so a rotation moves its reminder
+  without waiting for the timer, and the register copies only `lastWriteAt`
+  and `rotatedOn` out of the records it reads. An editor's save of the sheet
+  may hold at most 180 of the owner's own reminders: 20 rows stay free for
+  the register, so its warnings can always be installed.
+
 - **Lab host: Coder automation. The host renews the site's Coder status
   token and publishes the `hcw-lab` template on its own, with one rotation
   credential the owner seeds once (owner approval 2026-10-08).**

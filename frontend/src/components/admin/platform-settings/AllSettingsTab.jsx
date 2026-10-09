@@ -163,6 +163,16 @@ export const SETTINGS_INDEX = Object.freeze([
     history: false,
   },
   {
+    id: 'credential-register',
+    label: 'Credential rotation dates',
+    storedAt: 'admin_config/credential_register',
+    editedIn: 'Integrations → Credentials (Record)',
+    readBy:
+      'The credential register: the age and due date of each credential only you renew, and its reminder on the Reminders sheet.',
+    href: '/admin/integrations?tab=credentials',
+    history: false,
+  },
+  {
     id: 'gallery-folders',
     label: 'Gallery folders',
     storedAt: 'admin_config/gallery_folders',

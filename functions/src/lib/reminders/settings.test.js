@@ -4,11 +4,14 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  CREDENTIAL_ROW_PREFIX,
   DEFAULT_LEAD_DAYS,
   MAX_REMINDERS,
   OVERDUE_REPEAT_DAYS,
+  REGISTER_RESERVED_ROWS,
   RemindersValidationError,
   daysUntil,
+  isCredentialRow,
   mergeStamps,
   mergeStoredStamps,
   normalizeReminders,
@@ -172,6 +175,78 @@ describe('stamps from two writers', () => {
     expect(merged.reminders[0].notified).toEqual({ ahead: '2026-12-28T13:00:00.000Z' });
     expect(merged.reminders[1].notified).toEqual({});
     expect(mergeStoredStamps(saved, null).reminders[0].notified).toEqual({});
+  });
+
+  it('repairs a stored sheet whose reminders is not a list, rather than throwing (review of #1039)', () => {
+    const saved = normalizeReminders({ reminders: [reminder({ id: 'a' })] });
+    for (const malformed of [{ reminders: { a: 1 } }, { reminders: 'x' }, { reminders: 7 }]) {
+      const merged = mergeStoredStamps(saved, malformed);
+      expect(merged.reminders.map((r) => r.id)).toEqual(['a']);
+      expect(merged.reminders[0].notified).toEqual({});
+    }
+  });
+});
+
+describe('the credential register’s rows survive any save unchanged (review of #1039)', () => {
+  const registerRow = reminder({
+    id: `${CREDENTIAL_ROW_PREFIX}azure-swa-deployment-token`,
+    title: 'Rotate Static Web App deployment token',
+    dueDate: '2026-12-28',
+    leadDays: 14,
+    notified: { ahead: '2026-12-14T13:00:00.000Z' },
+  });
+  const stored = () => normalizeReminders({ reminders: [reminder({ id: 'mine' }), registerRow] });
+
+  it('recognises a register row by its reserved prefix only', () => {
+    expect(isCredentialRow(registerRow)).toBe(true);
+    expect(isCredentialRow(reminder({ id: 'cf-token' }))).toBe(false);
+    expect(isCredentialRow({})).toBe(false);
+  });
+
+  it('carries the stored register row through, whatever the save sent for it', () => {
+    const [storedRegisterRow] = stored().reminders.filter(isCredentialRow);
+    const saved = normalizeReminders({
+      reminders: [
+        reminder({ id: 'mine', title: 'Mine, renamed' }),
+        { ...registerRow, done: true, dueDate: '2099-01-01', notified: { due: '2099-01-01T00:00:00.000Z' } },
+      ],
+    });
+    const merged = mergeStoredStamps(saved, stored());
+    expect(merged.reminders.map((r) => r.id)).toEqual(['mine', registerRow.id]);
+    expect(merged.reminders[0].title).toBe('Mine, renamed');
+    expect(merged.reminders[1]).toEqual(storedRegisterRow);
+  });
+
+  it('keeps a register row the save left out, and drops one the stored sheet does not hold', () => {
+    const left = mergeStoredStamps(normalizeReminders({ reminders: [reminder({ id: 'mine' })] }), stored());
+    expect(left.reminders.map((r) => r.id)).toEqual(['mine', registerRow.id]);
+    const added = mergeStoredStamps(
+      normalizeReminders({ reminders: [reminder({ id: `${CREDENTIAL_ROW_PREFIX}made-up` })] }),
+      { reminders: [] }
+    );
+    expect(added.reminders).toEqual([]);
+  });
+
+  it('keeps no register row from a stored sheet that does not validate: the save repairs it', () => {
+    const merged = mergeStoredStamps(normalizeReminders({ reminders: [reminder({ id: 'mine' })] }), {
+      reminders: [{ id: `${CREDENTIAL_ROW_PREFIX}broken`, title: '' }],
+    });
+    expect(merged.reminders.map((r) => r.id)).toEqual(['mine']);
+  });
+
+  it('refuses a save that, with the register’s rows, would pass MAX_REMINDERS', () => {
+    const full = normalizeReminders({
+      reminders: Array.from({ length: MAX_REMINDERS }, (_, i) => reminder({ id: `r${i}` })),
+    });
+    expect(() => mergeStoredStamps(full, stored())).toThrow(RemindersValidationError);
+  });
+
+  it('keeps REGISTER_RESERVED_ROWS free for the register, even before any of its rows exist (review of #1039)', () => {
+    const own = (n) =>
+      normalizeReminders({ reminders: Array.from({ length: n }, (_, i) => reminder({ id: `r${i}` })) });
+    const limit = MAX_REMINDERS - REGISTER_RESERVED_ROWS;
+    expect(mergeStoredStamps(own(limit), null).reminders).toHaveLength(limit);
+    expect(() => mergeStoredStamps(own(limit + 1), null)).toThrow(/kept for the credential register/);
   });
 });
 

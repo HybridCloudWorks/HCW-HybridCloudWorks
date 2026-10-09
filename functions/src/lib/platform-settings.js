@@ -660,8 +660,17 @@ export const PLATFORM_SETTINGS = Object.freeze({
     },
     empty: emptyReminders,
     // The timer stamps `notified` between the page's load and its save; the
-    // save keeps those stamps (review of #910).
-    merge: mergeStoredStamps,
+    // save keeps those stamps (review of #910). It also carries the
+    // credential register's rows through exactly as stored: a save at this
+    // page's role cannot add, change or remove one (review of #1039).
+    merge: (value, stored) => {
+      try {
+        return mergeStoredStamps(value, stored);
+      } catch (error) {
+        if (error instanceof RemindersValidationError) fail(error.message);
+        throw error;
+      }
+    },
   }),
 });
 
@@ -966,10 +975,22 @@ async function getHistory({ guard, store }, request, context) {
   }
 }
 
+/** How many times a merged save re-reads after a conflicting write before answering 409. */
+export const MERGE_WRITE_ATTEMPTS = 3;
+
+/** 412: replaced since the read. 409: created since a read that found nothing. */
+const isWriteConflict = (error) => {
+  const status = error?.code ?? error?.statusCode;
+  return status === 412 || status === 409;
+};
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
- * @param {{ readDoc: Function, upsertDoc: Function, queryDocs?: Function }} deps.store
+ * @param {{ readDoc: Function, upsertDoc: Function, replaceDocIfMatch: Function, createDoc: Function, queryDocs?: Function }} deps.store
+ *        a setting with a merge (the reminders sheet) is written under the
+ *        ETag of the read it was merged from (replaceDocIfMatch, or createDoc
+ *        when nothing was stored); every other setting is upserted
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
  * @param {{ select: Function }} [deps.templateCache] the newsletter template cache (template-source.js)
@@ -982,6 +1003,53 @@ export function createPlatformSettingsHandlers({
   templateCache = sharedTemplateCache,
 }) {
   const resolve = (request) => resolveSetting(request.params?.setting);
+
+  /**
+   * Save a setting whose value is decided from the stored document (the
+   * reminders sheet: the timer's stamps and the credential register's rows
+   * come from the stored copy). The write is guarded by the ETag of the read
+   * it was merged from, so a sync or a timer stamp that lands in between is
+   * never written over: a 412 (replaced since the read) or 409 (created since
+   * an absent read) re-reads and re-merges, up to MERGE_WRITE_ATTEMPTS times,
+   * then answers 409 (CodeRabbit, review of #1039).
+   */
+  async function writeMerged(spec, requested, meta) {
+    for (let attempt = 1; attempt <= MERGE_WRITE_ATTEMPTS; attempt += 1) {
+      const stored = await store.readDoc('admin_config', spec.docId, ADMIN_CONFIG_PARTITION);
+      let value;
+      // A merge that refuses (the reminders sheet past its limit once the
+      // register's rows are counted) is the caller's 400, like a
+      // normalizer's refusal, never a 500.
+      try {
+        value = spec.merge(requested, stored);
+      } catch (error) {
+        if (error instanceof PlatformSettingValidationError) {
+          return { error: json(400, { error: error.message }) };
+        }
+        throw error;
+      }
+      const doc = { id: spec.docId, configScope: ADMIN_CONFIG_PARTITION, ...value, ...meta };
+      try {
+        if (stored) {
+          await store.replaceDocIfMatch(
+            'admin_config',
+            { ...doc, _etag: stored._etag },
+            { partitionKey: ADMIN_CONFIG_PARTITION }
+          );
+        } else {
+          await store.createDoc('admin_config', doc);
+        }
+        return { value };
+      } catch (error) {
+        if (!isWriteConflict(error)) throw error;
+      }
+    }
+    return {
+      error: json(409, {
+        error: 'This setting changed while it was being saved. Reload the page and save again.',
+      }),
+    };
+  }
 
   async function audit(action, user, details) {
     await store.upsertDoc('admin_audit_logs', {
@@ -1041,18 +1109,20 @@ export function createPlatformSettingsHandlers({
       let { value } = parsed;
 
       try {
-        if (spec.merge) {
-          const stored = await store.readDoc('admin_config', spec.docId, ADMIN_CONFIG_PARTITION);
-          value = spec.merge(value, stored);
-        }
         const updatedAt = now().toISOString();
-        await store.upsertDoc('admin_config', {
-          id: spec.docId,
-          configScope: ADMIN_CONFIG_PARTITION,
-          ...value,
-          updatedAt,
-          updatedBy: auth.user?.oid || auth.user?.sub || null,
-        });
+        const meta = { updatedAt, updatedBy: auth.user?.oid || auth.user?.sub || null };
+        if (spec.merge) {
+          const merged = await writeMerged(spec, value, meta);
+          if (merged.error) return merged.error;
+          ({ value } = merged);
+        } else {
+          await store.upsertDoc('admin_config', {
+            id: spec.docId,
+            configScope: ADMIN_CONFIG_PARTITION,
+            ...value,
+            ...meta,
+          });
+        }
         // A different newsletter template takes effect on the next preview,
         // not when the cached copy of the previous one expires.
         if (name === 'newsletter-settings') templateCache.select(value.templateId);

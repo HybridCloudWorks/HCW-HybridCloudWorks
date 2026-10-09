@@ -15,6 +15,11 @@
  *             of the keys it uses
  *   Keys      every Key Vault credential: its light, the services that use
  *             it, paste and generate, and "Other credentials"
+ *   Credentials  every credential in every store (Key Vault, GitHub, HCP
+ *             Terraform, the lab host and the rest): its age, its expiry,
+ *             whether anything renews it, overdue in red, and a recorded
+ *             rotation date for the ones only the owner renews, which moves
+ *             their Telegram reminder (#1026)
  *   Identity  the Entra configuration the browser and the API run on
  *
  * Deep links are `?tab=` (and `?group=` on Services); an unknown or moved tab
@@ -44,6 +49,7 @@ import IntegrationsOverview from '@/components/admin/integrations/IntegrationsOv
 import IntegrationsDirectory from '@/components/admin/integrations/IntegrationsDirectory';
 import IntegrationsServices from '@/components/admin/integrations/IntegrationsServices';
 import IntegrationsKeys from '@/components/admin/integrations/IntegrationsKeys';
+import IntegrationsCredentials from '@/components/admin/integrations/IntegrationsCredentials';
 import IntegrationsIdentity from '@/components/admin/integrations/IntegrationsIdentity';
 import useServiceTests from '@/components/admin/integrations/useServiceTests';
 import { TABS, resolveTab } from '@/components/admin/integrations/tabs';
@@ -53,6 +59,7 @@ const HELP = [
   'Overview lists every service worst first. A red word is the one to look at; press Test all to ask every safe service at once, one at a time.',
   'Services groups the cards. Each says what the service does for the site, where it is used, which way data flows and what its key can reach, with a beaker to test it.',
   'Keys is the only place a credential is written. Paste a new value to rotate; nothing here can read one back. Disconnecting a key-based service means replacing or revoking its key.',
+  'Credentials lists every credential in every store with its age and expiry; overdue is red. Record the date you rotated one the site cannot read, and its Telegram reminder moves with it.',
   'Identity shows the Entra app registrations the browser and the API run on. The Health page tests the token this session actually holds.',
   'Every test result is recorded, so "last worked" and "last failed" are still here tomorrow and on the Health page.',
 ];
@@ -97,6 +104,7 @@ export default function IntegrationsPage() {
           />
         )}
         {activeTab === 'keys' && <IntegrationsKeys />}
+        {activeTab === 'credentials' && <IntegrationsCredentials />}
         {activeTab === 'identity' && <IntegrationsIdentity />}
       </HubTabs>
     </div>

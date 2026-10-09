@@ -17,7 +17,14 @@
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { patchDoc, queryDocs, readDoc, upsertDoc } from '../lib/cosmos-client.js';
+import {
+  createDoc,
+  patchDoc,
+  queryDocs,
+  readDoc,
+  replaceDocIfMatch,
+  upsertDoc,
+} from '../lib/cosmos-client.js';
 import { createPlatformSettingsHandlers } from '../lib/platform-settings.js';
 import { createNotifier } from '../lib/notify.js';
 import { createNotifyTestHandlers } from '../lib/notify-test.js';
@@ -25,7 +32,7 @@ import { createNotifyTestHandlers } from '../lib/notify-test.js';
 const handlers = () =>
   createPlatformSettingsHandlers({
     guard: getDefaultGuard(),
-    store: { readDoc, upsertDoc, queryDocs },
+    store: { readDoc, upsertDoc, replaceDocIfMatch, createDoc, queryDocs },
   });
 
 // Test Telegram (owner brief 2026-10-06): one message through the production
