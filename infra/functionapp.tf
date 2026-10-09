@@ -487,7 +487,6 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # 2026-10-05 (the balance there is small), so this guard is the only stop.
     "CONTENTFORGE_IMAGE_COST_USD"           = "0.02"
     "CONTENTFORGE_IMAGE_MONTHLY_BUDGET_USD" = "10"
-    "PERPLEXITY_API_KEY"                    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/PERPLEXITY-API-KEY)"
     "REPLICATE_API_KEY"                     = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault.hcw.vault_uri}secrets/REPLICATE-API-KEY)"
 
     # Listen & Learn audio.

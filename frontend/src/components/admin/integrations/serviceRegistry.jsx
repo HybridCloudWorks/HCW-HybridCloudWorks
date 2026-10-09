@@ -11,7 +11,8 @@
  *
  * ADR 0033 (Platform) added a card for every AI key that until then appeared
  * only as a loose key on the Keys tab — Gemini, Anthropic, OpenAI, NVIDIA,
- * Perplexity, ElevenLabs, Azure Speech, Firecrawl, Replicate — and one for the
+ * ElevenLabs, Azure Speech, Firecrawl, Replicate (and Perplexity, until #1029
+ * retired the key nothing read) — and one for the
  * Hybrid Lab's three values, each saying what the service is for, what it can
  * do, which hubs use it, which way data flows and what the key can reach.
  */
@@ -381,9 +382,7 @@ const LLM_SECURITY_NOTE =
  *           read exists. `null` is honest rather than lazy, and since ADR 0033
  *           it comes with `untestedReason` saying why, shown on the card: the
  *           education profiles are public HTML a browser cannot fetch from
- *           another origin; Perplexity has no read-only endpoint, so a test
- *           would be a paid completion; Azure Speech is unprovisioned on
- *           purpose.
+ *           another origin; Azure Speech is unprovisioned on purpose.
  *
  *           NO BEAKER MEANS THE GLOBE HAS TO WORK HARDER. When a service holds
  *           credentials and offers no test, the only thing this page can do
@@ -675,22 +674,6 @@ export const SERVICES = Object.freeze([
     usedIn: ['Forge Studio', 'AI Engine'],
     dataDirection: 'Outbound: article text and prompts go to NVIDIA; drafts come back.',
     securityNote: `${LLM_SECURITY_NOTE} Locked off for the anonymous public explain routes.`,
-  },
-  {
-    id: 'perplexity',
-    group: 'gen-ai',
-    icon: Bot,
-    name: 'Perplexity',
-    description: 'A search-grounded model. Nothing on the site uses it today.',
-    url: 'https://www.perplexity.ai/settings/api',
-    test: null,
-    untestedReason:
-      'Perplexity has no read-only endpoint, so a test would be a paid completion for a service nothing uses.',
-    secrets: ['PERPLEXITY-API-KEY'],
-    capabilities: [],
-    usedIn: [],
-    dataDirection: 'None today.',
-    securityNote: 'Read by nothing; the key can be left unset.',
   },
 
   // ── AI services (ADR 0033) ───────────────────────────────────────────────

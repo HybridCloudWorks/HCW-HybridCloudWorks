@@ -52,7 +52,6 @@ describe('the service registry', () => {
       'Anthropic',
       'OpenAI',
       'NVIDIA API',
-      'Perplexity',
       'ElevenLabs',
       'Azure AI Speech',
       'Firecrawl',
@@ -124,15 +123,14 @@ describe('the service registry', () => {
   });
 
   it('names exactly the credentialed services with no test, and says why on each (ADR 0033)', () => {
-    // #483 emptied this set. ADR 0033 added a card for every AI key, and two
-    // of them have no cheap read to test with: Perplexity has no read-only
-    // endpoint (a test would be a paid completion for a service nothing
-    // uses) and Azure Speech is unprovisioned on purpose. Both are decisions
-    // made HERE, in the open, and each card says so in words.
+    // #483 emptied this set. ADR 0033 added a card for every AI key, and one
+    // of them has no cheap read to test with: Azure Speech is unprovisioned on
+    // purpose (Perplexity, the other, went with its key in #1029). It is a
+    // decision made HERE, in the open, and the card says so in words.
     const untestable = SERVICES.filter(
       (service) => !service.test && (service.secrets ?? []).length > 0
     );
-    expect(untestable.map((service) => service.name)).toEqual(['Perplexity', 'Azure AI Speech']);
+    expect(untestable.map((service) => service.name)).toEqual(['Azure AI Speech']);
     for (const service of untestable) {
       expect(service.untestedReason, `${service.name} says nothing`).toMatch(/\w{10,}/);
     }

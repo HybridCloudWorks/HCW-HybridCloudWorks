@@ -103,8 +103,8 @@ describe('the configuration', () => {
     }
   });
 
-  it('does not advertise an unwired provider as powering anything', () => {
-    expect(DIRECTORY.find((row) => row.id === 'perplexity').powers).toMatch(/^Nothing yet/);
+  it('lists no provider that nothing on the site uses (Perplexity, retired in #1029)', () => {
+    expect(DIRECTORY.find((row) => row.id === 'perplexity')).toBeUndefined();
   });
 
   it('reads a status key as connected, not connected, or unknown', () => {
@@ -117,8 +117,8 @@ describe('the configuration', () => {
   });
 
   it('reads a keyed service as unknown, not connected, while the key status cannot be read', () => {
-    const entry = { id: 'perplexity', keyed: true };
-    const card = { id: 'perplexity', items: [], test: undefined };
+    const entry = { id: 'azure-speech', keyed: true };
+    const card = { id: 'azure-speech', items: [], test: undefined };
     expect(directoryStatus({ entry, card, result: undefined, secretsKnown: false })).toBe(
       'untested'
     );
@@ -137,7 +137,7 @@ describe('the configuration', () => {
     expect(directoryStatus({ entry, card: undefined, result: undefined, secretsKnown: true })).toBe(
       'untested'
     );
-    const decorated = decorateEntries([{ id: 'perplexity', keyed: true, category: 'ai' }], {
+    const decorated = decorateEntries([{ id: 'azure-speech', keyed: true, category: 'ai' }], {
       serviceCards: [card],
       results: {},
       secretsKnown: false,
@@ -271,7 +271,6 @@ describe('the tab', () => {
     const connected = screen.queryAllByRole('heading', { level: 3 }).map((h) => h.textContent);
     // Telegram's recorded pass still counts; a keyed service with no test does not.
     expect(connected).toContain('Telegram');
-    expect(connected).not.toContain('Perplexity');
     expect(connected).not.toContain('Azure AI Speech');
   });
 

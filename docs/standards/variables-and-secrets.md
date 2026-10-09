@@ -361,21 +361,50 @@ Seeded by hand; referenced from `infra/functionapp.tf` app settings as
 | `CLIENT-IP-SALT` | §3 | Runtime salt for quota keys; rotating it resets live counters, so rotation must not need a Terraform run |
 | `AWS-ACCESS-KEY-ID`, `AWS-SECRET-ACCESS-KEY` | not inventoried | Third-party static credentials — AWS offers the Function App no federation here. Scope the IAM policy to `pricing:GetProducts` only |
 | `GEMINI-API-KEY` | §4 | Public Generative Language API, NOT Vertex — Vertex needs GCP ADC the Function App cannot hold. First in provider preference order since 2026-08-23. Unseeded resolves to the literal `@Microsoft.KeyVault(...)`, which the router reads as no key, so it falls through to OpenAI |
-| `ANTHROPIC-API-KEY`, `OPENAI-API-KEY`, `PERPLEXITY-API-KEY`, `REPLICATE-API-KEY` | §4, partially | Third-party SaaS keys. Distinct from Azure OpenAI, which is keyless. `PERPLEXITY` and `REPLICATE` are referenced as app settings but no longer reachable through the AI router — it implements Gemini, OpenAI and Anthropic only |
+| `ANTHROPIC-API-KEY`, `OPENAI-API-KEY`, `REPLICATE-API-KEY` | §4, partially | Third-party SaaS keys. Distinct from Azure OpenAI, which is keyless. `REPLICATE-API-KEY` is a media key, not a text one: image generation reads it (`MEDIA_KEY_ENV` in `functions/src/lib/ai/router.js`), and so does the Replicate MCP policy (`mcp-policy.js`). `PERPLEXITY-API-KEY` was retired on 2026-10-09 (#1029): nothing read it, so its app setting, catalogue entry and Integrations card went, and the secret is the owner's to delete (below) |
 | `FIRECRAWL-API-KEY`, `LINKIE-API-KEY`, `YOUTUBE-API-KEY` | not inventoried | Third-party SaaS keys |
 | `PUBLER-API-KEY`, `PUBLER-WORKSPACE-ID` | not inventoried | The `-ID` value is an identifier rather than a credential, but it travels with its key and splitting them across stores buys nothing |
 | `RESEND-API-KEY` | not inventoried | Newsletter list and sending (ADR 0030), replacing Klaviyo's two secrets. A Full access key; a sending-access key cannot manage contacts or broadcasts |
 | `RSSCOM-API-KEY`, `RSSCOM-PODCAST-ID` | not inventoried | Podcast publishing over the RSS.com Core API (ADR 0029 §1b, #437). The `-ID` is the show's numeric id, an identifier that travels with its key, as above |
 | `TELEGRAM-BOT-TOKEN`, `TELEGRAM-CHAT-ID` | not inventoried | As above |
 | `QLTY-API-TOKEN` | not inventoried | Qlty personal access token for the Health Hub's Code and Security summary (#569, `lib/code-quality/qlty-summary.js`). Sent only as a Bearer header to `api.qlty.sh`; the summary route returns counts and paths, never finding text |
-| `GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN` | not inventoried | Site rebuild trigger and VPS control |
+| `GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN` | not inventoried | **Read by nothing** (#1029, 2026-10-09): no app setting in `infra/` references either, and no code reads them. They were named for a site rebuild trigger and VPS control that never arrived here; Hostinger is reached through its hosted MCP server's OAuth connection (`hostinger-mcp`, `functions/src/lib/ai/mcp-oauth.js`), whose tokens live on its `mcp_servers` record, not in the vault. Whether they exist in the vault is unconfirmed, because a session holds no data-plane role; if they do, the owner deletes them (below) |
 | `GCP-BILLING-API-KEY` | not inventoried | Cloud Billing Catalog API key for the public GCP price list — Google's documented auth for it. Replaced a ~2.3 KB service-account JSON on 2026-08-29 |
-| `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by any app setting in `infra/` and read by nothing** — it has no app setting and no seeding path, deliberately |
+| `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by any app setting in `infra/` and read by nothing** — it has no app setting and no seeding path, deliberately. Like the two above, unconfirmed in the vault, and the owner's to delete if it is there (below) |
 | `TURNSTILE-SECRET-KEY` | not inventoried | Cloudflare Turnstile secret key for the Landing Zone Builder's "Validate on the lab" ([ADR 0032](../decisions/0032-learner-labs-platform.md), amendment of 2026-09-28), sent only to Cloudflare's siteverify. Its site key is public and is store 3 (`VITE_TURNSTILE_SITE_KEY`). The widget is created in the Cloudflare dashboard rather than as `cloudflare_turnstile_widget`, because that resource's read-only `secret` attribute would put this value in state, the rule in the next section |
 
 `infra/functionapp.tf` declares **30** `@Microsoft.KeyVault` references and no
-run-time reads. CHECKLIST §1–§8 inventories a handful of them. That gap is
-recorded below rather than papered over.
+run-time reads (counted 2026-10-09, after #1029 removed the Perplexity one).
+CHECKLIST §1–§8 inventories a handful of them. That gap is recorded below
+rather than papered over.
+
+**Deleting a secret nothing reads (#1029).** Four names above are read by
+nothing: `PERPLEXITY-API-KEY`, `GITHUB-APP-INSTALLATION-ID`,
+`HOSTINGER-API-TOKEN` and `GITHUB-APP-PRIVATE-KEY`. Deleting one is the
+owner's, from an account with a data-plane role on the vault, and comes after
+the `hcw-azure` run that drops the Perplexity reference, never before, so no
+app setting ever points at a deleted secret. One line per name, PowerShell:
+
+```powershell
+az keyvault secret delete --vault-name kv-site-prod-cus-01 --name PERPLEXITY-API-KEY
+```
+
+```powershell
+az keyvault secret delete --vault-name kv-site-prod-cus-01 --name GITHUB-APP-INSTALLATION-ID
+```
+
+```powershell
+az keyvault secret delete --vault-name kv-site-prod-cus-01 --name HOSTINGER-API-TOKEN
+```
+
+```powershell
+az keyvault secret delete --vault-name kv-site-prod-cus-01 --name GITHUB-APP-PRIVATE-KEY
+```
+
+Success prints the deleted secret's JSON, with a `recoveryId`. `SecretNotFound`
+means it was never seeded, which is just as good. The vault keeps a deleted
+secret for its soft-delete period, so `az keyvault secret recover` undoes a
+mistake until then.
 
 ### Store 2 — HCP Terraform workspace
 

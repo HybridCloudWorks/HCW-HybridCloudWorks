@@ -175,16 +175,6 @@ export const SECRET_CATALOG = Object.freeze([
     help: 'API key starting nvapi-. Free, rate-limited models: by default the backup for drafts, summaries and scripts, used when the models above cannot answer. The AI Engine page can make them the main writer for a feature. Never used on the public pages.',
     probe: 'nvidia',
   },
-  {
-    setting: 'PERPLEXITY_API_KEY',
-    secret: 'PERPLEXITY-API-KEY',
-    section: 'gen-ai',
-    label: 'Perplexity',
-    // Referenced but not reachable through the AI router today — it
-    // implements Gemini, OpenAI, Anthropic and NVIDIA only.
-    help: 'API key. Nothing on the site uses it today.',
-    probe: null,
-  },
 
   // ── AI services ───────────────────────────────────────────────────
   {

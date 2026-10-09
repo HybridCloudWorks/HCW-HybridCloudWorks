@@ -208,6 +208,15 @@ export const DECLARED = [
     action: 'create',
     reason: 'Telegram refused or failed a send; the owner hears by SMS and mail instead of nobody',
   },
+  // #1029: the Perplexity key's reference goes; nothing read it.
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.PERPLEXITY_API_KEY',
+    before:
+      '@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/PERPLEXITY-API-KEY)',
+    after: undefined,
+    reason: '#1029: the Perplexity key is retired; no code read it',
+  },
 ];
 
 /** The keys an update must carry for its values to be printed safely. */

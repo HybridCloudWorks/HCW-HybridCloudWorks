@@ -381,10 +381,10 @@ describe('what a card says about itself (ADR 0033)', () => {
   });
 
   it('says why a card has no test instead of showing no beaker and explaining nothing', async () => {
-    render(<Harness group="gen-ai" />);
-    const card = await waitFor(() => cardFor('Perplexity'));
-    expect(within(card).getByText(/No test: Perplexity has no read-only endpoint/)).toBeTruthy();
-    expect(within(card).queryByRole('button', { name: /Test Perplexity/ })).toBeNull();
+    render(<Harness group="ai-services" />);
+    const card = await waitFor(() => cardFor('Azure AI Speech'));
+    expect(within(card).getByText(/No test: Not set up on purpose/)).toBeTruthy();
+    expect(within(card).queryByRole('button', { name: /Test Azure AI Speech/ })).toBeNull();
   });
 });
 

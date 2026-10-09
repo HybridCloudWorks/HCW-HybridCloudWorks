@@ -159,15 +159,6 @@ export const DIRECTORY = Object.freeze([
     docsUrl: 'https://docs.api.nvidia.com',
   },
   {
-    id: 'perplexity',
-    category: 'ai',
-    summary: 'Answer engine with web grounding.',
-    // Listed on the AI Engine as a provider the router could use, with no
-    // feature wired to it (review of #922): say so rather than invent a use.
-    powers: 'Nothing yet: listed on the AI Engine as a provider, with no feature wired to it.',
-    docsUrl: 'https://docs.perplexity.ai',
-  },
-  {
     id: 'elevenlabs',
     category: 'ai',
     summary: 'Text-to-speech voices.',
