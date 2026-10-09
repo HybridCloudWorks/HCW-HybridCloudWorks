@@ -60,7 +60,11 @@ This project has not cut a tagged release; entries are grouped under
   still a Template Admin and not an Owner, and every run refuses one that
   is not a Template Admin; a new credential that fails before it is stored,
   and that Coder will not delete, is recorded by id and deleted by every
-  later run until it is gone (review of #1035).
+  later run until it is gone (review of #1035). A replaced credential is
+  listed the same way, before the new one is written, so an interruption
+  cannot leave it usable and forgotten; `hcw-coder-automation revoke`
+  turns the automation off by deleting the credential in Coder before the
+  file, and comes before any revert of this code (CodeRabbit, #1035).
 - **Coder automation, the site's half: the lab host can hand the site a
   renewed Coder status token through the lab agent, and the site stores it
   only after Coder vouches for it as a working, read-only key of the status

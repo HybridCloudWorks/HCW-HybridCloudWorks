@@ -2,7 +2,7 @@
 """Keep the site's Coder status token renewed, publish the template, and report.
 
 Installed by the coder role as /usr/local/libexec/hcw-coder-automation,
-root:root 0750, and run three ways, each as root:
+root:root 0750, and run four ways, each as root:
 
     hcw-coder-automation [--config PATH] seed [--force]
         The owner's one-time step, through /usr/local/sbin/hcw-coder-automation-seed,
@@ -15,6 +15,10 @@ root:root 0750, and run three ways, each as root:
     hcw-coder-automation [--config PATH] push-template [--force]
         The coder role, on every bootstrap.sh run. Publishes the hcw-lab
         template with the rotation credential when its files changed.
+    hcw-coder-automation [--config PATH] revoke
+        The owner's way to turn it off. Deletes the rotation credential, and
+        any on the deletion list, in Coder before removing the file, so no
+        unscoped token outlives the automation (review of #1035).
 
 The configuration (default /etc/hcw/coder/automation.json) is rendered by the
 coder role from its variables: paths, names and the agent's user, no secret.
@@ -211,6 +215,7 @@ def remember(token):
 
 
 def scrub(text):
+    """Replace every remembered token, and its secret half, with [token]."""
     for value in sorted(SECRETS, key=len, reverse=True):
         if value:
             text = text.replace(value, "[token]")
@@ -218,22 +223,27 @@ def scrub(text):
 
 
 def say(message):
+    """Print a scrubbed line to stdout under this helper's name."""
     print(f"{me}: {scrub(message)}", flush=True)
 
 
 def warn(message):
+    """Print a scrubbed line to stderr under this helper's name."""
     print(f"{me}: {scrub(message)}", file=sys.stderr, flush=True)
 
 
 def now():
+    """The current UTC time, to the second."""
     return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
 
 
 def iso(moment):
+    """A time as RFC 3339 UTC with seconds and a Z, the form every report field takes."""
     return moment.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def day(moment):
+    """A time's UTC date, YYYY-MM-DD."""
     return moment.astimezone(datetime.timezone.utc).strftime("%Y-%m-%d")
 
 
@@ -244,6 +254,7 @@ _TIME = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d+))?(Z|[+-]\d
 
 
 def parse_time(text):
+    """A Go RFC 3339 time from Coder as an aware UTC datetime; Failure when it is not one."""
     match = _TIME.match(text if isinstance(text, str) else "")
     if not match:
         raise Failure("Coder answered a time this helper cannot read")
@@ -254,14 +265,17 @@ def parse_time(text):
 
 
 def key_id(token):
+    """A token's public half: the id Coder knows its key by."""
     return token.split("-", 1)[0]
 
 
 def role_names(user):
+    """The site-wide role names Coder lists for a user."""
     return {role.get("name") for role in (user.get("roles") or []) if isinstance(role, dict)}
 
 
 def scopes_of(key):
+    """A key's scopes as a set, from scopes or the older single scope field."""
     scopes = key.get("scopes") or []
     if not scopes and key.get("scope"):
         scopes = [key["scope"]]
@@ -284,6 +298,7 @@ def is_status_key(key):
 
 
 def created(key):
+    """When Coder made a key."""
     return parse_time(key.get("created_at"))
 
 
@@ -291,6 +306,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
     # urllib would follow a redirect and send the token header with it.
     # Coder on the loopback never redirects an API call; refuse it if it does.
     def redirect_request(self, *args, **kwargs):
+        """Refuse every redirect, so the token header never follows one."""
         return None
 
 
@@ -298,6 +314,7 @@ class Coder:
     """Coder's REST API on the host's loopback, never through a proxy."""
 
     def __init__(self, url):
+        """A client for the Coder at url, with no proxy and no redirects."""
         self.url = url.rstrip("/")
         self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
@@ -371,16 +388,19 @@ def read_credential(path):
 
 
 def store_credential(path, token):
+    """Write the rotation credential root-only and atomically, then read it back."""
     write_atomic(path, token + "\n")
     if read_credential(path) != token:
         raise Failure(f"the rotation credential written to {path} did not read back the same")
 
 
 def state_path(config):
+    """Where the state file lives."""
     return os.path.join(config["state_dir"], "state.json")
 
 
 def load_state(config):
+    """The saved state, or an empty one when the file is missing or not a JSON object."""
     try:
         with open(state_path(config), encoding="utf-8") as handle:
             state = json.load(handle)
@@ -393,6 +413,7 @@ def load_state(config):
 
 
 def save_state(config, state):
+    """Save the state atomically, leaving out empty values; it never holds a token."""
     kept = {name: value for name, value in sorted(state.items()) if value is not None}
     write_atomic(state_path(config), json.dumps(kept, indent=2) + "\n")
 
@@ -418,6 +439,7 @@ def locked(config):
 
 
 def load_config(path):
+    """The JSON configuration bootstrap.sh writes, refused when a key is missing or of the wrong type."""
     try:
         with open(path, encoding="utf-8") as handle:
             config = json.load(handle)
@@ -471,6 +493,7 @@ def check_identity(coder, token, user, what):
 
 
 def own_key(coder, token, identifier, what):
+    """A token's own key record (GET /api/v2/users/me/keys/{id}); Failure on anything but 200."""
     status, key = coder.call("GET", f"/api/v2/users/me/keys/{identifier}", token)
     if status != 200 or not isinstance(key, dict):
         raise Failure(f"Coder answered HTTP {status} when asked for {what}'s record")
@@ -478,6 +501,7 @@ def own_key(coder, token, identifier, what):
 
 
 def list_tokens(coder, token, user):
+    """hcw-status's tokens, as Coder lists them to the rotation credential."""
     status, keys = coder.call("GET", "/api/v2/users/me/keys/tokens", token)
     if status != 200 or not isinstance(keys, list):
         raise Failure(f"Coder answered HTTP {status} when asked for {user}'s tokens")
@@ -507,18 +531,38 @@ def delete_key(coder, token, user, identifier):
     return status in (204, 404)
 
 
-# A rotation credential that was created but never stored is a year-long
-# unscoped token nothing holds, and prune touches status tokens only, so one
-# Coder does not delete is recorded here and every run deletes it until it is
-# gone (review of #1035). The id is a token's public half, like statusTokenId.
+# Rotation credentials to delete: a new one that failed before it was stored,
+# and the one a renewal or seed --force replaced. Each is a year-long unscoped
+# token nothing should hold, and prune touches status tokens only, so its id
+# stays here until Coder confirms the deletion, and every run works through
+# the list (reviews of #1035). A predecessor goes on before the new
+# credential replaces it, and the state is saved, so an interruption or a
+# failed delete between the two cannot strand it. The id is a token's public
+# half, like statusTokenId; the credential in use is never deleted.
 DISCARDED = "discardedRotationIds"
+
+
+def mark_for_deletion(state, identifier):
+    """Put a rotation credential's id on the list every run deletes from."""
+    state[DISCARDED] = [i for i in state.get(DISCARDED) or [] if i != identifier] + [identifier]
+
+
+def retire(coder, token, state, identifier):
+    """Delete a listed rotation credential of the token's user; True, and off the list, once it is gone."""
+    try:
+        gone = delete_key(coder, token, "me", identifier)
+    except Failure:
+        gone = False
+    if gone:
+        state[DISCARDED] = [i for i in state.get(DISCARDED) or [] if i != identifier] or None
+    return gone
 
 
 def discard_new_credential(coder, token, owner_ref, new, name, state, user):
     """Delete a new rotation credential that failed before it was stored.
 
     Returns what became of it, for the error. When Coder does not delete it,
-    its id goes into the state for the next run.
+    its id goes on the list for the next run.
     """
     identifier = key_id(new)
     try:
@@ -527,24 +571,23 @@ def discard_new_credential(coder, token, owner_ref, new, name, state, user):
         gone = False
     if gone:
         return f"the new rotation credential {name} was deleted"
-    state[DISCARDED] = [i for i in state.get(DISCARDED) or [] if i != identifier] + [identifier]
+    mark_for_deletion(state, identifier)
     return (f"deleting the new rotation credential {name} failed too; the next run deletes it, "
             f"or delete it by hand among {user}'s tokens in Coder")
 
 
 def retry_discards(coder, token, state):
-    """Delete the rotation credentials an earlier run or seed could not."""
+    """Delete the listed rotation credentials an earlier run or seed could not, never the one in use."""
     pending = [i for i in state.get(DISCARDED) or [] if isinstance(i, str) and i != key_id(token)]
+    state[DISCARDED] = pending or None
     if not pending:
-        state[DISCARDED] = None
         return
-    left = [identifier for identifier in pending if not delete_key(coder, token, "me", identifier)]
-    state[DISCARDED] = left or None
+    left = [identifier for identifier in pending if not retire(coder, token, state, identifier)]
     if len(left) < len(pending):
-        say(f"deleted {len(pending) - len(left)} rotation credential(s) an earlier run created but never stored")
+        say(f"deleted {len(pending) - len(left)} rotation credential(s) an earlier run replaced or never stored")
     if left:
         raise Failure(
-            f"Coder did not delete {len(left)} rotation credential(s) an earlier run created but never stored; "
+            f"Coder did not delete {len(left)} rotation credential(s) an earlier run replaced or never stored; "
             "the next run tries again"
         )
 
@@ -631,6 +674,7 @@ def report_fields(state, checked_at):
 
 
 def clip(errors):
+    """The errors as one scrubbed line of at most LAST_ERROR_MAX characters, for lastError."""
     text = scrub("; ".join(errors))
     return text if len(text) <= LAST_ERROR_MAX else text[: LAST_ERROR_MAX - 3] + "..."
 
@@ -649,15 +693,17 @@ def renew_rotation(coder, config, token, state, started):
     try:
         check_identity(coder, new, user, f"the new rotation credential {name}")
         expires = parse_time(own_key(coder, new, key_id(new), f"the new rotation credential {name}").get("expires_at"))
+        mark_for_deletion(state, key_id(token))
+        save_state(config, state)
         store_credential(config["credential_file"], new)
     except Failure as error:
         outcome = discard_new_credential(coder, token, "me", new, name, state, user)
         raise Failure(f"{error}; {outcome}") from None
     state["rotationTokenExpiresAt"] = iso(expires)
     say(f"stored a new rotation credential, {name}; it expires on {day(expires)}")
-    if delete_key(coder, new, "me", key_id(token)):
+    if retire(coder, new, state, key_id(token)):
         return new, expires, None
-    return new, expires, "the new rotation credential is stored, but Coder did not delete the previous one; it expires on its own"
+    return new, expires, "the new rotation credential is stored, but Coder did not delete the previous one; the next run deletes it"
 
 
 def renew_status(coder, config, token, state, started, previous_id):
@@ -760,6 +806,7 @@ def prune(coder, config, token, keys, state, started):
 
 
 def run(config, args):
+    """The timer's run: check the credential, renew what is due, delete what is listed or old, report. 0 or 1."""
     coder = Coder(config["coder_url"])
     user = config["status_user"]
     errors = []
@@ -846,6 +893,7 @@ def read_stdin_token():
 
 
 def seed(config, args):
+    """Store the rotation credential from the owner's token on stdin. 0, or a Failure or Refusal."""
     owner = read_stdin_token()
     coder = Coder(config["coder_url"])
     user = config["status_user"]
@@ -900,20 +948,24 @@ def seed(config, args):
         started = now()
         new, name = create_token(coder, owner, user, f"{ROTATION_PREFIX}{day(started)}",
                                  ROTATION_LIFETIME, None, "rotation credential")
+        replacing = existing is not None and existing != new
         try:
             check_identity(coder, new, user, f"the new rotation credential {name}")
             expires = parse_time(own_key(coder, new, key_id(new), f"the new rotation credential {name}").get("expires_at"))
+            if replacing:
+                mark_for_deletion(state, key_id(existing))
+                save_state(config, state)
             store_credential(path, new)
         except Failure as error:
             outcome = discard_new_credential(coder, owner, user, new, name, state, user)
             save_state(config, state)
             raise Failure(f"{error}; {outcome}") from None
         note = ""
-        if existing is not None and existing != new:
-            if delete_key(coder, new, "me", key_id(existing)):
+        if replacing:
+            if retire(coder, new, state, key_id(existing)):
                 note = " The previous one is deleted."
             else:
-                note = " Coder did not delete the previous one; it expires on its own."
+                note = " Coder did not delete the previous one; the next run deletes it."
         state["rotationTokenExpiresAt"] = iso(expires)
         save_state(config, state)
     say(f"stored the rotation credential {name} for {user}; it expires on {day(expires)}.{note}")
@@ -947,6 +999,7 @@ def template_digest(config):
 
 
 def push_template(config, args):
+    """Publish the template with hcw-coder-template-push when its files or autostop changed. 0, 1 or SKIPPED."""
     coder = Coder(config["coder_url"])
     user = config["status_user"]
     template = config["template_name"]
@@ -1005,10 +1058,50 @@ def push_template(config, args):
     return 0
 
 
-COMMANDS = {"seed": seed, "run": run, "push-template": push_template}
+# --- revoke -----------------------------------------------------------------
+
+
+def revoke(config, args):
+    """Turn the automation off: delete the rotation credential in Coder, then the file. 0 or a Failure."""
+    coder = Coder(config["coder_url"])
+    path = config["credential_file"]
+    with locked(config):
+        state = load_state(config)
+        token = read_credential(path)
+        if token is None:
+            say("there is no rotation credential to revoke; nothing was changed")
+            return 0
+        # The listed credentials first: once the stored one is gone, nothing
+        # is left that could delete them.
+        try:
+            retry_discards(coder, token, state)
+        except Failure as error:
+            save_state(config, state)
+            raise Failure(f"{error}; the rotation credential is kept so that this can run again") from None
+        # 401: Coder no longer accepts it (deleted or expired), which is the
+        # end this aims at; anything else but deleted leaves the file in place.
+        status, _ = coder.call("DELETE", f"/api/v2/users/me/keys/{key_id(token)}", token)
+        if status not in (204, 404, 401):
+            save_state(config, state)
+            raise Failure(
+                f"Coder did not delete the rotation credential (HTTP {status}); it is still stored and "
+                "still valid, so run this again"
+            )
+        os.unlink(path)
+        state["rotationTokenExpiresAt"] = None
+        save_state(config, state)
+    say(
+        "revoked the rotation credential in Coder and removed it; the daily run is now skipped and bootstrap.sh "
+        "no longer publishes. hcw-coder-automation-seed turns it back on"
+    )
+    return 0
+
+
+COMMANDS = {"seed": seed, "run": run, "push-template": push_template, "revoke": revoke}
 
 
 def main(argv=None):
+    """Parse the command line and run one command: 2 for a refusal, 1 for a failure."""
     global me
     parser = argparse.ArgumentParser(prog="hcw-coder-automation", description=__doc__.splitlines()[0])
     parser.add_argument("--config", default=DEFAULT_CONFIG)
@@ -1020,6 +1113,7 @@ def main(argv=None):
     command.add_argument("--rotate-credential", action="store_true", help="renew the rotation credential now")
     command = commands.add_parser("push-template", help="publish the template when its files changed")
     command.add_argument("--force", action="store_true", help="publish even when nothing changed")
+    commands.add_parser("revoke", help="turn it off: delete the rotation credential in Coder, then the file")
     args = parser.parse_args(argv)
     if args.command == "seed":
         me = "hcw-coder-automation-seed"

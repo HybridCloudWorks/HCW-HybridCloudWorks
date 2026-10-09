@@ -279,7 +279,9 @@ not an Owner, it says so, with its expiry, and changes nothing unless
 with the owner's token, checks that the new token is `hcw-status`, writes it
 beside the file and renames it over it, reads it back, deletes the one it
 replaced (`--force`), and prints one line naming the new token and its
-expiry date. A name already in use (Coder answers 409) gets `-2`, `-3` and
+expiry date. The replaced one's id is put on the state's deletion list, and
+the state saved, before the new one is written, and it leaves the list only
+once Coder confirms the deletion; until then every run deletes it. A name already in use (Coder answers 409) gets `-2`, `-3` and
 so on.
 
 ### What the daily run does
@@ -294,11 +296,14 @@ directory. Until the credential exists the unit is skipped by
    is a Template Admin and not an Owner, and reads its expiry.
 2. **Renews the credential** when it has under 60 days left (or with
    `--rotate-credential`): creates `hcw-status-rotation-<date>` with the old
-   one, checks it, stores it, then deletes the old one. A new one that fails
-   before it is stored is deleted; if Coder does not delete it (here or in
-   the seed), its id goes into the state, and every run deletes it before
-   anything else until it is gone, failing until then. `prune` touches
-   status tokens only, so nothing else would.
+   one, checks it, stores it, then deletes the old one. The old one's id is
+   put on the state's deletion list, and the state saved, before the new one
+   is written, so an interruption or a failed delete between the two cannot
+   leave it usable and forgotten. A new one that fails before it is stored
+   is deleted, or goes on the same list when Coder does not delete it (here
+   or in the seed). Every run deletes what the list holds, never the
+   credential in use, and fails until Coder confirms each deletion. `prune`
+   touches status tokens only, so nothing else would.
 3. **Renews the site's status token** when the token the site holds expires
    within 30 days or was made more than 60 days ago (or with
    `--rotate-now`): creates `hcw-status-site-<date>` with exactly
@@ -395,6 +400,18 @@ runs (`templates push`, `templates edit --default-ttl`, `templates versions
 list`, `templates list`) are template writes and reads, which Template Admin
 has (2026-09-28 measurement in `lab-host/README.md`: unscoped Template Admin
 changes a template, 200).
+
+### Turning it off
+
+`hcw-coder-automation revoke` (`docs/runbooks/labs-host.md`, "Stopping
+it") deletes the credentials on the state's deletion list, then the stored
+rotation credential, in Coder, with the credential itself, and removes the
+file only once Coder confirms (204, 404, or 401 for a token Coder no longer
+accepts). It stops with the credential still in place when either deletion
+is not confirmed, because the stored credential is the only thing that can
+delete the others, and a second run finishes the job. Removing the file
+alone would leave an unscoped token valid in Coder for up to a year, so
+`revoke` comes before any revert of this code (review of #1035).
 
 ### Coder's API
 
@@ -650,6 +667,9 @@ defaults. No root, no Docker, no network. It checks:
 - a new rotation credential that fails its check and that Coder will not
   delete fails the run or the seed, keeps the stored one, and is recorded by
   id; the next run deletes it and clears the record;
+- a renewal, and a `seed --force`, whose predecessor Coder will not delete
+  keep the new credential and list the old one, which the next run deletes;
+  the credential in use is never deleted, even with its id on the list;
 - a run with a ten-day-old hand-made token renews nothing and reports once,
   with no token, through `systemd-run --pipe --wait` as the agent's user;
   one older than 60 days is renewed with exactly the three read scopes and
@@ -664,6 +684,10 @@ defaults. No root, no Docker, no network. It checks:
   refused or missing credential, Coder not answering and a missing agent
   environment each fail the run, and the report still goes where it can,
   with a `lastError` of at most 300 characters;
+- `revoke` changes nothing without a credential; stops, keeping the
+  credential, when a listed one or the credential itself is not deleted;
+  and otherwise deletes the listed ones, then the credential in Coder, then
+  the file;
 - `push-template` skips with exit 3 and the seed line without a credential
   or with a refused one, publishes with the credential on the push helper's
   stdin and the configured checkout, records the version, publishes again

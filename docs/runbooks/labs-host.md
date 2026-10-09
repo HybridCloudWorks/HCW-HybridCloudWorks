@@ -861,7 +861,8 @@ hcw-coder-automation.service entered the failed state`, which
 | `hcw-status holds the Owner role` | Someone granted it Owner; nothing ran | Remove Owner from `hcw-status` |
 | `hcw-status is not a Template Admin` | Someone removed the role; nothing ran | Give `hcw-status` Template Admin again (`lab-host/README.md`, "The status token for the site", step 2) |
 | `deleting the new rotation credential … failed too` | A renewed credential failed before it was stored and Coder did not delete it; the stored one is unchanged and its id is in the state | Nothing: every run deletes it until it is gone |
-| `Coder did not delete 1 rotation credential(s) an earlier run created but never stored` | That deletion failed again | Nothing while it clears within a day or two; if it repeats, Coder is failing deletes generally, and `coder tokens list --all` (`lab-host/README.md`, "The status token for the site") shows the stray `hcw-status-rotation-` token |
+| `Coder did not delete the previous one; the next run deletes it` | A renewal stored the new credential, and Coder did not delete the one it replaced; its id is on the state's deletion list | Nothing: every run deletes it until it is gone |
+| `Coder did not delete 1 rotation credential(s) an earlier run replaced or never stored` | That deletion failed again | Nothing while it clears within a day or two; if it repeats, Coder is failing deletes generally, and `coder tokens list --all` (`lab-host/README.md`, "The status token for the site") shows the stray `hcw-status-rotation-` token |
 
 **Rotating by hand.** The site's status token, now, PowerShell:
 
@@ -896,17 +897,29 @@ ssh hcw-lab "sudo -n /usr/local/libexec/hcw-coder-automation push-template --for
 Success ends `hcw-coder-automation: published hcw-lab with the rotation
 credential; active version <name>`.
 
-**Stopping it.** Remove the credential, PowerShell:
+**Stopping it.** Revoke the credential, PowerShell:
 
 ```powershell
-ssh hcw-lab "sudo -n rm /etc/hcw/coder/automation/rotation-token"
+ssh hcw-lab "sudo -n /usr/local/libexec/hcw-coder-automation revoke"
 ```
 
-The daily run is then skipped, not failed (`systemctl status` shows a
+Success is one line, `hcw-coder-automation: revoked the rotation credential
+in Coder and removed it; …`. It deletes the credential in Coder first, along
+with any on the state's deletion list, and removes the file only once Coder
+confirms, so no unscoped token outlives the automation. Deleting the file
+alone would leave that token valid in Coder for up to a year. A line ending
+`run this again` means Coder did not confirm a deletion; nothing that
+could finish the job was removed, so run the same line again. Afterwards
+the daily run is skipped, not failed (`systemctl status` shows a
 `Condition:` line naming `ConditionPathExists`), `bootstrap.sh` stops
-publishing and says how to seed
-again, and the site keeps the last token it was given until that token
-expires. The token itself stays valid in Coder until its own expiry.
+publishing and says how to seed again, and the site keeps the last status
+token it was given until that token expires; renew it by hand as before
+("The status token for the site" in `lab-host/README.md`). Seeding again
+turns it all back on.
+
+**Before reverting the automation's code,** run the line above first. The
+revert removes the helper that knows how to revoke the credential, and the
+file it leaves behind would still be a valid unscoped token.
 
 ## Container-runtime privilege separation (LAB-5)
 

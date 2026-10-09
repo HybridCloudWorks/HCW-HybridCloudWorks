@@ -64,6 +64,7 @@ failed = 0
 
 
 def check(name, condition, detail=""):
+    """Record one named check: ok on stdout, or not ok and the detail on stderr."""
     global passed, failed
     if condition:
         passed += 1
@@ -76,6 +77,7 @@ def check(name, condition, detail=""):
 
 
 def skip(name, why):
+    """Record a check that cannot run here, and why."""
     print(f"skip - {name} ({why})")
 
 
@@ -91,6 +93,7 @@ def today():
 
 
 def jinja_env():
+    """A Jinja2 environment that renders the role's templates as Ansible does."""
     # Escaping on for HTML and XML only, as Jinja2 recommends. None of the
     # role's templates is either (JSON, a shell script, systemd units), and
     # Ansible renders them unescaped, so they render here as they do on the host.
@@ -122,6 +125,7 @@ def resolved(*files, extra=None):
 
 
 def render(template, values):
+    """One of the role's templates, rendered with the given values."""
     text = (ROLE / "templates" / template).read_text(encoding="utf-8")
     return jinja_env().from_string(text).render(ansible_managed="Ansible managed", **values)
 
@@ -144,6 +148,7 @@ helper_text = HELPER.read_text(encoding="utf-8")
 
 
 def task_using(module, **match):
+    """The coder role's first task calling a module with the given arguments, and its body."""
     for task in tasks:
         body = task.get(module)
         if isinstance(body, dict) and all(body.get(k) == v for k, v in match.items()):
@@ -230,11 +235,13 @@ else:
 
 
 def go_time(moment):
+    """A time as Coder's JSON carries it: Go's RFC 3339 with nanoseconds and a Z."""
     # Go's RFC 3339 with nanoseconds, which Python's fromisoformat cannot read before 3.11.
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + f"{moment.microsecond:06d}321Z"
 
 
 def random_text(length):
+    """Random letters and digits, the alphabet of Coder's key ids and secrets."""
     return "".join(random.choice(string.ascii_letters + string.digits) for _ in range(length))
 
 
@@ -260,6 +267,7 @@ class FakeCoder:
         self.fail_deletes = set()
 
     def issue(self, user_id, name, scopes, created=None, expires=None):
+        """Make a key for a user and return its token."""
         moment = now()
         identifier, secret = random_text(10), random_text(22)
         created = created or moment
@@ -272,12 +280,15 @@ class FakeCoder:
         return token
 
     def key_of(self, token):
+        """The key a token belongs to, or None."""
         return self.keys.get(token.split("-", 1)[0])
 
     def by_name(self, name):
+        """Every key with this token name."""
         return [key for key in self.keys.values() if key["token_name"] == name]
 
     def key_json(self, key):
+        """A key as Coder's API returns it."""
         return {
             "id": key["id"], "user_id": key["user_id"], "last_used": "0001-01-01T00:00:00Z",
             "expires_at": go_time(key["expires_at"]), "created_at": go_time(key["created_at"]),
@@ -288,6 +299,7 @@ class FakeCoder:
         }
 
     def authenticate(self, header):
+        """The key a Coder-Session-Token header names, when it is valid and unexpired."""
         identifier, _, secret = (header or "").partition("-")
         key = self.keys.get(identifier)
         if key is None or key["secret"] != secret or key["expires_at"] <= now():
@@ -295,6 +307,7 @@ class FakeCoder:
         return key
 
     def resolve(self, reference, caller):
+        """The user a path names: me, an id or a username."""
         if reference == "me":
             return caller
         return next((user for user in self.users.values() if reference in (user["id"], user["username"])), None)
@@ -324,6 +337,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.route("DELETE")
 
     def route(self, method):
+        """Serve the part of Coder's API the helper uses, with Coder's status codes and permissions."""
         fake = self.fake
         url = urllib.parse.urlsplit(self.path)
         parts = url.path.strip("/").split("/")
@@ -467,6 +481,7 @@ print(f"hcw-coder-template-push: published hcw-lab from {src}/lab-host/coder/tem
 
 
 def write_fake(path, text, **values):
+    """Write an executable fake, its @NAME@ placeholders filled in."""
     for name, value in values.items():
         text = text.replace(f"@{name}@", value)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -475,6 +490,7 @@ def write_fake(path, text, **values):
 
 
 def free_port():
+    """An unused TCP port on the loopback."""
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         return probe.getsockname()[1]
@@ -528,14 +544,17 @@ class World:
         self.write_config()
 
     def write_config(self, **changes):
+        """Write the helper's configuration, with changes."""
         self.config.update(changes)
         self.config_file.write_text(json.dumps(self.config), encoding="utf-8")
 
     def cli_mode(self, mode):
+        """Set how the fake site CLI answers: stored, not-stored or fail."""
         self.env_file.write_text(f"# a stand-in for /etc/hcw/labs-agent.env\nLABS_AGENT_ID=vps-test\nFAKE_CLI_MODE={mode}\n",
                                  encoding="utf-8")
 
     def helper(self, *args, stdin=b""):
+        """Run the helper with arguments and stdin, keeping its output for the leak check."""
         completed = subprocess.run([sys.executable, "-I", str(HELPER), "--config", str(self.config_file), *args],
                                    input=stdin, capture_output=True, timeout=120)
         result = subprocess.CompletedProcess(completed.args, completed.returncode,
@@ -545,23 +564,29 @@ class World:
         return result
 
     def seed(self, *args):
+        """Run the seed with the owner's token on stdin."""
         return self.helper("seed", *args, stdin=(self.owner_token + "\n").encode())
 
     def credential(self):
+        """The stored rotation credential, or None."""
         path = pathlib.Path(self.config["credential_file"])
         return path.read_text(encoding="utf-8").strip() if path.exists() else None
 
     def state(self):
+        """The helper's state file, parsed, or an empty dict."""
         path = self.state_dir / "state.json"
         return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
     def lines(self, path):
+        """A JSON-lines file, parsed."""
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
     def cli_calls(self):
+        """Every call the fake site CLI received."""
         return self.lines(self.cli_log)
 
     def status_key(self, name, created_days_ago, expires_in_days, scopes=STATUS_SCOPES):
+        """Make a status token of hcw-status, created and expiring relative to now."""
         moment = now()
         return self.fake.issue("u-status", name, scopes, moment - created_days_ago * DAY, moment + expires_in_days * DAY)
 
@@ -579,6 +604,7 @@ class World:
         return found
 
     def close(self):
+        """Stop the fake Coder and remove the world's files."""
         self.server.shutdown()
         self.server.server_close()
         shutil.rmtree(self.root, ignore_errors=True)
@@ -949,6 +975,84 @@ check("and the next run deletes that one too",
       result.stdout + result.stderr)
 leaks = world.leaks()
 check("no token leaks from a discarded credential", not leaks, ", ".join(leaks))
+world.close()
+
+# --- A replaced rotation credential that Coder will not delete ----------------------------
+
+world = World()
+world.seed()
+first = world.credential()
+first_key = dict(world.fake.key_of(first))
+world.status_key("frosty_hopper4", created_days_ago=1, expires_in_days=300)
+world.fake.fail_deletes.add(first_key["token_name"])
+result = world.helper("run", "--rotate-credential")
+second = world.credential()
+check("a renewal whose predecessor Coder will not delete keeps the new credential and fails, saying the next run deletes it",
+      result.returncode == 1 and second != first and "the next run deletes it" in result.stderr
+      and world.fake.key_of(first) is not None, result.stdout + result.stderr)
+check("the predecessor's id is on the list in the state",
+      world.state().get("discardedRotationIds") == [first_key["id"]], json.dumps(world.state()))
+world.fake.fail_deletes.clear()
+result = world.helper("run")
+check("the next run deletes the predecessor and clears the list",
+      result.returncode == 0 and world.fake.key_of(first) is None and "discardedRotationIds" not in world.state(),
+      result.stdout + result.stderr)
+second_key = dict(world.fake.key_of(second))
+world.fake.fail_deletes.add(second_key["token_name"])
+result = world.seed("--force")
+third = world.credential()
+check("seed --force whose predecessor Coder will not delete stores the new one and lists the old",
+      result.returncode == 0 and third != second and "the next run deletes it" in result.stdout
+      and world.state().get("discardedRotationIds") == [second_key["id"]], result.stdout + result.stderr)
+world.fake.fail_deletes.clear()
+result = world.helper("run")
+check("and the next run deletes it",
+      result.returncode == 0 and world.fake.key_of(second) is None and "discardedRotationIds" not in world.state(),
+      result.stdout + result.stderr)
+planted = world.state()
+planted["discardedRotationIds"] = [world.fake.key_of(third)["id"]]
+(world.state_dir / "state.json").write_text(json.dumps(planted), encoding="utf-8")
+result = world.helper("run")
+check("the credential in use is never deleted, even with its id on the list",
+      result.returncode == 0 and world.fake.key_of(third) is not None and world.credential() == third
+      and "discardedRotationIds" not in world.state(), result.stdout + result.stderr)
+leaks = world.leaks()
+check("no token leaks from a replaced credential", not leaks, ", ".join(leaks))
+world.close()
+
+# --- revoke: turning it off -------------------------------------------------------------
+
+world = World()
+result = world.helper("revoke")
+check("revoke with no credential changes nothing", result.returncode == 0 and "nothing was changed" in result.stdout,
+      result.stdout + result.stderr)
+world.seed()
+credential = world.credential()
+credential_name = world.fake.key_of(credential)["token_name"]
+leftover = world.fake.issue("u-status", f"hcw-status-rotation-{today()}-9", ["coder:all"])
+planted = world.state()
+planted["discardedRotationIds"] = [leftover.split("-")[0]]
+(world.state_dir / "state.json").write_text(json.dumps(planted), encoding="utf-8")
+world.fake.fail_deletes.add(f"hcw-status-rotation-{today()}-9")
+result = world.helper("revoke")
+check("revoke stops, keeping the credential, when a listed one cannot be deleted",
+      result.returncode == 1 and "kept so that this can run again" in result.stderr and world.credential() == credential
+      and world.fake.key_of(credential) is not None and world.fake.key_of(leftover) is not None,
+      result.stdout + result.stderr)
+world.fake.fail_deletes = {credential_name}
+result = world.helper("revoke")
+check("revoke deletes the listed ones first, and keeps the credential and its file when Coder will not delete it",
+      result.returncode == 1 and "still stored and still valid" in result.stderr and world.credential() == credential
+      and world.fake.key_of(credential) is not None and world.fake.key_of(leftover) is None,
+      result.stdout + result.stderr)
+world.fake.fail_deletes = set()
+result = world.helper("revoke")
+check("revoke deletes the credential in Coder, then its file, and clears its expiry from the state",
+      result.returncode == 0 and "revoked the rotation credential" in result.stdout and world.credential() is None
+      and world.fake.key_of(credential) is None and "rotationTokenExpiresAt" not in world.state()
+      and "discardedRotationIds" not in world.state(), result.stdout + result.stderr)
+leaks = world.leaks()
+check("no token leaks from a revoke", not leaks, ", ".join(leaks))
 world.close()
 
 print(f"hcw-coder-automation.test.py: {passed} passed, {failed} failed")
