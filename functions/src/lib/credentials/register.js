@@ -133,7 +133,6 @@ const KEY_VAULT_METADATA = Object.freeze({
   },
   'OPENAI-API-KEY': { issuer: 'OpenAI', consumer: 'AI router' },
   'NVIDIA-API-KEY': { issuer: 'NVIDIA API Catalog', consumer: 'AI router, content features only' },
-  'PERPLEXITY-API-KEY': { issuer: 'Perplexity', consumer: 'Nothing reads it today' },
   'ELEVENLABS-API-KEY': { issuer: 'ElevenLabs', consumer: 'Podcast narration' },
   'AZURE-SPEECH-KEY': {
     issuer: 'Azure AI Speech',
