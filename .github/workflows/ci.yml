@@ -461,7 +461,7 @@ jobs:
       # publish templates and mints the site's status token, so the file the
       # coder role installs is run as it ships against a fake Coder API, a
       # fake systemd-run and a fake site CLI: renewal only when due, the
-      # three read scopes and nanosecond lifetimes, the clean-up's 48-hour
+      # read scopes plus user:read and nanosecond lifetimes, the clean-up's 48-hour
       # and newest-two rules, a token never in any output, state or report.
       # Needs neither root nor Docker.
       - name: hcw-coder-automation test

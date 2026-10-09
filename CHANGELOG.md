@@ -32,7 +32,8 @@ This project has not cut a tagged release; entries are grouped under
   is a root-only file beside it. The daily `hcw-coder-automation.timer`
   renews the site's status token when the one the site holds expires within
   30 days or is over 60 days old: a 90-day token with exactly
-  `template:read`, `workspace:read` and `api_key:read`, checked against
+  `template:read`, `workspace:read`, `api_key:read` and `user:read` (the
+  last so the token can read its own expiry, which the site checks), checked against
   Coder, then handed to the site through the lab agent's CLI
   (`vps-agent/bin/report-coder-automation.js`, run with `systemd-run` as
   the agent's user with its `EnvironmentFile`), live only once the CLI

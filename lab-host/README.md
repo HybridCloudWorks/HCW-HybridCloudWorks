@@ -865,7 +865,7 @@ lapses first, the panes keep opening and the card stops listing templates
 and counting workspaces until it is renewed. **Since 2026-10-08 the host
 renews it** once the owner has seeded the rotation credential
 (`docs/runbooks/labs-host.md`, "Automatic renewal"): a 90-day token with the
-same three scopes, handed to the site and stored in Key Vault without the
+three read scopes and `user:read`, handed to the site and stored in Key Vault without the
 clipboard, from the day the token the site holds turns 60 days old. Step 2
 above still makes `hcw-status`, which that needs. To renew by hand, run
 steps 1, 3, 4 and 5 again. Step 3 makes a

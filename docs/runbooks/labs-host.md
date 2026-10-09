@@ -746,7 +746,7 @@ After the seed:
 - `hcw-coder-automation.timer` runs `hcw-coder-automation.service` daily at
   05:45 UTC (up to 30 minutes later). It renews the site's status token when
   the one the site holds expires within 30 days or is more than 60 days
-  old: a new token with the same three read scopes for 90 days, checked
+  old: a new token with the three read scopes and `user:read` for 90 days, checked
   against Coder, then handed to the site through the lab agent's CLI, which
   stores it in Key Vault. It deletes `hcw-status`'s older status tokens,
   keeping the newest two and any younger than 48 hours. It renews the

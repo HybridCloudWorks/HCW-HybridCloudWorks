@@ -311,7 +311,8 @@ directory. Until the credential exists the unit is skipped by
    check, the new token is deleted. When the CLI fails without saying, it
    is kept, in case the site stored it, and the next run renews again.
 4. **Deletes older status tokens**, once a delivered one is live: every
-   token scoped to those three scopes or fewer except the newest two, the
+   token with the three read scopes and at most `user:read` beside them
+   except the newest two, the
    live one, the one before it, and any younger than 48 hours (the site's
    Key Vault reference can take 24 hours to pick up a new version). The
    rotation credential and any token with other scopes are never touched.
@@ -640,7 +641,8 @@ defaults. No root, no Docker, no network. It checks:
   taking `-2` on a 409, and deletes the old one;
 - a run with a ten-day-old hand-made token renews nothing and reports once,
   with no token, through `systemd-run --pipe --wait` as the agent's user;
-  one older than 60 days is renewed with exactly the three scopes for 90
+  one older than 60 days is renewed with exactly the three read scopes and
+  `user:read` for 90
   days, checked by counting workspaces, handed to the CLI and recorded as
   live, the hand-made one kept as the one before; the clean-up deletes
   older status tokens past 48 hours and keeps the live one, the one before,

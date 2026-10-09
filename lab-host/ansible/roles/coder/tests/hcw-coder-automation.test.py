@@ -686,7 +686,7 @@ result = world.helper("run")
 new = world.fake.by_name(f"hcw-status-site-{today()}")
 check("a token older than 60 days is renewed", result.returncode == 0 and len(new) == 1, result.stdout + result.stderr)
 post = world.fake.posts[-1] if world.fake.posts else {}
-check("the new token has exactly the three read scopes and 90 days in nanoseconds",
+check("the new token has exactly the three read scopes, user:read and 90 days in nanoseconds",
       post.get("user") == "hcw-status" and post.get("by") == "hcw-status"
       and post.get("body") == {"lifetime": 90 * 86400 * NS, "scopes": STATUS_SCOPES, "token_name": f"hcw-status-site-{today()}"},
       json.dumps(post))
