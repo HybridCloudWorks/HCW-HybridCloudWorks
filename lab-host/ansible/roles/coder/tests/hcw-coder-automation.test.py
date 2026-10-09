@@ -255,6 +255,9 @@ class FakeCoder:
         self.deleted = []
         self.workspace_tokens = []
         self.tokens = set()
+        # Token names whose own-record read, or whose deletion, answers 500.
+        self.fail_reads = set()
+        self.fail_deletes = set()
 
     def issue(self, user_id, name, scopes, created=None, expires=None):
         moment = now()
@@ -375,12 +378,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if found is None or found["user_id"] != target["id"]:
                     return self.send(404, {"message": "Resource not found"})
                 if method == "GET":
+                    if found["token_name"] in fake.fail_reads:
+                        return self.send(500, {"message": "Internal error."})
                     if (mine and (unscoped or {"api_key:read", "user:read"} <= set(key["scopes"]))) or (owner and unscoped):
                         return self.send(200, fake.key_json(found))
                     return self.send(404, {"message": "Resource not found"})
                 if method == "DELETE":
                     if not (unscoped and (mine or owner)):
                         return self.send(403, {"message": "Forbidden."})
+                    if found["token_name"] in fake.fail_deletes:
+                        return self.send(500, {"message": "Internal error."})
                     fake.deleted.append(found["token_name"])
                     del fake.keys[found["id"]]
                     return self.send(204)
@@ -643,6 +650,22 @@ result = world.seed()
 check("a second seed finds the working credential and changes nothing",
       result.returncode == 0 and "already stored" in result.stdout and len(world.fake.posts) == posts
       and world.credential() == token, result.stdout + result.stderr)
+template_admin = [{"name": "template-admin", "display_name": "Template Admin", "organization_id": ""}]
+world.fake.users["u-status"]["roles"] = template_admin + [{"name": "owner", "display_name": "Owner", "organization_id": ""}]
+result = world.seed()
+check("a second seed does not keep a stored credential once hcw-status holds Owner, and creates nothing",
+      result.returncode == 1 and "already stored" not in result.stdout and "holds the Owner role" in result.stderr
+      and len(world.fake.posts) == posts and world.credential() == token, result.stdout + result.stderr)
+world.fake.users["u-status"]["roles"] = []
+result = world.seed()
+check("nor once hcw-status is no longer a Template Admin",
+      result.returncode == 1 and "already stored" not in result.stdout and "not a Template Admin" in result.stderr
+      and len(world.fake.posts) == posts and world.credential() == token, result.stdout + result.stderr)
+result = world.helper("run")
+check("and a run refuses the credential of an hcw-status that is not a Template Admin, creating nothing",
+      result.returncode == 1 and "not a Template Admin" in result.stderr and len(world.fake.posts) == posts,
+      result.stdout + result.stderr)
+world.fake.users["u-status"]["roles"] = template_admin
 result = world.seed("--force")
 replacement = world.credential()
 check("seed --force replaces it, taking the next name when the first is in use (409)",
@@ -887,6 +910,45 @@ check("one of this helper's tokens that never went live is not mistaken for the 
 check("and nothing is deleted while it is younger than 48 hours", world.fake.key_of(undelivered) is not None)
 leaks = world.leaks()
 check("no token leaks here either", not leaks, ", ".join(leaks))
+world.close()
+
+# --- A new rotation credential that fails and that Coder will not delete -------------------
+
+world = World()
+world.seed()
+first = world.credential()
+world.status_key("frosty_hopper4", created_days_ago=1, expires_in_days=300)
+second_name = f"hcw-status-rotation-{today()}-2"
+world.fake.fail_reads.add(second_name)
+world.fake.fail_deletes.add(second_name)
+result = world.helper("run", "--rotate-credential")
+orphan = world.fake.by_name(second_name)
+check("a new rotation credential that fails its check, and that Coder will not delete, fails the run and says so",
+      result.returncode == 1 and f"deleting the new rotation credential {second_name} failed too" in result.stderr
+      and world.credential() == first, result.stdout + result.stderr)
+check("its id is kept in the state for the next run",
+      len(orphan) == 1 and world.state().get("discardedRotationIds") == [orphan[0]["id"]], json.dumps(world.state()))
+world.fake.fail_reads.clear()
+world.fake.fail_deletes.clear()
+result = world.helper("run")
+check("the next run deletes it and clears the record",
+      result.returncode == 0 and not world.fake.by_name(second_name) and "discardedRotationIds" not in world.state()
+      and "never stored" in result.stdout and world.credential() == first, result.stdout + result.stderr)
+world.fake.fail_reads.add(second_name)
+world.fake.fail_deletes.add(second_name)
+result = world.seed("--force")
+orphan = world.fake.by_name(second_name)
+check("seed --force records a new credential that fails and cannot be deleted, and keeps the stored one",
+      result.returncode == 1 and "failed too" in result.stderr and world.credential() == first and len(orphan) == 1
+      and world.state().get("discardedRotationIds") == [orphan[0]["id"]], result.stdout + result.stderr)
+world.fake.fail_reads.clear()
+world.fake.fail_deletes.clear()
+result = world.helper("run")
+check("and the next run deletes that one too",
+      result.returncode == 0 and not world.fake.by_name(second_name) and "discardedRotationIds" not in world.state(),
+      result.stdout + result.stderr)
+leaks = world.leaks()
+check("no token leaks from a discarded credential", not leaks, ", ".join(leaks))
 world.close()
 
 print(f"hcw-coder-automation.test.py: {passed} passed, {failed} failed")

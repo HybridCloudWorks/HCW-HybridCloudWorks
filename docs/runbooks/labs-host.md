@@ -805,7 +805,8 @@ Remove-Variable t
 | `the first line on stdin is not a Coder token` | `$t` holds something else; repeat the `Read-Host` line. What it held is not shown |
 | `Coder refused the token on stdin (HTTP 401)` | The `hcw-setup` token expired or was deleted; make another |
 | `Coder has no user hcw-status` | Step 2 of "The status token for the site" has not run |
-| `hcw-status holds the Owner role` / `is not a Template Admin` | Its role is wrong; step 2 of the same section sets Template Admin, and Owner must be removed in Coder's **Users** page |
+| `hcw-status holds the Owner role` / `is not a Template Admin` | Its role is wrong; step 2 of the same section sets Template Admin, and Owner must be removed in Coder's **Users** page. A stored credential is not kept while either is wrong, so the seed says this even when one is already stored |
+| `deleting the new rotation credential … failed too` | Coder made the new credential but it failed before it was stored, and Coder did not delete it. The stored one is unchanged; the next run deletes the new one |
 
 **2. Run it once now, and read what it did.** PowerShell:
 
@@ -858,6 +859,9 @@ hcw-coder-automation.service entered the failed state`, which
 | `site CLI: …` then `the site's CLI exited with 1` | The site's CLI failed, and its one line names the class: `HTTP <status>` (the site answered that), `MISSING_CONFIG` (the agent's environment lacks a value), `INVALID_INPUT`, `INPUT_TOO_LARGE` or `UNEXPECTED_ANSWER` | `HTTP` and `MISSING_CONFIG` are the site's or the agent's side; the other three are a fault in this helper or the CLI. A new token was kept, and the next run tries again |
 | `the site answered that it did not store the new status token` | The site declined it; the new token was deleted | The site side |
 | `hcw-status holds the Owner role` | Someone granted it Owner; nothing ran | Remove Owner from `hcw-status` |
+| `hcw-status is not a Template Admin` | Someone removed the role; nothing ran | Give `hcw-status` Template Admin again (`lab-host/README.md`, "The status token for the site", step 2) |
+| `deleting the new rotation credential … failed too` | A renewed credential failed before it was stored and Coder did not delete it; the stored one is unchanged and its id is in the state | Nothing: every run deletes it until it is gone |
+| `Coder did not delete 1 rotation credential(s) an earlier run created but never stored` | That deletion failed again | Nothing while it clears within a day or two; if it repeats, Coder is failing deletes generally, and `coder tokens list --all` (`lab-host/README.md`, "The status token for the site") shows the stray `hcw-status-rotation-` token |
 
 **Rotating by hand.** The site's status token, now, PowerShell:
 

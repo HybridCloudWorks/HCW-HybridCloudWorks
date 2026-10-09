@@ -56,7 +56,11 @@ This project has not cut a tagged release; entries are grouped under
   `lab-host/ansible/roles/coder/tests/hcw-coder-automation.test.py`, run in
   the `ansible-lint (lab-host)` job against a fake Coder API, a fake
   `systemd-run` and a fake site CLI, with no token in any output, state or
-  report.
+  report. The seed keeps a stored credential only while `hcw-status` is
+  still a Template Admin and not an Owner, and every run refuses one that
+  is not a Template Admin; a new credential that fails before it is stored,
+  and that Coder will not delete, is recorded by id and deleted by every
+  later run until it is gone (review of #1035).
 - **Coder automation, the site's half: the lab host can hand the site a
   renewed Coder status token through the lab agent, and the site stores it
   only after Coder vouches for it as a working, read-only key of the status

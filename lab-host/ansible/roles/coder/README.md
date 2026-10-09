@@ -242,9 +242,10 @@ created with none) belonging to `hcw-status`, a Template Admin and never an
 Owner. With it the host creates and deletes `hcw-status`'s own tokens,
 renews the credential itself and publishes the template, and nothing more:
 it cannot manage users, change deployment settings or act as anyone else.
-The seed and every run refuse it if `hcw-status` holds Owner; the seed also
-refuses an `hcw-status` that is not a Template Admin, which reading every
-workspace and publishing need. Its lifetime is a year, which Coder allows a
+The seed and every run refuse it if `hcw-status` holds Owner or is not a
+Template Admin, which reading every workspace and publishing need; the seed
+keeps a stored credential only while both still hold, never on its username
+alone. Its lifetime is a year, which Coder allows a
 Template Admin: an Owner's tokens are capped by `--max-admin-token-lifetime`
 (168 hours by default), everyone else's by `--max-token-lifetime` (876,600
 hours), and the cap is the user's the token is for (`getMaxTokenLifetime` in
@@ -270,8 +271,9 @@ and never prints, logs, reports or writes anything else holding it.
 **The seed** (`hcw-coder-automation-seed`) reads the owner's token from
 the first line of stdin (a byte order mark, carriage return and blanks
 removed; a terminal, an empty line or anything not shaped like a token
-refused with exit 2 before Coder is asked anything). If a working credential
-is already stored it says so, with its expiry, and changes nothing unless
+refused with exit 2 before Coder is asked anything). If a credential is
+already stored, still works and `hcw-status` is still a Template Admin and
+not an Owner, it says so, with its expiry, and changes nothing unless
 `--force` is given. Otherwise it checks the owner's token and
 `hcw-status`'s roles, creates `hcw-status-rotation-<date>` for `hcw-status`
 with the owner's token, checks that the new token is `hcw-status`, writes it
@@ -289,10 +291,14 @@ directory. Until the credential exists the unit is skipped by
 `ConditionPathExists=`, not failed. Each run:
 
 1. Reads the credential, checks it is `hcw-status`'s and that `hcw-status`
-   is not an Owner, and reads its expiry.
+   is a Template Admin and not an Owner, and reads its expiry.
 2. **Renews the credential** when it has under 60 days left (or with
    `--rotate-credential`): creates `hcw-status-rotation-<date>` with the old
-   one, checks it, stores it, then deletes the old one.
+   one, checks it, stores it, then deletes the old one. A new one that fails
+   before it is stored is deleted; if Coder does not delete it (here or in
+   the seed), its id goes into the state, and every run deletes it before
+   anything else until it is gone, failing until then. `prune` touches
+   status tokens only, so nothing else would.
 3. **Renews the site's status token** when the token the site holds expires
    within 30 days or was made more than 60 days ago (or with
    `--rotate-now`): creates `hcw-status-site-<date>` with exactly
@@ -637,8 +643,13 @@ defaults. No root, no Docker, no network. It checks:
   (without showing it), a token Coder refuses, a missing `hcw-status`, one
   that holds Owner and one that is not a Template Admin, creating nothing;
   stores an unscoped year-long `hcw-status-rotation-<date>` made by the
-  owner, `0600`; leaves a working one alone; and with `--force` replaces it,
-  taking `-2` on a 409, and deletes the old one;
+  owner, `0600`; leaves a working one alone, but not once `hcw-status` holds
+  Owner or loses Template Admin; and with `--force` replaces it, taking `-2`
+  on a 409, and deletes the old one; a run refuses an `hcw-status` that is
+  not a Template Admin;
+- a new rotation credential that fails its check and that Coder will not
+  delete fails the run or the seed, keeps the stored one, and is recorded by
+  id; the next run deletes it and clears the record;
 - a run with a ten-day-old hand-made token renews nothing and reports once,
   with no token, through `systemd-run --pipe --wait` as the agent's user;
   one older than 60 days is renewed with exactly the three read scopes and

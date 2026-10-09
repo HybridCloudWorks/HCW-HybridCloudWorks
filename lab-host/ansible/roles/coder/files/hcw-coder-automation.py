@@ -434,8 +434,28 @@ def load_config(path):
 # --- Coder ------------------------------------------------------------------
 
 
+def identity_problem(who, user, what):
+    """Why the user Coder describes in `who` cannot hold the rotation credential, or None.
+
+    It must be hcw-status, a Template Admin (reading every workspace and
+    publishing the template need it) and never an Owner (least privilege).
+    The seed and every run apply this one rule, so a stored credential is
+    never kept on its username alone (review of #1035).
+    """
+    if who.get("username") != user:
+        return f"{what} belongs to {who.get('username')!r}, not {user}"
+    roles = role_names(who)
+    if "owner" in roles:
+        return (f"{user} holds the Owner role, and the rotation credential is meant to carry Template Admin "
+                f"only. Remove Owner from {user}")
+    if "template-admin" not in roles:
+        return (f"{user} is not a Template Admin, which reading every workspace and publishing the template "
+                "need (lab-host/README.md, \"The status token for the site\", step 2)")
+    return None
+
+
 def check_identity(coder, token, user, what):
-    """Refuse a token that Coder refuses, that is not hcw-status's, or whose user holds Owner."""
+    """Refuse a token that Coder refuses, or whose user fails identity_problem."""
     status, who = coder.call("GET", "/api/v2/users/me", token)
     if status == 401:
         raise Failure(
@@ -444,13 +464,9 @@ def check_identity(coder, token, user, what):
         )
     if status != 200 or not isinstance(who, dict):
         raise Failure(f"Coder answered HTTP {status} when asked who {what} is")
-    if who.get("username") != user:
-        raise Failure(f"{what} belongs to {who.get('username')!r}, not {user}; nothing was changed")
-    if "owner" in role_names(who):
-        raise Failure(
-            f"{user} holds the Owner role, and the rotation credential is meant to carry Template Admin "
-            f"only. Remove Owner from {user}; nothing was changed"
-        )
+    problem = identity_problem(who, user, what)
+    if problem:
+        raise Failure(f"{problem}; nothing was changed")
     return who
 
 
@@ -489,6 +505,48 @@ def delete_key(coder, token, user, identifier):
     """True when the key is gone (deleted now, or already)."""
     status, _ = coder.call("DELETE", f"/api/v2/users/{user}/keys/{identifier}", token)
     return status in (204, 404)
+
+
+# A rotation credential that was created but never stored is a year-long
+# unscoped token nothing holds, and prune touches status tokens only, so one
+# Coder does not delete is recorded here and every run deletes it until it is
+# gone (review of #1035). The id is a token's public half, like statusTokenId.
+DISCARDED = "discardedRotationIds"
+
+
+def discard_new_credential(coder, token, owner_ref, new, name, state, user):
+    """Delete a new rotation credential that failed before it was stored.
+
+    Returns what became of it, for the error. When Coder does not delete it,
+    its id goes into the state for the next run.
+    """
+    identifier = key_id(new)
+    try:
+        gone = delete_key(coder, token, owner_ref, identifier)
+    except Failure:
+        gone = False
+    if gone:
+        return f"the new rotation credential {name} was deleted"
+    state[DISCARDED] = [i for i in state.get(DISCARDED) or [] if i != identifier] + [identifier]
+    return (f"deleting the new rotation credential {name} failed too; the next run deletes it, "
+            f"or delete it by hand among {user}'s tokens in Coder")
+
+
+def retry_discards(coder, token, state):
+    """Delete the rotation credentials an earlier run or seed could not."""
+    pending = [i for i in state.get(DISCARDED) or [] if isinstance(i, str) and i != key_id(token)]
+    if not pending:
+        state[DISCARDED] = None
+        return
+    left = [identifier for identifier in pending if not delete_key(coder, token, "me", identifier)]
+    state[DISCARDED] = left or None
+    if len(left) < len(pending):
+        say(f"deleted {len(pending) - len(left)} rotation credential(s) an earlier run created but never stored")
+    if left:
+        raise Failure(
+            f"Coder did not delete {len(left)} rotation credential(s) an earlier run created but never stored; "
+            "the next run tries again"
+        )
 
 
 # --- The site's CLI ---------------------------------------------------------
@@ -592,9 +650,9 @@ def renew_rotation(coder, config, token, state, started):
         check_identity(coder, new, user, f"the new rotation credential {name}")
         expires = parse_time(own_key(coder, new, key_id(new), f"the new rotation credential {name}").get("expires_at"))
         store_credential(config["credential_file"], new)
-    except Failure:
-        delete_key(coder, token, "me", key_id(new))
-        raise
+    except Failure as error:
+        outcome = discard_new_credential(coder, token, "me", new, name, state, user)
+        raise Failure(f"{error}; {outcome}") from None
     state["rotationTokenExpiresAt"] = iso(expires)
     say(f"stored a new rotation credential, {name}; it expires on {day(expires)}")
     if delete_key(coder, new, "me", key_id(token)):
@@ -732,6 +790,10 @@ def run(config, args):
             token = None
         if token is not None:
             try:
+                retry_discards(coder, token, state)
+            except Failure as error:
+                errors.append(str(error))
+            try:
                 keys = list_tokens(coder, token, user)
                 if renew_status_if_due(coder, config, token, keys, state, started, args.rotate_now):
                     keys = list_tokens(coder, token, user)
@@ -793,16 +855,19 @@ def seed(config, args):
         existing = read_credential(path)
         if existing is not None:
             status, who = coder.call("GET", "/api/v2/users/me", existing)
-            works = status == 200 and isinstance(who, dict) and who.get("username") == user
-            if works and not args.force:
+            if status != 200 or not isinstance(who, dict):
+                problem = f"it no longer works (Coder answered HTTP {status})"
+            else:
+                problem = identity_problem(who, user, "it")
+            if problem is None and not args.force:
                 expires = parse_time(own_key(coder, existing, key_id(existing), "the rotation credential").get("expires_at"))
                 say(
                     f"a working rotation credential for {user} is already stored (it expires on {day(expires)}); "
                     "nothing was changed. --force replaces it"
                 )
                 return 0
-            if not works:
-                say(f"the stored rotation credential no longer works (Coder answered HTTP {status}); replacing it")
+            if problem is not None:
+                say(f"the stored rotation credential cannot be kept: {problem}; checking the token on stdin to replace it")
 
         status, who = coder.call("GET", "/api/v2/users/me", owner)
         if status == 401:
@@ -839,9 +904,10 @@ def seed(config, args):
             check_identity(coder, new, user, f"the new rotation credential {name}")
             expires = parse_time(own_key(coder, new, key_id(new), f"the new rotation credential {name}").get("expires_at"))
             store_credential(path, new)
-        except Failure:
-            delete_key(coder, owner, user, key_id(new))
-            raise
+        except Failure as error:
+            outcome = discard_new_credential(coder, owner, user, new, name, state, user)
+            save_state(config, state)
+            raise Failure(f"{error}; {outcome}") from None
         note = ""
         if existing is not None and existing != new:
             if delete_key(coder, new, "me", key_id(existing)):
