@@ -551,7 +551,7 @@ describe('verifying a renewed status token before it is stored (Coder automation
 
   it('passes a working, read-only key of the status user, asking each read with the candidate', async () => {
     const fetchImpl = coder();
-    await expect(verify(fetchImpl)).resolves.toEqual({ ok: true, running: 3 });
+    await expect(verify(fetchImpl)).resolves.toEqual({ ok: true, running: 3, expiresAt: null });
     expect(fetchImpl.calls.map(({ url }) => url)).toEqual([
       `https://coder.lab.example${RUNNING}`,
       `https://coder.lab.example${ME}`,
@@ -567,8 +567,17 @@ describe('verifying a renewed status token before it is stored (Coder automation
     await expect(verify(coder({ [KEY]: { scopes: [...STATUS_TOKEN_SCOPES] } }))).resolves.toMatchObject({ ok: true });
   });
 
+  it('reports the key’s own expiry from Coder’s nanosecond expires_at, and null for anything unreadable', async () => {
+    const withExpiry = (expires_at) => coder({ [KEY]: { scopes: [...STATUS_TOKEN_SCOPES], expires_at } });
+    expect((await verify(withExpiry('2027-11-30T00:00:00.123456789Z'))).expiresAt).toBe('2027-11-30T00:00:00.123Z');
+    expect((await verify(withExpiry('2027-11-30T00:00:00Z'))).expiresAt).toBe('2027-11-30T00:00:00.000Z');
+    for (const bad of ['never', '', null, 42]) {
+      expect((await verify(withExpiry(bad))).expiresAt, String(bad)).toBeNull();
+    }
+  });
+
   it('accepts zero, and nothing that is not an integer count', async () => {
-    expect(await verify(coder({ [RUNNING]: { count: 0 } }))).toEqual({ ok: true, running: 0 });
+    expect(await verify(coder({ [RUNNING]: { count: 0 } }))).toEqual({ ok: true, running: 0, expiresAt: null });
     for (const answer of [{}, { count: '2' }, { count: 1.5 }, { workspaces: [{ id: 'w' }] }, null]) {
       const verdict = await verify(coder({ [RUNNING]: () => okJson(answer) }));
       expect(verdict, JSON.stringify(answer)).toEqual({

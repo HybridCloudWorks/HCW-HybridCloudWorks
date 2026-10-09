@@ -438,9 +438,9 @@ async function storeVerifiedToken(deps, { token, agent, at }, context) {
     context.warn?.(
       `reportCoderAutomation: the status token was stored, but a step after the vault write failed (${written.status})`
     );
-    return { stored: true, refusal: null, followUp: `The token was stored, but ${written.error}` };
+    return { stored: true, expiresAt: verdict.expiresAt, refusal: null, followUp: `The token was stored, but ${written.error}` };
   }
-  return { stored: true, refusal: null, followUp: null };
+  return { stored: true, expiresAt: verdict.expiresAt, refusal: null, followUp: null };
 }
 
 /**
@@ -480,7 +480,13 @@ function reportFields(report, { agent, at, outcome }) {
     delete fields.statusTokenExpiresAt;
     fields.lastError = joinErrors(outcome.refusal.error, report.lastError);
   }
-  if (outcome.stored) fields.statusTokenRotatedAt = at;
+  if (outcome.stored) {
+    fields.statusTokenRotatedAt = at;
+    // The stored key's own expiry, as Coder reported it to the site's check,
+    // not the report's and never the previous token's kept value: null when
+    // Coder gave none (CodeRabbit review of #1030).
+    fields.statusTokenExpiresAt = outcome.expiresAt ?? null;
+  }
   if (outcome.followUp) fields.lastError = joinErrors(outcome.followUp, report.lastError);
   return fields;
 }
@@ -530,13 +536,12 @@ export function createCoderAutomationReporter({
       context.error?.(
         `reportCoderAutomation: the report could not be recorded (${error?.code ?? 'error'})${stored ? '; the token it carried was stored' : ''}`
       );
-      return json(500, {
-        ok: false,
-        stored,
-        error: stored
-          ? 'The token was stored, but the report could not be recorded'
-          : 'The report could not be recorded',
-      });
+      // Once the vault has the token the answer says so, even here: the CLI
+      // turns any non-2xx into a bare HTTP status, and a host told 500 would
+      // mint and hand over yet another token while this one stays live
+      // (CodeRabbit review of #1030). The failure is in the site's log.
+      if (stored) return json(200, { ok: true, stored: true });
+      return json(500, { ok: false, stored: false, error: 'The report could not be recorded' });
     }
 
     if (refusal) return json(refusal.status, { ok: false, stored: false, error: refusal.error });

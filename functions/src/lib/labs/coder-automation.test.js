@@ -104,6 +104,9 @@ function makeStore(initial = {}) {
 const ME_URL = 'https://coder.lab.example/api/v2/users/me';
 const KEY_URL = `https://coder.lab.example/api/v2/users/me/keys/${TOKEN.split('-')[0]}`;
 const READ_SCOPES = ['template:read', 'workspace:read', 'api_key:read', 'user:read'];
+// The key's own expiry as Coder writes it (nanoseconds), and later than the
+// report's, so a test can tell whose date was stored.
+const KEY_EXPIRES_AT = '2027-11-30T00:00:00.123456789Z';
 const answered = (a) => (typeof a === 'function' ? a() : { ok: true, status: 200, json: async () => a });
 
 /**
@@ -115,7 +118,7 @@ const coderAnswering = (running, over = {}) => {
   const byUrl = {
     [RUNNING_URL]: running,
     [ME_URL]: over.me ?? { username: 'hcw-status' },
-    [KEY_URL]: over.key ?? { scopes: READ_SCOPES, scope: '' },
+    [KEY_URL]: over.key ?? { scopes: READ_SCOPES, scope: '', expires_at: KEY_EXPIRES_AT },
   };
   return vi.fn(async (url) =>
     Object.hasOwn(byUrl, url) ? answered(byUrl[url]) : { ok: false, status: 404, json: async () => ({}) }
@@ -320,12 +323,23 @@ describe('a renewed token: verified against Coder, then stored, never the other 
       reportedAt: NOW.toISOString(),
       checkedAt: '2026-10-08T04:59:00.000Z',
       statusTokenRotatedAt: NOW.toISOString(),
-      statusTokenExpiresAt: '2027-10-08T04:59:00.000Z',
+      // The stored key's own expiry from Coder, not the report's date.
+      statusTokenExpiresAt: '2027-11-30T00:00:00.123Z',
       rotationTokenExpiresAt: '2026-12-01T00:00:00.000Z',
       templatePushedAt: '2026-10-07T21:00:00.000Z',
       templateVersion: 'brave_turing4',
       lastError: null,
     });
+  });
+
+  it('never keeps the previous token’s expiry for a stored token: null when Coder gives none (CodeRabbit review)', async () => {
+    const t = setup({ fetchImpl: coderAnswering({ count: 1 }, { key: { scopes: READ_SCOPES, scope: '' } }) });
+    await t.send(bodyWith({ report: { ...REPORT } }));
+    expect(stored(t.store).statusTokenExpiresAt).toBe('2027-10-08T04:59:00.000Z');
+    const { report: _report, ...rest } = bodyWith();
+    await t.send({ ...rest, statusToken: TOKEN, report: { checkedAt: REPORT.checkedAt } });
+    expect(stored(t.store).statusTokenExpiresAt).toBeNull();
+    expect(stored(t.store).statusTokenRotatedAt).toBe(NOW.toISOString());
   });
 
   it('writes one content-free audit row for the rotation', async () => {
@@ -584,23 +598,27 @@ describe('the report document: one, merged under its ETag', () => {
     expect(doc.templateVersion).toBe('first');
   });
 
-  it('gives up with a content-free 500 when the document never stops changing', async () => {
+  it('answers stored when the report cannot be recorded after the token was, and 500 when no token was', async () => {
     const t = setup();
     t.store.createDoc = vi.fn(async () => {
       throw Object.assign(new Error('conflict'), { code: 409 });
     });
     const { res, body } = await t.send(bodyWith({ statusToken: TOKEN }));
-    expect(res.status).toBe(500);
-    // The token did reach the vault, and the answer says so.
-    expect(body).toEqual({
-      ok: false,
-      stored: true,
-      error: 'The token was stored, but the report could not be recorded',
-    });
+    // The token did reach the vault, so the answer is a success the host's
+    // CLI can read: a 500 would read as nothing stored and earn another
+    // token (CodeRabbit review). The failure is in the site's log.
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ ok: true, stored: true });
     expect(t.context.error).toHaveBeenCalledWith(
       'reportCoderAutomation: the report could not be recorded (CONFLICT); the token it carried was stored'
     );
-  }, 10_000);
+
+    const plain = setup();
+    plain.store.createDoc = t.store.createDoc;
+    const without = await plain.send(bodyWith());
+    expect(without.res.status).toBe(500);
+    expect(without.body).toEqual({ ok: false, stored: false, error: 'The report could not be recorded' });
+  }, 20_000);
 
   it('builds the document from named fields only', () => {
     const merged = mergeReport(

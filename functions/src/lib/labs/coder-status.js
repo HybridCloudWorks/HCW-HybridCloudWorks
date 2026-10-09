@@ -318,7 +318,21 @@ export async function verifyStatusToken({
   const problem = statusScopeProblem(key.body);
   if (problem) return failed('scopes', `Scope check: ${problem}`);
 
-  return { ok: true, running: works.body.count };
+  // The key's own expiry, read from the record the scope check already
+  // fetched: the card shows the stored token's date from this, never the
+  // previous token's (CodeRabbit review of #1030). Null when Coder gave none.
+  // An ISO date-time only (Date.parse reads "42" as the year 2042), and
+  // Coder writes nanoseconds, so Date.parse is given milliseconds at most.
+  const raw = key.body?.expires_at;
+  const expires =
+    typeof raw === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(raw)
+      ? Date.parse(raw.replace(/(\.\d{3})\d+/, '$1'))
+      : Number.NaN;
+  return {
+    ok: true,
+    running: works.body.count,
+    expiresAt: Number.isFinite(expires) ? new Date(expires).toISOString() : null,
+  };
 }
 
 const failed = (check, reason) => ({ ok: false, check, reason });
