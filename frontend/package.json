@@ -139,6 +139,7 @@
     },
     "eslint-plugin-react": {
       "eslint": "$eslint"
-    }
+    },
+    "postcss-selector-parser": "7.1.6"
   }
 }

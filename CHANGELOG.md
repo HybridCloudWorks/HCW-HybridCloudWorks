@@ -13228,6 +13228,13 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Security
 
+- **`postcss-selector-parser` is pinned to 7.1.6 in the frontend, closing
+  Dependabot alert #159** (quadratic selector parsing, CPU exhaustion, every
+  version below 7.1.6). The only consumer, `@tailwindcss/typography`, still
+  pins 6.0.10 in its newest release (0.5.20), so the fix is an npm override.
+  The production build's CSS is byte-identical with it, so typography's
+  output is unchanged. It is a build-time dependency that only ever parses
+  this repository's own stylesheets.
 - **Qlty security findings on Terraform and workflows cleared, by owner decision
   (ADR 0031).** Qlty listed 19 open checkov and trivy findings on `main`, and
   the owner decided each group on 2026-09-14.
