@@ -407,8 +407,9 @@ changes a template, 200).
 `hcw-coder-automation revoke` (`docs/runbooks/labs-host.md`, "Stopping
 it") deletes the credentials on the state's deletion list, then the stored
 rotation credential, in Coder, with the credential itself, and removes the
-file only once Coder confirms (204, 404, or 401 for a token Coder no longer
-accepts). It stops with the credential still in place when either deletion
+file only once Coder confirms (204 or 404; a 401 to the deletion, just after
+Coder accepted the credential, confirms nothing). It stops with the
+credential still in place when either deletion
 is not confirmed, because the stored credential is the only thing that can
 delete the others, and a second run finishes the job. Removing the file
 alone would leave an unscoped token valid in Coder for up to a year, so

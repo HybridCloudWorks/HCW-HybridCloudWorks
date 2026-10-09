@@ -1084,8 +1084,11 @@ def revoke(config, args):
             except Failure as error:
                 save_state(config, state)
                 raise Failure(f"{error}; the rotation credential is kept so that this can run again") from None
+            # Only a confirmed deletion: a 401 here, just after Coder accepted
+            # the credential, proves nothing, and the file is all that could
+            # revoke it later (CodeRabbit, #1035).
             status, _ = coder.call("DELETE", f"/api/v2/users/me/keys/{key_id(token)}", token)
-            if status not in (204, 404, 401):
+            if status not in (204, 404):
                 save_state(config, state)
                 raise Failure(
                     f"Coder did not delete the rotation credential (HTTP {status}); it is still stored and "

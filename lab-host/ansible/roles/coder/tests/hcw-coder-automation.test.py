@@ -262,9 +262,11 @@ class FakeCoder:
         self.deleted = []
         self.workspace_tokens = []
         self.tokens = set()
-        # Token names whose own-record read, or whose deletion, answers 500.
+        # Token names whose own-record read, or whose deletion, answers 500,
+        # and whose deletion answers 401.
         self.fail_reads = set()
         self.fail_deletes = set()
+        self.unauthorized_deletes = set()
 
     def issue(self, user_id, name, scopes, created=None, expires=None):
         """Make a key for a user and return its token."""
@@ -402,6 +404,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                         return self.send(403, {"message": "Forbidden."})
                     if found["token_name"] in fake.fail_deletes:
                         return self.send(500, {"message": "Internal error."})
+                    if found["token_name"] in fake.unauthorized_deletes:
+                        return self.send(401, {"message": "You are signed out or your session has expired."})
                     fake.deleted.append(found["token_name"])
                     del fake.keys[found["id"]]
                     return self.send(204)
@@ -1046,6 +1050,12 @@ check("revoke deletes the listed ones first, and keeps the credential and its fi
       and world.fake.key_of(credential) is not None and world.fake.key_of(leftover) is None,
       result.stdout + result.stderr)
 world.fake.fail_deletes = set()
+world.fake.unauthorized_deletes = {credential_name}
+result = world.helper("revoke")
+check("revoke keeps the credential when its deletion answers 401 just after Coder accepted it",
+      result.returncode == 1 and "HTTP 401" in result.stderr and world.credential() == credential
+      and world.fake.key_of(credential) is not None, result.stdout + result.stderr)
+world.fake.unauthorized_deletes = set()
 result = world.helper("revoke")
 check("revoke deletes the credential in Coder, then its file, and clears its expiry from the state",
       result.returncode == 0 and "revoked the rotation credential" in result.stdout and world.credential() is None
