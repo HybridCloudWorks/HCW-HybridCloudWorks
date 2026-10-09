@@ -47,49 +47,9 @@ only; the site and the docs resolve straight to Azure and GitHub Pages. A lab
 host outside Azure runs the browser labs and the lab job runner, and reports
 to Azure through Azure Arc.
 
-```mermaid
-flowchart LR
-    browser["Browser"]
+![How HybridCloudWorks is built: the browser, Cloudflare, the Azure application and management subscriptions, Microsoft Entra ID, the lab host, GitHub and the AI providers, with the requests and data between them](docs/assets/architecture/hcw-architecture.svg)
 
-    subgraph cloudflare["Cloudflare"]
-        proxy["API proxy<br/>api-azure.hybridcloudworks.com"]
-        probe["Availability probe<br/>Worker"]
-    end
-
-    subgraph azure["Azure"]
-        swa["Azure Static Web Apps<br/>pre-rendered React site"]
-        func["Azure Functions<br/>API and background jobs"]
-        cosmos[("Cosmos DB")]
-        storage[("Blob and Queue Storage")]
-        kv["Key Vault"]
-        entra["Microsoft Entra ID"]
-        monitor["Application Insights<br/>and Log Analytics"]
-    end
-
-    subgraph labhost["Lab host"]
-        coder["Coder<br/>browser workspaces"]
-        agent["vps-agent<br/>lab job runner"]
-    end
-
-    ai["AI model providers"]
-    pages["GitHub Pages<br/>docs site"]
-
-    browser -->|"pages"| swa
-    browser -->|"API calls"| proxy
-    proxy --> func
-    browser -->|"admin sign-in"| entra
-    browser -->|"lab panes"| coder
-    browser -->|"docs"| pages
-    func --> cosmos
-    func --> storage
-    func --> kv
-    func --> ai
-    func --> monitor
-    agent -->|"polls for jobs"| proxy
-    probe -->|"health check"| proxy
-    probe --> monitor
-    labhost -->|"Azure Arc"| monitor
-```
+The diagram is drawn in draw.io with the official Azure icons; its source is [`docs/assets/architecture/hcw-architecture.drawio`](docs/assets/architecture/hcw-architecture.drawio). Edit that file in draw.io and export it again as SVG, rather than editing the SVG.
 
 The same picture in words:
 
