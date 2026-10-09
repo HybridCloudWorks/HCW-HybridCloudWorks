@@ -884,7 +884,6 @@ export const SERVICE_DOCS = {
     ],
   },
 
-
   // ── Azure OpenAI ─────────────────────────────────────────────────────────
   azure: {
     id: 'azure',
