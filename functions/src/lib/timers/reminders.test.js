@@ -227,3 +227,43 @@ describe('createReminderCheck', () => {
     expect(s.replaceDocIfMatch).not.toHaveBeenCalled();
   });
 });
+
+describe('the credential register’s rows (#1026)', () => {
+  it('syncs them first, at the run’s own time, then reads the sheet the sync left', async () => {
+    const order = [];
+    const s = {
+      readDoc: vi.fn(async () => {
+        order.push('read');
+        return doc([{ id: 'credential-lab-agent-certificate', title: 'Rotate it', dueDate: '2026-12-28' }]);
+      }),
+      replaceDocIfMatch: vi.fn(async (_c, d) => d),
+    };
+    const syncCredentials = vi.fn(async () => {
+      order.push('sync');
+      return { synced: true, changed: true, reminders: 1 };
+    });
+    const result = await createReminderCheck({ store: s, notifier: sending(), now, syncCredentials }).run();
+    expect(order).toEqual(['sync', 'read']);
+    expect(syncCredentials).toHaveBeenCalledWith(NOW);
+    expect(result).toMatchObject({ checked: 1, sent: 1 });
+  });
+
+  it('goes on with the sheet as it stands when the sync throws, and says so', async () => {
+    const s = store(doc([{ id: 'x', title: 'T', dueDate: '2026-12-28' }]));
+    const log = { warn: vi.fn(), log: vi.fn() };
+    const syncCredentials = vi.fn(async () => {
+      throw Object.assign(new Error('Entity admin_config/reminders is unavailable'), { code: 503 });
+    });
+    const result = await createReminderCheck({ store: s, notifier: sending(), now, log, syncCredentials }).run();
+    expect(result).toMatchObject({ checked: 1, sent: 1 });
+    // The code, never the store's sentence, which names a document.
+    expect(log.warn.mock.calls[0][0]).toBe('[sendReminders] credential reminders sync threw (503)');
+  });
+
+  it('says when the sync declined, with its reason and nothing else', async () => {
+    const log = { warn: vi.fn(), log: vi.fn() };
+    const syncCredentials = vi.fn(async () => ({ synced: false, reason: 'invalid' }));
+    await createReminderCheck({ store: store(doc([])), notifier: sending(), now, log, syncCredentials }).run();
+    expect(log.warn.mock.calls[0][0]).toBe('[sendReminders] credential reminders not synced (invalid)');
+  });
+});

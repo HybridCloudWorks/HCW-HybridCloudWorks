@@ -24,6 +24,12 @@
  *
  * Each reminder is its own notifier source (`reminder:<id>`), so the
  * notifier's fifteen-minute cooldown never lets one reminder silence another.
+ *
+ * Since #1026 a run first brings the credential register's rows in line
+ * (`syncCredentials`, lib/credentials/reminders.js): a Key Vault secret
+ * rotated on the Keys tab since yesterday has moved its reminder before
+ * anything is said, so no message is built from a stale due date. A sync
+ * that fails is a warning and the run goes on with the sheet as it stands.
  */
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { dateOnly, daysUntil, stageDue } from '../reminders/calendar.js';
@@ -156,15 +162,40 @@ async function sayDue(deps, reminders, today, at) {
 }
 
 /**
+ * The credential rows first; a failure is said and never stops the run. The
+ * line carries a reason or an error code, never the store's message, which
+ * can name a document.
+ */
+async function syncFirst(syncCredentials, at, log) {
+  try {
+    const summary = await syncCredentials(at);
+    if (summary && !summary.synced) {
+      log.warn?.(`[sendReminders] credential reminders not synced (${summary.reason || 'unknown'})`);
+    }
+  } catch (error) {
+    log.warn?.(`[sendReminders] credential reminders sync threw (${error?.code ?? 'error'})`);
+  }
+}
+
+/**
  * @param {object} deps
  * @param {{ readDoc: Function, replaceDocIfMatch: Function }} deps.store
  * @param {{ notifyTelegram: Function }|null} [deps.notifier]
  * @param {() => Date} [deps.now]
+ * @param {((at: Date) => Promise<{ synced: boolean, reason?: string }>)|null} [deps.syncCredentials]
+ *        the credential register's sync, run before the sheet is read
  */
-export function createReminderCheck({ store, notifier = null, now = () => new Date(), log = {} }) {
+export function createReminderCheck({
+  store,
+  notifier = null,
+  now = () => new Date(),
+  log = {},
+  syncCredentials = null,
+}) {
   async function run() {
     const at = now();
     const today = dateOnly(at);
+    if (syncCredentials) await syncFirst(syncCredentials, at, log);
     const doc = await store.readDoc('admin_config', REMINDERS_CONFIG_ID, ADMIN_CONFIG_PARTITION);
     if (!doc) return { checked: 0, sent: 0 };
 

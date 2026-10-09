@@ -19,6 +19,39 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Credentials: one register of every credential, with its age and expiry,
+  on Admin → Integrations → Credentials, and a Telegram reminder for each
+  one only the owner can renew (#1026).** `functions/src/lib/credentials/`
+  holds a static register of every credential by name and metadata only —
+  where each lives, what uses it, its issuer, whether it renews itself
+  (`self`, `automation`, `hand`, or `none` for an identifier) and, where a
+  rule exists, its lifetime: Key Vault (built from `secret-catalog.js` so
+  the two cannot drift, which `register.test.js` holds), the three MCP
+  OAuth connections in `mcp_servers`, the GitHub Actions and Agents
+  secrets, the OIDC federations, the HCP Terraform variables of
+  `hcw/hcw-azure` and `hcw/hcw-lab`, the Static Web Apps deployment token,
+  the Entra and Docker identities, and the lab host's vault keys, files and
+  the owner's password-manager entries. `GET /api/cms/credentials`
+  (super_admin) merges in the live dates — the Keys tab's `lastWriteAt`,
+  the lab host's Coder token report, each MCP connection's state — and
+  answers each credential's age, expiry (reported, or the last rotation
+  plus its rule for a hand-renewed one), and a state: ok, due soon,
+  overdue (red), or unknown. `PUT /api/cms/credentials` records, under the
+  document's ETag, when a hand-renewed credential the site cannot read was
+  last rotated (`admin_config/credential_register`, a date per credential).
+  Each hand credential with a due date gets the reminder row
+  `credential-<id>` on the existing Reminders sheet, said by the existing
+  `sendReminders` timer: the Anthropic key, the Telegram bot token, both
+  GitHub App private keys and the Coder GitHub OAuth secret (a year each,
+  until the owner sets another rule), the Static Web Apps token's 90-day
+  reset and the two 730-day lab host certificates. The sync owns only those
+  rows: the owner's own reminders pass through untouched, `done` and the
+  timer's stamps are kept while a due date stands and reset when it moves,
+  and every write is conditional on the sheet's ETag. It runs when a
+  rotation is recorded, from the tab's Update reminders
+  (`POST /api/cms/credentials/reminders`), and at the start of every
+  `sendReminders` run. No value is read, stored or returned anywhere.
+
 - **Lab host: Coder automation. The host renews the site's Coder status
   token and publishes the `hcw-lab` template on its own, with one rotation
   credential the owner seeds once (owner approval 2026-10-08).**

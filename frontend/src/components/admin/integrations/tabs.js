@@ -11,6 +11,10 @@ export const TABS = Object.freeze([
   { id: 'overview', label: 'Overview' },
   { id: 'services', label: 'Services' },
   { id: 'keys', label: 'Keys' },
+  // Every credential's age and expiry, Key Vault and beyond (#1026). Beside
+  // Keys because it is the other half of the same question: Keys writes a
+  // Key Vault value, Credentials says which of every store's are due.
+  { id: 'credentials', label: 'Credentials' },
   { id: 'identity', label: 'Identity' },
   // The directory is descriptive, so it sits after the operational tabs (#919).
   { id: 'directory', label: 'Directory' },
@@ -23,12 +27,15 @@ const TAB_IDS = new Set(TABS.map((tab) => tab.id));
 /**
  * Tab ids that moved or were never ids here, so a bookmark or a hand-typed
  * link lands where its content went rather than on a blank page.
+ *
+ * `credentials` sent a guessed link to Keys until #1026 made it a tab of its
+ * own; a link to it now lands on the register, which lists every Key Vault
+ * secret too and says which are due.
  */
 export const MOVED_TABS = Object.freeze({
   connections: 'overview',
   status: 'overview',
   'api-keys': 'keys',
-  credentials: 'keys',
   secrets: 'keys',
   entra: 'identity',
 });
