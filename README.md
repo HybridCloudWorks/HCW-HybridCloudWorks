@@ -1,7 +1,16 @@
 # HybridCloudWorks Website
 
-[![Maintainability](https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks/maintainability.svg)](https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks)
-[![Code Coverage](https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks/coverage.svg)](https://qlty.sh/gh/HybridCloudWorks/projects/HCW-HybridCloudWorks)
+[![CI](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/codeql.yml)
+[![Docs site](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/docs-pages.yml/badge.svg?branch=main)](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/docs-pages.yml)
+[![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/saulpatinojr/HCW-HybridCloudWorks?utm_source=oss&utm_medium=github&utm_campaign=saulpatinojr%2FHCW-HybridCloudWorks&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)](https://coderabbit.ai)
+[![Maintainability](https://qlty.sh/gh/saulpatinojr/projects/HCW-HybridCloudWorks/maintainability.svg)](https://qlty.sh/gh/saulpatinojr/projects/HCW-HybridCloudWorks)
+[![Code Coverage](https://qlty.sh/gh/saulpatinojr/projects/HCW-HybridCloudWorks/coverage.svg)](https://qlty.sh/gh/saulpatinojr/projects/HCW-HybridCloudWorks)
+
+[![hybridcloudworks.com](https://img.shields.io/website?url=https%3A%2F%2Fhybridcloudworks.com&label=hybridcloudworks.com)](https://hybridcloudworks.com)
+[![Docs](https://img.shields.io/website?url=https%3A%2F%2Fdocs.hybridcloudworks.com&label=docs)](https://docs.hybridcloudworks.com)
+[![License: Apache-2.0](https://img.shields.io/github/license/saulpatinojr/HCW-HybridCloudWorks)](https://github.com/saulpatinojr/HCW-HybridCloudWorks/blob/main/LICENSE)
+[![Last commit](https://img.shields.io/github/last-commit/saulpatinojr/HCW-HybridCloudWorks)](https://github.com/saulpatinojr/HCW-HybridCloudWorks/commits/main)
 
 HybridCloudWorks is a cloud engineering website and operations portal covering
 Azure, AWS, Google Cloud, GitHub, Terraform, FinOps, VMware, and Ansible. It
