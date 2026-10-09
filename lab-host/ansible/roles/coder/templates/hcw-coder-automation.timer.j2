@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Run hcw-coder-automation.service daily
+
+[Timer]
+OnCalendar={{ coder_automation_on_calendar }}
+# A day the host was off runs at the next boot instead of being skipped; the
+# jitter keeps it clear of the 03:30 backup and the 04:30 reboot.
+Persistent=true
+RandomizedDelaySec=30m
+Unit=hcw-coder-automation.service
+
+[Install]
+WantedBy=timers.target

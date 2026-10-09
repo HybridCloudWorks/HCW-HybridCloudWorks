@@ -60,6 +60,44 @@ coder_server_memory_reserve_mib: 2560
 # <n>h0m0s. lab-host/README.md, "Publishing the template".
 coder_template_default_ttl: 1h
 
+# Coder automation (README.md beside this role, "Coder automation";
+# docs/runbooks/labs-host.md, "Automatic renewal"). The rotation credential,
+# an unscoped token of coder_automation_status_user, lives in a directory of
+# its own under the Compose project's, root-only like coder.env: the owner's
+# hcw-coder-automation-seed writes it there once, the daily timer renames a
+# renewed one into place, and this role never reads or writes the file.
+coder_automation_dir: /etc/hcw/coder/automation
+coder_automation_credential_file: "{{ coder_automation_dir }}/rotation-token"
+# Paths and names for /usr/local/libexec/hcw-coder-automation, no secret.
+coder_automation_config_file: /etc/hcw/coder/automation.json
+# What the helper last did (the live status token's id and name, the template
+# it last published and when), which the timer reports to the site. Token ids
+# are the part of a token before the dash, never its secret.
+coder_automation_state_dir: /var/lib/hcw-coder-automation
+# The Coder user that owns the rotation credential and the site's status
+# token: Template Admin, never Owner (lab-host/README.md, "The status token
+# for the site", step 2, creates it).
+coder_automation_status_user: hcw-status
+# Daily, after the 03:30 backup and the 04:30 unattended-upgrades reboot,
+# with up to 30 minutes of jitter.
+coder_automation_on_calendar: "*-*-* 05:45:00"
+# The checkout hcw-coder-template-push publishes from: bootstrap.sh's
+# HCW_SRC_DIR default, which the helper names too.
+coder_automation_src_dir: /opt/hcw-src
+# The lab agent, whose CLI hands the site its token and the report. These
+# repeat labs_agent_user (group_vars/all.yml), labs_agent_group and
+# labs_agent_env_file (the labs_agent role's defaults) and labs_agent_app_dir
+# (labs_agent_home/vps-agent), so this role's contract stands alone; the
+# test beside this role fails when they differ. The CLI runs from the agent's
+# own checkout, which has its node_modules, not /opt/hcw-src, which does not.
+coder_automation_agent_user: hcw-labs-agent
+coder_automation_agent_group: hcw-labs-agent
+coder_automation_agent_env_file: /etc/hcw/labs-agent.env
+coder_automation_agent_app_dir: /opt/hcw-labs-agent/vps-agent
+coder_automation_report_cli: bin/report-coder-automation.js
+# How long the CLI may take before systemd stops it and the run fails.
+coder_automation_report_timeout_seconds: 120
+
 # Nightly pg_dump, the convenience docs/architecture/labs-host.md describes:
 # seven days on the host, never copied anywhere.
 coder_backup_dir: /var/backups/coder

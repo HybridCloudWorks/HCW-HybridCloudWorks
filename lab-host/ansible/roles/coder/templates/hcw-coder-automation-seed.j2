@@ -1,0 +1,19 @@
+#!/bin/sh
+# {{ ansible_managed }}
+#
+# hcw-coder-automation-seed [--force]   (the owner's Coder token on stdin)
+#
+# The owner's one-time step for Coder automation: creates the rotation
+# credential, an unscoped token of {{ coder_automation_status_user }} (Template Admin, never
+# Owner), with the owner's own short-lived token, and stores it root-only in
+# {{ coder_automation_credential_file }}. After it, the daily
+# hcw-coder-automation timer renews the site's status token and bootstrap.sh
+# publishes the template, with nothing more from the owner. The owner's line,
+# from the workstation, is in docs/runbooks/labs-host.md, "Automatic renewal".
+#
+# Rendered by the coder role from roles/coder/templates/hcw-coder-automation-seed.j2
+# to /usr/local/sbin/hcw-coder-automation-seed, root:root 0750. The work is
+# /usr/local/libexec/hcw-coder-automation's (roles/coder/files/hcw-coder-automation.py),
+# which reads the token from stdin and never prints it. A working credential
+# already stored is left alone unless --force is given.
+exec /usr/local/libexec/hcw-coder-automation --config {{ coder_automation_config_file }} seed "$@"

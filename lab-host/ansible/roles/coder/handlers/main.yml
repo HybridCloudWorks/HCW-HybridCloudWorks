@@ -9,3 +9,7 @@
 - name: Reload systemd for the coder backup units
   ansible.builtin.systemd_service:
     daemon_reload: true
+
+- name: Reload systemd for the coder automation units
+  ansible.builtin.systemd_service:
+    daemon_reload: true

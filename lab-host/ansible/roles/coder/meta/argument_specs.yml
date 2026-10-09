@@ -19,6 +19,14 @@ argument_specs:
         takes a Coder token on stdin and publishes the hcw-lab template from the checkout in
         /opt/hcw-src with the CLI inside the coder container, then sets its default autostop to
         coder_template_default_ttl.
+      - Installs Coder automation, enabled or not. /usr/local/sbin/hcw-coder-automation-seed takes
+        the owner's token on stdin once and stores a rotation credential, an unscoped token of
+        coder_automation_status_user (Template Admin, never Owner), root-only in
+        coder_automation_credential_file. The daily hcw-coder-automation timer, running only while
+        Coder is enabled, then renews the site's read-only status token through the lab agent's
+        CLI, deletes the old ones, renews the rotation credential and reports, and every run of
+        this role publishes the hcw-lab template with that credential when its files changed.
+        Without a credential the publish is skipped with a message, never failed.
     author: HybridCloudWorks
     options:
       coder_enabled:
@@ -185,6 +193,76 @@ argument_specs:
             `coder templates edit --default-ttl` after every publish and is rendered with. Whole
             hours, <n>h; the role refuses any other shape, because the helper checks that Coder
             reports the value back as <n>h0m0s.
+      coder_automation_dir:
+        type: path
+        required: false
+        default: /etc/hcw/coder/automation
+        description: Directory of the rotation credential, root:root 0700. The timer's unit may write here and nowhere else under /etc.
+      coder_automation_credential_file:
+        type: path
+        required: false
+        default: /etc/hcw/coder/automation/rotation-token
+        description:
+          - The rotation credential, root:root 0600, written by hcw-coder-automation-seed and renamed
+            into place by the timer when it renews it. The role never reads or writes it; the helper
+            refuses it unless it is a regular file owned by root with no group or other bits.
+      coder_automation_config_file:
+        type: path
+        required: false
+        default: /etc/hcw/coder/automation.json
+        description: The helper's configuration (paths, names, the agent's user), rendered from these variables. No secret.
+      coder_automation_state_dir:
+        type: path
+        required: false
+        default: /var/lib/hcw-coder-automation
+        description: The helper's state.json and lock, root:root 0700. No token is ever written there.
+      coder_automation_status_user:
+        type: str
+        required: false
+        default: hcw-status
+        description:
+          - The Coder user that owns the rotation credential and the site's status token. It must hold
+            Template Admin and must not hold Owner; the seed and every run refuse otherwise.
+      coder_automation_on_calendar:
+        type: str
+        required: false
+        default: "*-*-* 05:45:00"
+        description: systemd OnCalendar for the daily timer, with up to 30 minutes of jitter.
+      coder_automation_src_dir:
+        type: path
+        required: false
+        default: /opt/hcw-src
+        description: The checkout hcw-coder-template-push publishes from, bootstrap.sh's HCW_SRC_DIR.
+      coder_automation_agent_user:
+        type: str
+        required: false
+        default: hcw-labs-agent
+        description: The lab agent's user, which runs the site's CLI; labs_agent_user.
+      coder_automation_agent_group:
+        type: str
+        required: false
+        default: hcw-labs-agent
+        description: The lab agent's group; labs_agent_group.
+      coder_automation_agent_env_file:
+        type: path
+        required: false
+        default: /etc/hcw/labs-agent.env
+        description: The agent's EnvironmentFile, which systemd reads for the CLI as it does for the agent; labs_agent_env_file.
+      coder_automation_agent_app_dir:
+        type: path
+        required: false
+        default: /opt/hcw-labs-agent/vps-agent
+        description: The agent's own checkout of vps-agent, with its node_modules, where the CLI runs; labs_agent_app_dir.
+      coder_automation_report_cli:
+        type: str
+        required: false
+        default: bin/report-coder-automation.js
+        description: The CLI, relative to coder_automation_agent_app_dir, that stores the status token and the report on the site.
+      coder_automation_report_timeout_seconds:
+        type: int
+        required: false
+        default: 120
+        description: How long the CLI may run before systemd stops it and the run fails.
       coder_backup_dir:
         type: path
         required: false

@@ -87,6 +87,19 @@ starts or stops it, adds the Caddy route and keeps a week of nightly dumps.
    `/usr/local/sbin/hcw-coder-template-push`, `root:root` `0750`, enabled or
    not (below). The one templated value is `coder_template_default_ttl`,
    which the role first asserts is whole hours.
+10. Installs Coder automation, enabled or not ("Coder automation", below):
+    `files/hcw-coder-automation.py` as
+    `/usr/local/libexec/hcw-coder-automation` and the owner's
+    `/usr/local/sbin/hcw-coder-automation-seed` (both `root:root` `0750`),
+    its configuration `/etc/hcw/coder/automation.json` (paths and names, no
+    secret), the rotation credential's directory `/etc/hcw/coder/automation`
+    and the state directory `/var/lib/hcw-coder-automation` (both `root`
+    `0700`), and `hcw-coder-automation.service` and `.timer`, the timer
+    running daily while Coder is enabled and stopped while it is not. Then,
+    while enabled and once the owner has seeded a rotation credential, it
+    publishes the `hcw-lab` template with that credential when the
+    template's files changed; with no credential it says how to seed one
+    and carries on.
 
 The privilege boundary is the Compose file's and the template's, not this
 role's: a socket goes to the `coder-docker-proxy` service only, read-only,
@@ -158,11 +171,29 @@ it never pulls, starts or stops a container.
 Installed enabled or not, like the backup script: with Coder disabled it
 stops at step 3 and says Coder is probably not running.
 
-### Why the owner runs it, and bootstrap does not
+### Who runs it
 
-A publish by `bootstrap.sh` would need a token stored in the vault, and a
-token that can publish a template can run any container Coder's daemon will
-start. The template runs in Coder's provisioner, inside the `coder`
+The owner, with a short-lived token of their own (the line above), and,
+since 2026-10-08, the role itself on every `bootstrap.sh` run, with the
+rotation credential the owner seeds once, whenever the template's files
+changed ("Coder automation", below).
+
+Until then this section was headed "Why the owner runs it, and bootstrap
+does not", and its reason still holds: a token that can publish a template
+can run any container Coder's daemon will start, so keeping one on the host
+keeps that power on the host. The owner accepted that on 2026-10-08, within
+these bounds. The credential belongs to `hcw-status`, a Template Admin that
+never holds Owner, so it cannot manage users, change deployment settings or
+act as anyone else, and the helper refuses to use it if `hcw-status` ever
+holds Owner. It is a root-only file, and root on this host can already read
+Coder's database and mint any token, so the file gives root nothing it
+lacked; what it adds is a credential that works from off the host if it is
+copied, for at most its year, and it is replaced ten months in with the old
+one deleted. And what it publishes is the checkout `bootstrap.sh` runs:
+`main` at a commit that passed the `coder (lab-host)` checks, among them
+`template.test.mjs`.
+
+The rest of this section is the measurement behind that reason. The template runs in Coder's provisioner, inside the `coder`
 container, which reaches Docker through the socket proxy; a template version
 that asks the Docker provider for a privileged container with `/` mounted
 still gets one, because the proxy allows container creation and does not
@@ -176,8 +207,209 @@ on the internet through Caddy. The narrowest v2.37.3 token that could
 publish still carries template write (`template:update`, with
 `file:create` for the upload; the exact set `templates push` needs has not
 been measured), and `--allow template:<id>` can hold it to the one template,
-but no scope holds it to this host. So the token the helper uses is the
-owner's, made in a pane for the one run and expiring on its own.
+but no scope holds it to this host. That is why the token was the owner's,
+made in a pane for the one run and expiring on its own, until the bounds
+above were accepted; and why the rotation credential is unscoped rather
+than a scope set nobody has measured against `templates push`.
+
+## Coder automation
+
+Owner approval 2026-10-08. Until then the owner renewed the site's status
+token by hand once a year (`lab-host/README.md`, "The status token for the
+site") and published the template by hand after every `bootstrap.sh` run
+that changed it. Now the owner seeds one credential, once, and the host
+does both. The owner's lines are in
+[docs/runbooks/labs-host.md](../../../../docs/runbooks/labs-host.md),
+"Automatic renewal".
+
+```text
+hcw-coder-automation-seed [--force]                 (the owner's token on stdin)
+hcw-coder-automation run [--rotate-now] [--rotate-credential]
+hcw-coder-automation push-template [--force]
+```
+
+`/usr/local/libexec/hcw-coder-automation` is `files/hcw-coder-automation.py`,
+Python 3 standard library only, run isolated (`-I`) on the host's
+`/usr/bin/python3`. The seed is a two-line wrapper rendered from
+`templates/hcw-coder-automation-seed.j2`. Every command takes a lock under
+the state directory, so the timer, a seed and a bootstrap's publish never
+write the same files at once.
+
+### The rotation credential
+
+An unscoped Coder API token (`coder:all`, the scope Coder gives a token
+created with none) belonging to `hcw-status`, a Template Admin and never an
+Owner. With it the host creates and deletes `hcw-status`'s own tokens,
+renews the credential itself and publishes the template, and nothing more:
+it cannot manage users, change deployment settings or act as anyone else.
+The seed and every run refuse it if `hcw-status` holds Owner; the seed also
+refuses an `hcw-status` that is not a Template Admin, which reading every
+workspace and publishing need. Its lifetime is a year, which Coder allows a
+Template Admin: an Owner's tokens are capped by `--max-admin-token-lifetime`
+(168 hours by default), everyone else's by `--max-token-lifetime` (876,600
+hours), and the cap is the user's the token is for (`getMaxTokenLifetime` in
+`coderd/apikey.go`).
+
+**Where it is stored, and why not a vault.** A root-only file,
+`/etc/hcw/coder/automation/rotation-token` (`0600`, its directory `0700`),
+like `coder.env` beside it. HashiCorp Vault was the first choice, had root
+been able to read a secret from it unattended at timer time, and it cannot: the `vault`
+role never holds a token, its root token is typed at a hidden prompt and
+removed afterwards, there is no authentication method this host could use
+alone, and under Shamir keys every reboot seals it until the owner unseals
+it. A Vault token stored to read this one would be a root-only file too. The
+Ansible vault, where this role's three secrets come from, can be read
+unattended, but only with `/etc/hcw/ansible/vault-password`, a root-only file
+on the same disk, so encrypting adds nothing against root; and a timer
+rewriting `vault.yml` would race `hcw-vault-set` and
+`Register-LabAgent.ps1`, and hand the credential to every task of every
+`bootstrap.sh` run as an extra variable. The helper refuses the file unless
+it is a regular file owned by root with no group or other permission bits,
+and never prints, logs, reports or writes anything else holding it.
+
+**The seed** (`hcw-coder-automation-seed`) reads the owner's token from
+the first line of stdin (a byte order mark, carriage return and blanks
+removed; a terminal, an empty line or anything not shaped like a token
+refused with exit 2 before Coder is asked anything). If a working credential
+is already stored it says so, with its expiry, and changes nothing unless
+`--force` is given. Otherwise it checks the owner's token and
+`hcw-status`'s roles, creates `hcw-status-rotation-<date>` for `hcw-status`
+with the owner's token, checks that the new token is `hcw-status`, writes it
+beside the file and renames it over it, reads it back, deletes the one it
+replaced (`--force`), and prints one line naming the new token and its
+expiry date. A name already in use (Coder answers 409) gets `-2`, `-3` and
+so on.
+
+### What the daily run does
+
+`hcw-coder-automation.service`, from `hcw-coder-automation.timer` at 05:45
+UTC with up to 30 minutes of jitter (`Persistent=true`), as root with
+everything read-only but the credential's directory and the state
+directory. Until the credential exists the unit is skipped by
+`ConditionPathExists=`, not failed. Each run:
+
+1. Reads the credential, checks it is `hcw-status`'s and that `hcw-status`
+   is not an Owner, and reads its expiry.
+2. **Renews the credential** when it has under 60 days left (or with
+   `--rotate-credential`): creates `hcw-status-rotation-<date>` with the old
+   one, checks it, stores it, then deletes the old one.
+3. **Renews the site's status token** when the token the site holds expires
+   within 30 days or was made more than 60 days ago (or with
+   `--rotate-now`): creates `hcw-status-site-<date>` with exactly
+   `template:read`, `workspace:read` and `api_key:read` for 90 days, checks
+   it (`GET /api/v2/workspaces?q=status:running` must answer 200 with a
+   numeric `count`, and it must read its own record, which `api_key:read`
+   allows), and hands it to the site with a report. It is live only once
+   the site's CLI answers `{"ok":true,"stored":true}`; the state then
+   records it as the site's token and the one it replaced as the one
+   before. "The token the site holds" is the one this helper last
+   delivered; before its first delivery it is the newest status token not
+   named `hcw-status-site-`, the one made by hand, because one of the
+   helper's own that was never recorded as live never reached the site.
+   When the site answers `stored: false`, or the token fails its own
+   check, the new token is deleted. When the CLI fails without saying, it
+   is kept, in case the site stored it, and the next run renews again.
+4. **Deletes older status tokens**, once a delivered one is live: every
+   token scoped to those three scopes or fewer except the newest two, the
+   live one, the one before it, and any younger than 48 hours (the site's
+   Key Vault reference can take 24 hours to pick up a new version). The
+   rotation credential and any token with other scopes are never touched.
+5. **Reports** to the site, every run, with the same CLI and no token:
+   `{"report":{"checkedAt","statusTokenExpiresAt","statusTokenRotatedAt","rotationTokenExpiresAt","templatePushedAt","templateVersion","lastError"}}`,
+   each time ISO 8601 UTC to the second, and any field it does not know
+   left out: `statusTokenExpiresAt` only once a delivered token is live,
+   `lastError` only when something failed, at most 300 characters of the
+   helper's own words, never Coder's or the CLI's.
+6. Records what it did in `/var/lib/hcw-coder-automation/state.json`
+   (`root` `0600`; the live token's id and name, the template's publish,
+   the last error, never a token: a token's id is the part before the dash,
+   not its secret), prints one summary line, and exits 1 if any step
+   failed, so the unit shows failed and its `OnFailure=` notifier raises
+   the lab alert (the `hardening` role's `hcw-unit-failed@`).
+
+A step that fails does not stop the report: a refused credential, Coder not
+answering, or a CLI that failed are each in `lastError`, and in the journal.
+
+### How the site's CLI is run
+
+`vps-agent/bin/report-coder-automation.js`, from the agent's own checkout
+(`/opt/hcw-labs-agent/vps-agent`, which has its `node_modules`;
+`/opt/hcw-src` has none), as the agent's user with the agent's environment,
+through `systemd-run`:
+
+```text
+systemd-run --pipe --wait --quiet --collect --service-type=exec --uid=hcw-labs-agent --gid=hcw-labs-agent
+  --property=EnvironmentFile=/etc/hcw/labs-agent.env --property=WorkingDirectory=/opt/hcw-labs-agent/vps-agent
+  --property=Environment=NODE_ENV=production --property=NoNewPrivileges=yes --property=PrivateTmp=yes
+  --property=ProtectSystem=full --property=ProtectHome=yes --property=RuntimeMaxSec=120
+  -- /usr/bin/node bin/report-coder-automation.js
+```
+
+The same user, `EnvironmentFile=` and `WorkingDirectory=` as
+`hcw-labs-agent.service`. systemd reads the environment file as root, as it
+does for the agent, so it stays `root` `0600` and the agent's user never
+reads it; `--pipe` gives the CLI the JSON on stdin, and `--wait` returns its
+exit status. `runuser` after sourcing the file was the alternative, and it
+would parse a systemd `EnvironmentFile` as shell, which is not the same
+syntax. `RuntimeMaxSec=` has systemd stop a CLI that hangs before the helper
+gives up on it. The CLI's stderr reaches the journal with any token the
+helper knows replaced by `[token]`.
+
+The contract, which the CLI's side holds too: stdin is one JSON object with
+`statusToken`, `report` or both, and nothing else (the CLI takes the agent's
+id from `LABS_AGENT_ID` in the agent's environment); every time in the
+report is ISO 8601 with seconds and a zone (`2026-10-08T05:45:00Z`). The CLI
+sends it to the site's `POST /api/agent/reportCoderAutomation`, which this
+helper never calls itself. Success is `{"ok":true,"stored":true|false}` on
+stdout and exit 0; failure is one error class on stderr (`HTTP <status>`,
+`INVALID_INPUT`, `INPUT_TOO_LARGE`, `MISSING_CONFIG` or
+`UNEXPECTED_ANSWER`) and exit 1. The helper reads the last line of stdout,
+so a log line before the answer does no harm.
+
+### Publishing the template
+
+`push-template`, run by this role on every `bootstrap.sh` run while Coder is
+enabled, after Coder is up and before `lab_images` removes the images the
+previous template version names. It keeps a SHA-256 of exactly what
+`hcw-coder-template-push` copies (every `*.tf`, `.terraform.lock.hcl`,
+`README.md`) and of `coder_template_default_ttl`, and publishes only when
+that differs from its last successful publish, so a failed publish is
+retried by the next run and an unchanged one costs nothing. It hands the
+push helper the credential on stdin, as the owner's line hands it the
+owner's token, records `templatePushedAt` and `templateVersion` for the
+report, and prints `hcw-coder-automation: published hcw-lab with the
+rotation credential; active version <name>`, which is the task's
+`changed_when`. Exit 3, with a line saying to seed, when there is no
+credential or Coder refuses it: the run carries on. Any other failure fails
+the task. `hcw-coder-template-push` needed no change for this: it already
+took "the owner's, or a Template Admin's" token, and the four commands it
+runs (`templates push`, `templates edit --default-ttl`, `templates versions
+list`, `templates list`) are template writes and reads, which Template Admin
+has (2026-09-28 measurement in `lab-host/README.md`: unscoped Template Admin
+changes a template, 200).
+
+### Coder's API
+
+Read 2026-10-08 against v2.38.0, the pinned release:
+<https://coder.com/docs/reference/api/users> ("Get user tokens", "Create
+token API key", "Get API key by ID", "Delete API key"),
+<https://coder.com/docs/reference/api/workspaces> ("List workspaces"), and
+`codersdk/apikey.go` and `coderd/apikey.go` at the `v2.38.0` tag.
+
+| Call | Used for |
+| --- | --- |
+| `GET /api/v2/users/me` | Who a token is, and its roles |
+| `GET /api/v2/users/hcw-status` | The seed's check of `hcw-status`'s roles, with the owner's token |
+| `POST /api/v2/users/{user}/keys/tokens` | `{"token_name","lifetime","scopes"}`; 201 `{"key"}`, 409 on a name in use |
+| `GET /api/v2/users/me/keys/tokens` | `hcw-status`'s tokens, expired ones left out |
+| `GET /api/v2/users/me/keys/{id}` | One token's `expires_at` |
+| `DELETE /api/v2/users/me/keys/{id}` | 204 |
+| `GET /api/v2/workspaces?q=status:running` | The new status token's check: 200 and a numeric `count` |
+
+`lifetime` is a Go `time.Duration`, which `encoding/json` writes as an
+integer count of **nanoseconds**: 90 days is `7776000000000000`, a year
+`31536000000000000`. Every call goes to `http://127.0.0.1:7080` with the
+token in `Coder-Session-Token`, through no proxy and following no redirect.
 
 ## Variables
 
@@ -199,6 +431,12 @@ owner's, made in a pane for the one run and expiring on its own.
 | `coder_backup_keep_days`, `coder_backup_on_calendar` | `7`, `*-*-* 03:30:00` | The dump schedule |
 | `coder_launcher_dir` | `/etc/caddy/hcw-lab-launcher` | Where the lab launcher's files are installed and served from |
 | `coder_template_default_ttl` | `1h` | The `hcw-lab` template's default autostop, which `hcw-coder-template-push` sets after every publish; whole hours only |
+| `coder_automation_status_user` | `hcw-status` | The Template Admin that owns the rotation credential and the site's status token |
+| `coder_automation_on_calendar` | `*-*-* 05:45:00` | The daily automation run, with up to 30 minutes of jitter |
+| `coder_automation_dir`, `coder_automation_credential_file` | `/etc/hcw/coder/automation`, `.../rotation-token` | The rotation credential, root-only |
+| `coder_automation_config_file`, `coder_automation_state_dir` | `/etc/hcw/coder/automation.json`, `/var/lib/hcw-coder-automation` | The helper's configuration and its state |
+| `coder_automation_agent_user`, `_group`, `_env_file`, `_app_dir` | `hcw-labs-agent`, `hcw-labs-agent`, `/etc/hcw/labs-agent.env`, `/opt/hcw-labs-agent/vps-agent` | The lab agent the site's CLI runs as; the test holds them to the `labs_agent` role's |
+| `coder_automation_report_cli`, `coder_automation_report_timeout_seconds` | `bin/report-coder-automation.js`, `120` | The site's CLI, and how long it may take |
 
 Paths, the port and the unit names are in `defaults/main.yml`;
 `meta/argument_specs.yml` is the contract.
@@ -342,7 +580,8 @@ rename `docker.pre-upgrade` back to `docker`, and revert the pin.
 ## Handlers
 
 `Reload caddy for the coder route` (route file added or removed), `Reload
-systemd for the coder backup units` (unit files).
+systemd for the coder backup units` and `Reload systemd for the coder
+automation units` (unit files).
 
 ## Tests
 
@@ -377,7 +616,54 @@ The `ansible-lint (lab-host)` job in `.github/workflows/ci.yml` runs it with
 the job's Python, which has Jinja2 and PyYAML from ansible-core. To run it
 without a host, see `lab-host/README.md`, "Validating without a host".
 
+`tests/hcw-coder-automation.test.py` runs `files/hcw-coder-automation.py` as
+it ships against a fake Coder API on a loopback port (answering as v2.38.0
+does: `<10>-<22>` tokens, `lifetime` in nanoseconds, `coder:all` for no
+scope, 409 on a name in use, nine fractional digits in its times, expired
+tokens left out), a fake `systemd-run` that reads the `EnvironmentFile=` and
+`WorkingDirectory=` it is given, a fake site CLI and a fake
+`hcw-coder-template-push`, and renders this role's templates with its
+defaults. No root, no Docker, no network. It checks:
+
+- the configuration names the `labs_agent` role's user, group, environment
+  file and checkout, Coder's published port, the checkout `bootstrap.sh`
+  keeps and the push helper reads, and the role's autostop; the unit has the
+  failure notifier, the credential condition and its two writable paths;
+  the role installs both helpers `root:root` `0750`; the runbook's seed line
+  runs the installed path;
+- the seed refuses a terminal, empty stdin, a line that is not a token
+  (without showing it), a token Coder refuses, a missing `hcw-status`, one
+  that holds Owner and one that is not a Template Admin, creating nothing;
+  stores an unscoped year-long `hcw-status-rotation-<date>` made by the
+  owner, `0600`; leaves a working one alone; and with `--force` replaces it,
+  taking `-2` on a 409, and deletes the old one;
+- a run with a ten-day-old hand-made token renews nothing and reports once,
+  with no token, through `systemd-run --pipe --wait` as the agent's user;
+  one older than 60 days is renewed with exactly the three scopes for 90
+  days, checked by counting workspaces, handed to the CLI and recorded as
+  live, the hand-made one kept as the one before; the clean-up deletes
+  older status tokens past 48 hours and keeps the live one, the one before,
+  a young one, the credential and a token with other scopes; the credential
+  renews itself under 60 days and on `--rotate-credential`;
+- `stored: false` deletes the new token and fails the run; a failing CLI
+  keeps it and fails the run, with its stderr scrubbed of the token; a
+  refused or missing credential, Coder not answering and a missing agent
+  environment each fail the run, and the report still goes where it can,
+  with a `lastError` of at most 300 characters;
+- `push-template` skips with exit 3 and the seed line without a credential
+  or with a refused one, publishes with the credential on the push helper's
+  stdin and the configured checkout, records the version, publishes again
+  only when a copied file or the autostop changes (or with `--force`), and
+  retries after a failed publish;
+- an undelivered `hcw-status-site-` token is never taken for the site's;
+- no token appears in anything the helper printed, its state file or any
+  report.
+
+The same job runs it with its own Python. To run it without a host, see
+`lab-host/README.md`, "Validating without a host".
+
 ## Check mode
 
 Safe. `getent` reads, the templates diff, `docker_compose_v2` reports what
-`up` or `down` would do without doing it.
+`up` or `down` would do without doing it. The template publish is a
+command, which check mode skips.
