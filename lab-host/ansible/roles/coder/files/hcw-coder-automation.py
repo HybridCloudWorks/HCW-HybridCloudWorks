@@ -1095,7 +1095,21 @@ def revoke(config, args):
                     "still valid, so run this again"
                 )
         os.unlink(path)
-        state[DISCARDED] = None
+        listed = [i for i in state.get(DISCARDED) or [] if isinstance(i, str)]
+        if refused and listed:
+            # A refused credential cannot delete them, and one of them may
+            # still be valid (only the stored one may have expired), so they
+            # stay listed: the first run after the next seed deletes them
+            # with the new credential, or answers 404 once the user was
+            # deleted (CodeRabbit, #1035).
+            warn(
+                f"{len(listed)} listed rotation credential(s) ({', '.join(listed)}) could not be deleted without "
+                f"a working credential; they stay listed, and the first run after hcw-coder-automation-seed "
+                f"deletes them. Deleting {config['status_user']}, as the runbook's leak containment does, "
+                "removes them at once"
+            )
+        else:
+            state[DISCARDED] = None
         state["rotationTokenExpiresAt"] = None
         save_state(config, state)
     done = ("Coder no longer accepts the rotation credential (HTTP 401), so there was nothing to delete in Coder; "

@@ -1068,9 +1068,14 @@ planted = world.state()
 planted["discardedRotationIds"] = ["gone000000"]
 (world.state_dir / "state.json").write_text(json.dumps(planted), encoding="utf-8")
 result = world.helper("revoke")
-check("revoke of a credential Coder no longer accepts (its user deleted) removes the file and clears the list",
+check("revoke of a credential Coder no longer accepts removes the file, keeps the list and says so",
       result.returncode == 0 and "no longer accepts the rotation credential (HTTP 401)" in result.stdout
-      and world.credential() is None and "discardedRotationIds" not in world.state(), result.stdout + result.stderr)
+      and "they stay listed" in result.stderr and world.credential() is None
+      and world.state().get("discardedRotationIds") == ["gone000000"], result.stdout + result.stderr)
+world.seed()
+result = world.helper("run")
+check("and the first run after the next seed works through the kept list",
+      result.returncode == 0 and "discardedRotationIds" not in world.state(), result.stdout + result.stderr)
 leaks = world.leaks()
 check("no token leaks from a revoke", not leaks, ", ".join(leaks))
 world.close()

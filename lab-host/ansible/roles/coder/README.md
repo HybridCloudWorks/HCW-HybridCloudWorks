@@ -415,7 +415,10 @@ delete the others, and a second run finishes the job. Removing the file
 alone would leave an unscoped token valid in Coder for up to a year, so
 `revoke` comes before any revert of this code (review of #1035). A credential
 Coder no longer accepts (401: expired, or it or its user deleted) has nothing
-left in Coder to delete, so `revoke` removes the file and clears the list.
+left in Coder to delete, so `revoke` removes the file. It keeps the deletion
+list and says so, since a listed credential may still be valid when only the
+stored one expired: the first run after the next seed deletes them with the
+new credential, or finds them gone once the user was deleted.
 
 A leak is contained on the account, not the token: deleting `hcw-status`
 deletes every API key it has, copies and successors alike (the
