@@ -57,7 +57,7 @@ HELPER = ROLE / "files" / "hcw-coder-automation.py"
 UTC = datetime.timezone.utc
 DAY = datetime.timedelta(days=1)
 NS = 1_000_000_000
-STATUS_SCOPES = ["template:read", "workspace:read", "api_key:read"]
+STATUS_SCOPES = ["template:read", "workspace:read", "api_key:read", "user:read"]
 
 passed = 0
 failed = 0
@@ -369,7 +369,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if found is None or found["user_id"] != target["id"]:
                     return self.send(404, {"message": "Resource not found"})
                 if method == "GET":
-                    if (mine and (unscoped or "api_key:read" in key["scopes"])) or (owner and unscoped):
+                    if (mine and (unscoped or {"api_key:read", "user:read"} <= set(key["scopes"]))) or (owner and unscoped):
                         return self.send(200, fake.key_json(found))
                     return self.send(404, {"message": "Resource not found"})
                 if method == "DELETE":

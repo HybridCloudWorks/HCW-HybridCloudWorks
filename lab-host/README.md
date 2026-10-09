@@ -806,7 +806,7 @@ appears on a command line.
    it is never on the screen, and success prints nothing:
 
    ```powershell
-   $s = $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read --scope api_key:read; }'"
+   $s = $t | ssh hcw-lab "sudo -n docker exec -i -e CODER_URL=http://127.0.0.1:7080 coder sh -c 'tr -d \\r | { read -r CODER_SESSION_TOKEN; export CODER_SESSION_TOKEN; coder tokens create --user hcw-status --lifetime 1y --scope template:read --scope workspace:read --scope api_key:read --scope user:read; }'"
    ```
 
    Check what `$s` holds, PowerShell:

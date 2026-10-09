@@ -296,10 +296,11 @@ directory. Until the credential exists the unit is skipped by
 3. **Renews the site's status token** when the token the site holds expires
    within 30 days or was made more than 60 days ago (or with
    `--rotate-now`): creates `hcw-status-site-<date>` with exactly
-   `template:read`, `workspace:read` and `api_key:read` for 90 days, checks
-   it (`GET /api/v2/workspaces?q=status:running` must answer 200 with a
-   numeric `count`, and it must read its own record, which `api_key:read`
-   allows), and hands it to the site with a report. It is live only once
+   `template:read`, `workspace:read`, `api_key:read` and `user:read` for 90
+   days, checks it (`GET /api/v2/workspaces?q=status:running` must answer 200
+   with a numeric `count`, and it must read its own record, which needs
+   `api_key:read` and, on v2.38, `user:read`; the site checks the same two
+   reads before storing it), and hands it to the site with a report. It is live only once
    the site's CLI answers `{"ok":true,"stored":true}`; the state then
    records it as the site's token and the one it replaced as the one
    before. "The token the site holds" is the one this helper last

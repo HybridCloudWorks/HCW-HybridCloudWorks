@@ -53,8 +53,8 @@ file unless it is a regular file owned by the user running it, with no group
 or other permission bits.
 
 THE SITE'S STATUS TOKEN is a token of hcw-status scoped to template:read,
-workspace:read and api_key:read (lab-host/README.md, "The status token for
-the site", has why each). It reaches the site only through the lab agent's
+workspace:read, api_key:read and user:read (lab-host/README.md, "The status
+token for the site", has why each). It reaches the site only through the lab agent's
 own CLI, vps-agent/bin/report-coder-automation.js, run as the agent's user
 with the agent's environment, which stores it in the site's Key Vault as
 CODER-STATUS-TOKEN. A new token is live only once that CLI answers
@@ -122,8 +122,14 @@ DEFAULT_CONFIG = "/etc/hcw/coder/automation.json"
 
 # The site's status token: the three scopes lab-host/README.md, "The status
 # token for the site", measured as the least that answers the site's three
-# calls and lets the token read its own expiry (#763).
-STATUS_SCOPES = ("template:read", "workspace:read", "api_key:read")
+# calls and lets the token read its own expiry (#763), and user:read. In
+# Coder v2.38 /users/me and /users/me/keys/{id} both load the user through the
+# authorizing store (httpmw.ExtractUserParam), and a low-level scope grants
+# only its own resource, so without user:read both answer 404: the token could
+# not read its own expiry, and the site, which checks the token with those two
+# reads before storing it (functions/src/lib/labs/coder-status.js), would
+# refuse every renewal (review of #1030). user:read is read-only.
+STATUS_SCOPES = ("template:read", "workspace:read", "api_key:read", "user:read")
 STATUS_PREFIX = "hcw-status-site-"
 STATUS_LIFETIME = datetime.timedelta(days=90)
 # Renewed when the token the site holds expires within 30 days, or is more
@@ -262,10 +268,19 @@ def scopes_of(key):
     return set(scopes)
 
 
+# The scopes every status token carries; user:read is the only one allowed
+# beside them. The site accepts exactly this shape before storing a token
+# (functions/src/lib/labs/coder-status.js), so the helper recognises the
+# site's kind by the same rule: a token of hcw-status with only some of
+# these scopes, say workspace:read and user:read, is someone else's and
+# is never renewed against or cleaned up (review of #1030).
+REQUIRED_STATUS_SCOPES = frozenset(("template:read", "workspace:read", "api_key:read"))
+
+
 def is_status_key(key):
-    """A token scoped to the status scopes or fewer: the site's kind."""
+    """The site's kind: the three read scopes, and user:read at most beside them."""
     scopes = scopes_of(key)
-    return bool(scopes) and scopes <= set(STATUS_SCOPES)
+    return REQUIRED_STATUS_SCOPES <= scopes <= set(STATUS_SCOPES)
 
 
 def created(key):
@@ -599,7 +614,7 @@ def renew_status(coder, config, token, state, started, previous_id):
             raise NotDelivered(f"the new status token {name} failed its check (GET /api/v2/workspaces answered HTTP {status})")
         status, own = coder.call("GET", f"/api/v2/users/me/keys/{new_id}", new)
         if status != 200 or not isinstance(own, dict):
-            raise NotDelivered(f"the new status token {name} cannot read its own record (HTTP {status}), so it lacks api_key:read")
+            raise NotDelivered(f"the new status token {name} cannot read its own record (HTTP {status}), so it lacks api_key:read or user:read")
         expires = parse_time(own.get("expires_at"))
         report = report_fields(state, started)
         report.update(statusTokenExpiresAt=iso(expires), statusTokenRotatedAt=iso(started))
