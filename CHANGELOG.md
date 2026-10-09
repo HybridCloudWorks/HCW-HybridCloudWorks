@@ -19,8 +19,10 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
-- **CodeRabbit reviews pull requests here, on its free open-source plan.**
-  `.coderabbit.yaml` at the root (owner request, 2026-10-08) enables no paid
+- **CodeRabbit is configured for this repository, for its free open-source
+  plan.** It reviews nothing until the CodeRabbit GitHub App is installed on
+  the repository, an owner step. `.coderabbit.yaml` at the root (owner
+  request, 2026-10-08) enables no paid
   add-on, and every key and value was checked against CodeRabbit's
   `schema.v2.json`. It reviews drafts too, with the `chill` profile and no
   request-changes gate, and it skips lockfiles, build output,
