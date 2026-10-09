@@ -91,7 +91,13 @@ def today():
 
 
 def jinja_env():
-    env = jinja2.Environment(undefined=jinja2.StrictUndefined, trim_blocks=True, keep_trailing_newline=True)
+    # Escaping on for HTML and XML only, as Jinja2 recommends. None of the
+    # role's templates is either (JSON, a shell script, systemd units), and
+    # Ansible renders them unescaped, so they render here as they do on the host.
+    env = jinja2.Environment(
+        undefined=jinja2.StrictUndefined, trim_blocks=True, keep_trailing_newline=True,
+        autoescape=jinja2.select_autoescape(default_for_string=False, default=False),
+    )
     env.filters["to_json"] = json.dumps
     return env
 
@@ -108,10 +114,10 @@ def resolved(*files, extra=None):
             if isinstance(value, str) and "{{" in value:
                 try:
                     values[name] = env.from_string(value).render(**values)
-                except jinja2.exceptions.UndefinedError:
-                    pass
                 except jinja2.exceptions.TemplateError:
-                    pass
+                    # It names a value not resolved yet, or an Ansible-only
+                    # construct; left as written, the next pass tries again.
+                    continue
     return values
 
 
@@ -845,8 +851,9 @@ check("and the next run publishes what the failed one did not", result.returncod
 result = world.helper("run")
 report = world.cli_calls()[-1]["payload"]["report"]
 check("the daily report carries the template's publish time and version",
-      report.get("templateVersion") == "brave_turing6" and report.get("templatePushedAt", "").startswith(today()),
-      json.dumps(report))
+      result.returncode == 0 and report.get("templateVersion") == "brave_turing6"
+      and report.get("templatePushedAt", "").startswith(today()),
+      json.dumps(report) + result.stderr)
 world.fake.keys.pop(world.credential().split("-")[0])
 result = world.helper("push-template")
 check("a rotation credential Coder refuses skips the publish (exit 3) and says to seed again",
