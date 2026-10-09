@@ -11253,6 +11253,24 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Removed
 
+- **The Perplexity key, which nothing read (#1029).** Its Function App
+  setting (`PERPLEXITY_API_KEY`, a Key Vault reference), its secret
+  catalogue entry, its Integrations card and directory row, and its service
+  docs page are gone; the AI router never implemented Perplexity. Kept on
+  purpose: the deprecated-provider lists that clear old AI Engine rows, the
+  pricing table that prices historical `ai_usage` rows, and the badge and
+  emoji that label them. The tests that used Perplexity as their example of
+  an untestable card now use Azure AI Speech. The `hcw-azure` run drops the
+  app setting; the secret, and three more that nothing reads
+  (`GITHUB-APP-INSTALLATION-ID`, `HOSTINGER-API-TOKEN`,
+  `GITHUB-APP-PRIVATE-KEY`), are the owner's to delete afterwards, one line
+  each in `docs/standards/variables-and-secrets.md`. The same pass corrects
+  three records: Caddy's `CLOUDFLARE_API_TOKEN` is set on the lab host (read
+  by name, and proven by the `*.lab` wildcard certificate only DNS-01 can
+  issue); the `hcw-lab` workspace token stays missing because that
+  workspace does not exist yet; and `COPILOT_REVIEW_APP_PRIVATE_KEY` is
+  still absent, which costs Copilot code review nothing.
+
 - **Unused files, scripts and tooling removed in a repository cleanup.**
   Every removal was checked from `origin/main`: nothing imports, fetches, runs
   or links to it. The frontend build, all 1,703 frontend tests, lint, the
