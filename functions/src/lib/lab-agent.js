@@ -413,8 +413,9 @@ async function reportCoderAutomation(ctx, request, context) {
  * @param {object} deps
  * @param {{ requireAgent: Function }} deps.guard
  * @param {{ queryDocs: Function, readDoc: Function, patchDoc: Function, replaceDocIfMatch: Function, createDoc?: Function, upsertDoc?: Function }} deps.store
- *        createDoc and upsertDoc are the Coder automation report's: its
- *        document's first write, and the audit row and secret state
+ *        createDoc and upsertDoc are the Coder automation report's: the
+ *        first write of its document and of the secret state (both
+ *        ETag-guarded, replaceDocIfMatch after), and the audit row
  * @param {() => Date} [deps.now]
  * @param {object} [deps.coderAutomation] env, fetchImpl, vault and uuid for
  *        the report (labs/coder-automation.js); production defaults otherwise

@@ -52,7 +52,7 @@ describe('the rows', () => {
       },
       { id: 'rotation', text: 'Rotation credential expires on 2027-04-01.' },
       { id: 'template', text: 'Template last published 2026-10-07 (brave_turing4).' },
-      { id: 'checked', text: 'Last automation check 2026-10-08 (2 h ago).' },
+      { id: 'checked', text: 'Last automation check 2026-10-08, reported 2 h ago.' },
     ]);
   });
 
@@ -71,7 +71,7 @@ describe('the rows', () => {
       'Status token not renewed by the lab host yet.',
       'Rotation credential expiry not reported.',
       'Template not published by the lab host yet.',
-      'Last automation check 2026-10-08 (2 h ago).',
+      'Last automation check 2026-10-08, reported 2 h ago.',
     ]);
   });
 });
@@ -126,14 +126,14 @@ describe('the status, lib/status.js’s, worst first', () => {
     ]);
   });
 
-  it('is degraded once the host has been silent for a week, whatever it last said', () => {
+  it('is degraded once the site has heard nothing for a week, whatever the report said', () => {
     const quiet = describeCoderAutomation(
-      read({ checkedAt: iso(-(SILENT_AFTER_DAYS - 0.5)) }),
+      read({ reportedAt: iso(-(SILENT_AFTER_DAYS - 0.5)) }),
       NOW
     );
     expect(quiet.status).toBe('healthy');
     const silent = describeCoderAutomation(
-      read({ checkedAt: iso(-(SILENT_AFTER_DAYS + 0.5)) }),
+      read({ reportedAt: iso(-(SILENT_AFTER_DAYS + 0.5)) }),
       NOW
     );
     expect(silent.status).toBe('degraded');
@@ -142,9 +142,27 @@ describe('the status, lib/status.js’s, worst first', () => {
     ]);
   });
 
+  it('measures silence by reportedAt, the site’s clock, so a host clock in 2099 cannot hide it (review of #1030)', () => {
+    const view = describeCoderAutomation(
+      read({ checkedAt: '2099-01-01T00:00:00.000Z', reportedAt: iso(-(SILENT_AFTER_DAYS + 1)) }),
+      NOW
+    );
+    expect(view.status).toBe('degraded');
+    expect(view.problems).toEqual([
+      {
+        status: 'degraded',
+        text: `The lab host has not reported for ${SILENT_AFTER_DAYS + 1} days.`,
+      },
+    ]);
+    // And the age on the row is the site's too, not the host's.
+    expect(view.rows.find((row) => row.id === 'checked').text).toBe(
+      `Last automation check 2099-01-01, reported ${SILENT_AFTER_DAYS + 1} d ago.`
+    );
+  });
+
   it('takes the worst of several problems', () => {
     const view = describeCoderAutomation(
-      read({ lastError: 'x', rotationTokenExpiresAt: iso(-1), checkedAt: iso(-30) }),
+      read({ lastError: 'x', rotationTokenExpiresAt: iso(-1), reportedAt: iso(-30) }),
       NOW
     );
     expect(view.status).toBe('critical');

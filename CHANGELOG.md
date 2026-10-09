@@ -21,8 +21,9 @@ This project has not cut a tagged release; entries are grouped under
 
 - **Coder automation, the site's half: the lab host can hand the site a
   renewed Coder status token through the lab agent, and the site stores it
-  only after Coder accepts it; the Hybrid Lab card shows what the host last
-  reported (owner approval, 2026-10-08).**
+  only after Coder vouches for it as a working, read-only key of the status
+  user; the Hybrid Lab card shows what the host last reported (owner
+  approval, 2026-10-08).**
   Until now `CODER-STATUS-TOKEN` was renewed by hand once a year, minted in
   a pane and pasted on the Keys tab, because the host cannot reach Key
   Vault and must not. A fourth agent route, `POST
@@ -34,17 +35,34 @@ This project has not cut a tagged release; entries are grouped under
   (`functions/src/lib/labs/coder-automation.js`, composed in
   `lib/lab-agent.js`). A token must have Coder's key shape, measured
   against Coder v2.38's source (a 10-character id, a dash, a 22-character
-  secret), and must answer Coder's running-workspaces read with an integer
-  count through `coder-status.js`'s guarded GET (`verifyStatusToken`); only
-  then is it written by `writeCatalogSecret`, the Keys tab's own writer
-  factored out of `admin-secrets.js`, so the Keys row goes amber and then
-  green as for a paste and there is no second vault client. One
-  `coder_status_token_rotated` audit row, never the value. A token Coder
-  refuses is 422 and a vault refusal 502; the report is recorded either way
-  in one `admin_config/coder_automation` document, merged under its ETag
-  (event dates kept when a report omits them, `lastError` cleared by a
-  clean check, anything shaped like a Coder key in it removed). Warning and
-  error lines name a status, never the token, the agent or a document id.
+  secret), and must pass three reads made with it through `coder-status.js`'s
+  guarded GET, each answering exactly 200 (`verifyStatusToken`): the
+  running-workspaces read gives an integer count, `GET /api/v2/users/me`
+  names `hcw-status` (`CODER_STATUS_USER` may rename it), and the token's
+  own key record lists `template:read`, `workspace:read` and
+  `api_key:read`, with `user:read` the one more it may carry. An unscoped
+  key (`coder:all`, or `all` in the deprecated `scope`), a key with any
+  other scope, and another user's key are refused, so a working Template
+  Admin key cannot become the read-only status token. Only then is it
+  written by `writeCatalogSecret`, the Keys tab's own writer factored out of
+  `admin-secrets.js`, so the Keys row goes amber and then green as for a
+  paste and there is no second vault client. The writer never throws past
+  the vault write and says `vaultWritten`, so a failure after it is answered
+  200 `{ ok: true, stored: true }` with the failure as `lastError`, and the
+  host does not mint again. The `secret_state` document the Keys tab, the
+  agent and every key verdict share is now written one secret's record at a
+  time under its ETag (`updateSecretRecord`), so a verdict landing during a
+  renewal is no longer lost. One `coder_status_token_rotated` audit row,
+  never the value. A token that fails a check is 422 with a sentence naming
+  the check, and a vault refusal 502; the report is recorded either way in
+  one `admin_config/coder_automation` document, merged under its ETag (event
+  dates kept when a report omits them, `lastError` cleared by a clean check,
+  anything shaped like a Coder key in it removed). A `checkedAt`,
+  `statusTokenRotatedAt` or `templatePushedAt` more than ten minutes ahead
+  of the site's clock is a 400, and the card measures silence from the
+  site's own `reportedAt`, so a host clock in the future cannot hide a host
+  that has stopped. Warning and error lines name a status, never the token,
+  the agent or a document id.
   `GET /api/cms/labs/coder-automation` (editor) serves the document, and
   the Hybrid Lab card on the Services tab now groups its keys: Coder's two
   values together with **Automatic renewal** (status token renewed on,
@@ -57,9 +75,13 @@ This project has not cut a tagged release; entries are grouped under
   `{"ok":true,"stored":<bool>}`, and on failure prints the error's class
   alone; the agent's configuration moved to `vps-agent/lib/config.js` so
   the agent and the one-shot read it one way. `lab-host/README.md`, "The
-  status token for the site", gains a paragraph pointing to the host's
-  setup. Tests: `functions/src/lib/labs/coder-automation.test.js`,
-  `coder-status.test.js`, `admin-secrets.test.js`, `lab-agent.test.js`;
+  status token for the site", gains a paragraph naming the three checks,
+  saying the host should mint with `--scope user:read` as well (from Coder
+  v2.38's source: both identity reads load the caller's user through its
+  authorizing store; not yet measured on the lab's Coder), and pointing to
+  the host's setup. Tests: `functions/src/lib/labs/coder-automation.test.js`,
+  `coder-status.test.js`, `admin-secrets.test.js`, `key-verdict.test.js`,
+  `lab-agent.test.js`;
   `frontend/src/components/admin/integrations/coderAutomationView.test.js`,
   `IntegrationsServices.test.jsx`, `serviceRegistry.test.js`;
   `vps-agent/lib/report-coder-automation.test.js`, `config.test.js`,

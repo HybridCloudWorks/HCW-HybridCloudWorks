@@ -26,9 +26,10 @@ import { createNotifier } from '../lib/notify.js';
 // The notifier is how the owner hears that an agent announced its own
 // shutdown (lib/lab-agent.js, heartbeat); it reads and writes the cooldown
 // document in `system`, hence upsertDoc beside the agent store's verbs.
-// createDoc and upsertDoc are also the Coder automation report's: the
-// report document's first write, the secret state document and the audit
-// row (lib/labs/coder-automation.js).
+// createDoc and upsertDoc are also the Coder automation report's: the first
+// write of the report document and of the secret state document (both then
+// replaceDocIfMatch, under their ETags), and the audit row
+// (lib/labs/coder-automation.js).
 const handlers = (context) =>
   createLabAgentHandlers({
     guard: getDefaultAgentGuard(),

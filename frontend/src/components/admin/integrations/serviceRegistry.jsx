@@ -826,7 +826,7 @@ export const SERVICES = Object.freeze([
     dataDirection:
       'Inbound: workspace status comes from Coder, and the lab host hands over a renewed status token; a Turnstile token goes to Cloudflare to verify.',
     securityNote:
-      'The status token is read-only in Coder and never reaches a browser; a renewed one from the lab host is stored only after Coder accepts it. The Turnstile secret goes to Cloudflare siteverify and nowhere else.',
+      'The status token is read-only in Coder and never reaches a browser; a renewed one from the lab host is stored only after Coder shows it is a working, read-only key of the status user. The Turnstile secret goes to Cloudflare siteverify and nowhere else.',
   },
 ]);
 

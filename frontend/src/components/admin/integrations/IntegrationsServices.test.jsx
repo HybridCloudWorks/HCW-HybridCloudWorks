@@ -451,7 +451,7 @@ describe('the Hybrid Lab card: everything Coder in one box (2026-10-08)', () => 
     );
     expect(rows[1]).toBe('Rotation credential expires on 2099-04-01.');
     expect(rows[2]).toBe('Template last published 2026-10-07 (brave_turing4).');
-    expect(rows[3]).toMatch(/^Last automation check \d{4}-\d{2}-\d{2} \(\d+ min ago\)\.$/);
+    expect(rows[3]).toMatch(/^Last automation check \d{4}-\d{2}-\d{2}, reported \d+ min ago\.$/);
     expect(box.querySelector('[data-status]').getAttribute('data-status')).toBe('healthy');
     expect(within(box).queryByTestId('coder-automation-problem')).toBeNull();
   });

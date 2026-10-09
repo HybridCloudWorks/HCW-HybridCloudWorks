@@ -11,13 +11,15 @@
  */
 import { httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { readDoc, upsertDoc } from '../lib/cosmos-client.js';
+import { createDoc, readDoc, replaceDocIfMatch } from '../lib/cosmos-client.js';
 import { createAdminSecretHandlers } from '../lib/admin-secrets.js';
 
+// createDoc and replaceDocIfMatch, not upsertDoc: the state document is
+// written under its ETag, one secret's record at a time (updateSecretRecord).
 const handlers = () =>
   createAdminSecretHandlers({
     guard: getDefaultGuard(),
-    store: { readDoc, upsertDoc },
+    store: { readDoc, createDoc, replaceDocIfMatch },
   });
 
 httpRouteByMethod('cmsSecrets', {

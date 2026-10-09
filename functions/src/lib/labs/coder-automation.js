@@ -15,10 +15,10 @@
  * (auth/require-agent.js). The host already holds one credential: the
  * agent's Entra certificate, whose whole reach is the agent routes. This
  * adds one route to that reach, and narrows it to one secret by name,
- * CODER-STATUS-TOKEN, and to a value Coder itself accepts. A stolen
- * certificate can therefore replace the status token with another working
- * Coder key and nothing else: the token is read-only in Coder, and the
- * site's only use of it is the labs card's counts.
+ * CODER-STATUS-TOKEN, and to a value Coder itself vouches for: a working key
+ * of the status user, scoped to reading. A stolen certificate can therefore
+ * replace the status token with another read-only key of that same user and
+ * nothing else, and the site's only use of it is the labs card's counts.
  *
  * ===========================================================================
  * POST /api/agent/reportCoderAutomation (lib/lab-agent.js composes it)
@@ -37,18 +37,37 @@
  * Validation runs after the guard, so a caller without a credential learns
  * nothing about the shape.
  *
+ * THE HOST'S CLOCK IS CHECKED, NOT TRUSTED (review of #1030). `checkedAt`,
+ * `statusTokenRotatedAt` and `templatePushedAt` say when something already
+ * happened, so one more than MAX_CLOCK_SKEW_MS ahead of the site's clock is a
+ * 400 naming the host's clock; nothing is clamped silently. The card judges
+ * how fresh a report is by `reportedAt`, the site's own time of receipt,
+ * never by `checkedAt`: a host whose clock read 2099 would otherwise have
+ * kept the card from ever saying it had gone quiet.
+ *
  * VERIFY, THEN STORE. A `statusToken` must be a Coder API key in shape
- * (CODER_API_KEY_PATTERN, from Coder v2.38's source), and then must work:
- * the card's own `GET /api/v2/workspaces?q=status:running`, made with it
- * through coder-status.js's guarded GET, must answer 200 with an integer
- * `count`. Only then is it written, through `writeCatalogSecret`, the same
+ * (CODER_API_KEY_PATTERN, from Coder v2.38's source), and then pass the three
+ * checks of coder-status.js's verifyStatusToken, each a read made with it
+ * that must answer exactly 200: it works (the card's own running-workspaces
+ * read answers an integer `count`), it is the status user's (`/users/me`
+ * names CODER_STATUS_USER, default hcw-status), and it can only read (its
+ * own key record lists the read scopes and nothing more; an unscoped key is
+ * refused). Only then is it written, through `writeCatalogSecret`, the same
  * writer the Keys tab's PUT uses (admin-secrets.js), so the Keys row goes
  * amber and then green as it does for a paste, and there is no second Key
- * Vault client. A token Coder refuses is not stored: 422 with the reason, and
- * the report is still recorded, with the reason as its `lastError`. A vault
- * refusal is 502 on the same terms. A stored token earns one
- * `admin_audit_logs` row, `coder_status_token_rotated`, that names the agent
- * and the secret and never the value.
+ * Vault client. A token that fails a check is not stored: 422 with a
+ * sentence naming the check, and the report is still recorded, with that
+ * sentence as its `lastError`. A vault refusal is 502 on the same terms. A
+ * stored token earns one `admin_audit_logs` row,
+ * `coder_status_token_rotated`, that names the agent and the secret and
+ * never the value.
+ *
+ * ONCE THE VAULT HAS THE TOKEN, THE ANSWER SAYS SO. The writer reports
+ * `vaultWritten` and never throws past the vault write, so a failure after it
+ * (recording the write on the Keys tab's state document) is not a failed
+ * renewal: the token is live, the answer is 200 `{ ok: true, stored: true }`,
+ * and the follow-up failure is the report's `lastError`. A host told
+ * otherwise would mint and hand over yet another token.
  *
  * Answers 200 `{ ok: true, stored }`.
  *
@@ -101,6 +120,7 @@ import {
   CODER_API_KEY_PATTERN,
   TOKEN_RENEW_WARNING_DAYS,
   readCoderConfig,
+  readStatusUser,
   verifyStatusToken,
 } from './coder-status.js';
 
@@ -126,6 +146,16 @@ export const REPORT_FIELDS = Object.freeze({
   templateVersion: 'version',
   lastError: 'error',
 });
+
+/**
+ * The report's dates that say when something already happened, and so may
+ * not be in the future by more than MAX_CLOCK_SKEW_MS (see the header). The
+ * two expiries are rightly in the future and are not among them.
+ */
+export const PAST_EVENT_FIELDS = Object.freeze(['checkedAt', 'statusTokenRotatedAt', 'templatePushedAt']);
+
+/** How far ahead of the site's clock the host's may run before a report is refused. */
+export const MAX_CLOCK_SKEW_MS = 10 * 60 * 1000;
 
 /** The fields a report keeps until a later report mentions them (see the header). */
 export const EVENT_FIELDS = Object.freeze([
@@ -222,8 +252,17 @@ function reportValue(key, kind, raw) {
   return { value: raw.replace(EMBEDDED_KEY, REDACTED_KEY).trim() };
 }
 
+/** The first past-event date that is ahead of the site's clock by more than the skew, as a refusal; or null. */
+function clockRefusal(report, nowMs) {
+  const ahead = PAST_EVENT_FIELDS.find(
+    (key) => report[key] !== undefined && Date.parse(report[key]) - nowMs > MAX_CLOCK_SKEW_MS
+  );
+  if (!ahead) return null;
+  return `report.${ahead} is more than ${MAX_CLOCK_SKEW_MS / 60_000} minutes ahead of the site's clock; check the lab host's clock`;
+}
+
 /** The report, checked key by key: `{ report }` or `{ error }`. */
-function parseReport(raw) {
+function parseReport(raw, nowMs) {
   if (!isPlainObject(raw)) return { error: 'report must be a JSON object' };
   const unknown = Object.keys(raw).find((key) => !Object.hasOwn(REPORT_FIELDS, key));
   if (unknown !== undefined) {
@@ -239,15 +278,16 @@ function parseReport(raw) {
     if (checked.error) return { error: checked.error };
     report[key] = checked.value;
   }
-  return { report };
+  const ahead = clockRefusal(report, nowMs);
+  return ahead ? { error: ahead } : { report };
 }
 
 /**
  * The body, checked: `{ value: { statusToken, report } }` or `{ error }`, the
- * error a sentence for the 400. Pure, and the token never appears in a
- * sentence it returns.
+ * error a sentence for the 400. Pure given `nowMs` (the site's clock, for the
+ * past-event dates), and the token never appears in a sentence it returns.
  */
-export function parseAutomationBody(body) {
+export function parseAutomationBody(body, nowMs = Date.now()) {
   if (!isPlainObject(body)) return { error: 'The body must be a JSON object' };
   const unknown = Object.keys(body).find((key) => !BODY_FIELDS.includes(key));
   if (unknown !== undefined) {
@@ -268,7 +308,7 @@ export function parseAutomationBody(body) {
   }
 
   if (body.report === undefined) return { error: 'report is required' };
-  const parsed = parseReport(body.report);
+  const parsed = parseReport(body.report, nowMs);
   if (parsed.error) return { error: parsed.error };
   return { value: { statusToken, report: parsed.report } };
 }
@@ -336,11 +376,21 @@ export function presentAutomation(doc) {
   return out;
 }
 
+const refused = (status, error) => ({ stored: false, refusal: { status, error }, followUp: null });
+
 /**
- * The 422 or 502 a token earns when it is not stored, or null when it was.
+ * What happened to a renewed token: `{ stored, refusal, followUp }`.
+ *
+ *   stored    the vault holds it now. True even when something after the
+ *             vault write failed, because the token is live either way, and
+ *             the host must hear that it need not mint another.
+ *   refusal   `{ status, error }` when it was not stored: 422 for a check it
+ *             failed, 502 when Key Vault refused it.
+ *   followUp  the sentence for what failed after the vault took it, or null.
+ *
  * Every sentence here can reach the host's journal and the card, so none
- * carries the token; Coder's reasons name a status or a cause only
- * (coder-status.js verifyStatusToken).
+ * carries the token; Coder's reasons name a check and a status or a cause
+ * only (coder-status.js verifyStatusToken).
  */
 async function storeVerifiedToken(deps, { token, agent, at }, context) {
   const config = readCoderConfig(deps.env);
@@ -348,31 +398,49 @@ async function storeVerifiedToken(deps, { token, agent, at }, context) {
     context.warn?.(
       'reportCoderAutomation: a renewed status token arrived while CODER_URL is not set; it could not be verified and was not stored'
     );
-    return {
-      status: 422,
-      error: 'CODER_URL is not set on the site, so the token could not be verified; it was not stored',
-    };
+    return refused(422, 'CODER_URL is not set on the site, so the token could not be verified; it was not stored');
   }
 
-  const verdict = await verifyStatusToken({ fetchImpl: deps.fetchImpl, config, token });
+  const verdict = await verifyStatusToken({
+    fetchImpl: deps.fetchImpl,
+    config,
+    token,
+    expectedUser: readStatusUser(deps.env),
+  });
   if (!verdict.ok) {
     context.warn?.(
-      `reportCoderAutomation: a renewed status token failed verification (${verdict.reason}); it was not stored`
+      `reportCoderAutomation: a renewed status token failed the ${verdict.check} check (${verdict.reason}); it was not stored`
     );
-    return { status: 422, error: `${verdict.reason}; the token was not stored` };
+    return refused(422, `${verdict.reason}; the token was not stored`);
   }
 
-  const written = await writeCatalogSecret(
-    { store: deps.store, env: deps.env, now: () => at, vault: deps.vault, log: context },
-    { name: CODER_STATUS_SECRET, value: token, actor: `lab-agent:${agent.agentId}` }
-  );
+  let written;
+  try {
+    written = await writeCatalogSecret(
+      { store: deps.store, env: deps.env, now: () => at, vault: deps.vault, log: context },
+      { name: CODER_STATUS_SECRET, value: token, actor: `lab-agent:${agent.agentId}` }
+    );
+  } catch (error) {
+    // writeCatalogSecret never throws (admin-secrets.js), so this is a bug
+    // in it; and since which step threw is unknown, so is whether the vault
+    // has the token. The answer says exactly that rather than guessing.
+    context.error?.(
+      `reportCoderAutomation: the status token write threw (${error?.code ?? 'error'}); whether it was stored is unknown`
+    );
+    return refused(500, 'The token write ended in an error, so whether it was stored is unknown');
+  }
+
+  if (!written.vaultWritten) {
+    context.warn?.(`reportCoderAutomation: a verified status token was not stored (${written.status})`);
+    return refused(written.status === 502 ? 502 : 422, written.error);
+  }
   if (!written.ok) {
     context.warn?.(
-      `reportCoderAutomation: a verified status token was not stored (${written.status})`
+      `reportCoderAutomation: the status token was stored, but a step after the vault write failed (${written.status})`
     );
-    return { status: written.status === 502 ? 502 : 422, error: written.error };
+    return { stored: true, refusal: null, followUp: `The token was stored, but ${written.error}` };
   }
-  return null;
+  return { stored: true, refusal: null, followUp: null };
 }
 
 /**
@@ -400,20 +468,24 @@ async function auditRotation(deps, { agent, at }, context) {
   }
 }
 
+/** The site's sentence first, then the host's, within the field's length. */
+const joinErrors = (site, host) =>
+  [site, host].filter(Boolean).join(' — ').slice(0, MAX_LAST_ERROR_LENGTH);
+
 /** What this report writes to the document, given what happened to its token. */
-function reportFields(report, { agent, at, stored, refusal }) {
+function reportFields(report, { agent, at, outcome }) {
   const fields = { ...report, agentId: agent.agentId, reportedAt: at };
-  if (refusal) {
+  if (outcome.refusal) {
     delete fields.statusTokenRotatedAt;
     delete fields.statusTokenExpiresAt;
-    fields.lastError = [refusal.error, report.lastError]
-      .filter(Boolean)
-      .join(' — ')
-      .slice(0, MAX_LAST_ERROR_LENGTH);
+    fields.lastError = joinErrors(outcome.refusal.error, report.lastError);
   }
-  if (stored) fields.statusTokenRotatedAt = at;
+  if (outcome.stored) fields.statusTokenRotatedAt = at;
+  if (outcome.followUp) fields.lastError = joinErrors(outcome.followUp, report.lastError);
   return fields;
 }
+
+const NO_TOKEN = Object.freeze({ stored: false, refusal: null, followUp: null });
 
 /**
  * The agent's report, after `requireAgent` has bound the body to an agent
@@ -439,20 +511,21 @@ export function createCoderAutomationReporter({
   const deps = { store, env, fetchImpl, vault, now, uuid };
 
   return async function reportCoderAutomation({ body, agent }, context) {
-    const parsed = parseAutomationBody(body);
+    const received = now();
+    const parsed = parseAutomationBody(body, received.getTime());
     if (parsed.error) return json(400, { ok: false, error: parsed.error });
     const { statusToken, report } = parsed.value;
-    const at = now().toISOString();
+    const at = received.toISOString();
 
-    let refusal = null;
+    let outcome = NO_TOKEN;
     if (statusToken) {
-      refusal = await storeVerifiedToken(deps, { token: statusToken, agent, at }, context);
-      if (!refusal) await auditRotation(deps, { agent, at }, context);
+      outcome = await storeVerifiedToken(deps, { token: statusToken, agent, at }, context);
+      if (outcome.stored) await auditRotation(deps, { agent, at }, context);
     }
-    const stored = Boolean(statusToken) && !refusal;
+    const { stored, refusal } = outcome;
 
     try {
-      await recordAutomationReport(store, reportFields(report, { agent, at, stored, refusal }));
+      await recordAutomationReport(store, reportFields(report, { agent, at, outcome }));
     } catch (error) {
       context.error?.(
         `reportCoderAutomation: the report could not be recorded (${error?.code ?? 'error'})${stored ? '; the token it carried was stored' : ''}`

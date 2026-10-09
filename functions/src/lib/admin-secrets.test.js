@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   MIN_SECRET_LENGTH,
+  SECRET_STATE_WRITE_ATTEMPTS,
   computeSecretState,
   createAdminSecretHandlers,
   processStartedAt,
   recordSecretVerdict,
   rejectSecretValue,
+  updateSecretRecord,
   writeCatalogSecret,
 } from './admin-secrets.js';
 
@@ -15,12 +17,32 @@ const before = (iso) => iso; // readability at call sites
 
 const entry = { setting: 'GEMINI_API_KEY', secret: 'GEMINI-API-KEY' };
 
+/**
+ * The state document with real ETag semantics: a replace with a stale
+ * `_etag` is a 412 and a create over an existing document a 409, as Cosmos
+ * answers them. `upsertDoc` is there only to prove nothing calls it: a blind
+ * whole-document write is what lost concurrent writes (review of #1030).
+ */
 function buildStore(initial = {}) {
-  let doc = Object.keys(initial).length ? { id: 'secret_state', secrets: initial } : null;
+  let etag = 0;
+  const stamp = (next) => ({ ...next, _etag: `"e${++etag}"` });
+  let doc = Object.keys(initial).length ? stamp({ id: 'secret_state', secrets: initial }) : null;
   return {
-    readDoc: vi.fn(async () => doc),
-    upsertDoc: vi.fn(async (_c, next) => {
-      doc = next;
+    readDoc: vi.fn(async () => (doc ? structuredClone(doc) : null)),
+    createDoc: vi.fn(async (_c, next) => {
+      if (doc) throw Object.assign(new Error('conflict'), { code: 409 });
+      doc = stamp(next);
+      return doc;
+    }),
+    replaceDocIfMatch: vi.fn(async (_c, next) => {
+      if (!doc || doc._etag !== next._etag) {
+        throw Object.assign(new Error('precondition failed'), { code: 412 });
+      }
+      doc = stamp(next);
+      return doc;
+    }),
+    upsertDoc: vi.fn(async () => {
+      throw new Error('the state document must not be written blind');
     }),
     current: () => doc,
   };
@@ -580,7 +602,8 @@ describe('recording verdicts', () => {
   it('ignores a name outside the catalogue rather than growing the document', async () => {
     const store = buildStore();
     await recordSecretVerdict(store, 'NOT-A-SECRET', { ok: false, status: 401 });
-    expect(store.upsertDoc).not.toHaveBeenCalled();
+    expect(store.createDoc).not.toHaveBeenCalled();
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
   });
 
   it('does nothing without a store', async () => {
@@ -598,20 +621,30 @@ describe('writeCatalogSecret, the one writer behind the Keys tab and the lab age
   // The lab agent's Coder status token renewal (labs/coder-automation.js)
   // calls this directly, so its refusals are pinned here, not only through
   // putSecret.
-  const write = (deps, over = {}) =>
+  // Built at run time: a literal in Coder's API key shape reads as a leaked
+  // token to secret scanners (GitGuardian flagged these on #1030).
+  const VALUE = ['FAKEKEYID0', 'FAKESECRETFAKESECRET00'].join('-');
+  const noSleep = { sleep: async () => {} };
+  const write = (deps, over = {}, stateOptions = noSleep) =>
     writeCatalogSecret(
       { store: deps._store, env: deps.env, now: deps.now, vault: deps.vault, log: deps.log },
-      { name: 'CODER-STATUS-TOKEN', value: ['FAKEKEYID0', 'FAKESECRETFAKESECRET00'].join('-'), actor: 'lab-agent:vps-1', ...over }
+      { name: 'CODER-STATUS-TOKEN', value: VALUE, actor: 'lab-agent:vps-1', ...over },
+      stateOptions
     );
 
   it('refuses a name outside the catalogue and a value rejectSecretValue refuses, before the vault', async () => {
     const deps = buildDeps();
     expect(await write(deps, { name: 'NOT-A-SECRET' })).toEqual({
       ok: false,
+      vaultWritten: false,
       status: 400,
       error: 'NOT-A-SECRET is not a secret this estate declares',
     });
-    expect(await write(deps, { value: ' padded-value-long-enough' })).toMatchObject({ ok: false, status: 400 });
+    expect(await write(deps, { value: ' padded-value-long-enough' })).toMatchObject({
+      ok: false,
+      vaultWritten: false,
+      status: 400,
+    });
     expect(deps.vault.setVaultSecret).not.toHaveBeenCalled();
     expect(deps._store.current()).toBeNull();
   });
@@ -619,7 +652,7 @@ describe('writeCatalogSecret, the one writer behind the Keys tab and the lab age
   it('writes, refreshes and records the actor it is given, and never the value', async () => {
     const deps = buildDeps();
     const written = await write(deps);
-    expect(written).toMatchObject({ ok: true, refresh: { refreshed: true } });
+    expect(written).toMatchObject({ ok: true, vaultWritten: true, recorded: true, refresh: { refreshed: true } });
     expect(written.entry.setting).toBe('CODER_STATUS_TOKEN');
     expect(written.record).toMatchObject({ lastWriteBy: 'lab-agent:vps-1', lastWriteVersion: 'v2' });
     expect(JSON.stringify(deps._store.current())).not.toContain('FAKESECRET');
@@ -635,8 +668,156 @@ describe('writeCatalogSecret, the one writer behind the Keys tab and the lab age
         refreshKeyVaultReferences: vi.fn(),
       },
     });
-    expect(await write(deps)).toMatchObject({ ok: false, status: 502 });
+    expect(await write(deps)).toMatchObject({ ok: false, vaultWritten: false, status: 502 });
     expect(deps.vault.refreshKeyVaultReferences).not.toHaveBeenCalled();
     expect(deps._store.current()).toBeNull();
+  });
+
+  describe('once the vault has the value, it never throws and never says it was not stored', () => {
+    it('reports vaultWritten when the state record cannot be written', async () => {
+      const deps = buildDeps();
+      deps._store.createDoc = vi.fn(async () => {
+        throw Object.assign(new Error('service unavailable'), { code: 503 });
+      });
+      const written = await write(deps);
+      expect(written).toMatchObject({
+        ok: false,
+        vaultWritten: true,
+        recorded: false,
+        status: 500,
+        error: 'the Keys tab could not record the write (503), so its light may lag',
+      });
+      expect(deps.vault.setVaultSecret).toHaveBeenCalledTimes(1);
+      // The record it meant to write, so a caller can still show it as pending.
+      expect(written.record).toMatchObject({ lastWriteBy: 'lab-agent:vps-1' });
+    });
+
+    it('reports vaultWritten when the state document never stops changing', async () => {
+      const deps = buildDeps({ store: buildStore({ 'GEMINI-API-KEY': {} }) });
+      deps._store.replaceDocIfMatch = vi.fn(async () => {
+        throw Object.assign(new Error('precondition failed'), { code: 412 });
+      });
+      const written = await write(deps);
+      expect(written).toMatchObject({ ok: false, vaultWritten: true, error: expect.stringMatching(/CONFLICT/) });
+      expect(deps._store.replaceDocIfMatch).toHaveBeenCalledTimes(SECRET_STATE_WRITE_ATTEMPTS);
+    });
+
+    it('counts a refresh that throws as not refreshed, and still records the write', async () => {
+      const deps = buildDeps({
+        vault: {
+          setVaultSecret: vi.fn(async () => ({ version: 'v3' })),
+          refreshKeyVaultReferences: vi.fn(async () => {
+            throw new Error('ARM throttled');
+          }),
+        },
+      });
+      const written = await write(deps);
+      expect(written).toMatchObject({ ok: true, vaultWritten: true, refresh: { refreshed: false } });
+      expect(deps._store.current().secrets['CODER-STATUS-TOKEN'].lastWriteVersion).toBe('v3');
+    });
+
+    it('the Keys tab says Stored, but, rather than reporting a failed write', async () => {
+      const deps = buildDeps();
+      deps._store.createDoc = vi.fn(async () => {
+        throw Object.assign(new Error('service unavailable'), { code: 503 });
+      });
+      const response = await createAdminSecretHandlers(deps).putSecret(
+        request({ secret: 'GEMINI-API-KEY', value: 'a-good-long-value' })
+      );
+      expect(response.status).toBe(200);
+      expect(response.jsonBody.success).toBe(true);
+      expect(response.jsonBody.message).toMatch(/^Stored, but the Keys tab could not record the write \(503\)/);
+      expect(response.jsonBody.secret.state).toBe('pending');
+    });
+  });
+});
+
+describe('the state document: one secret’s record at a time, under its ETag (review of #1030)', () => {
+  const noSleep = { sleep: async () => {} };
+
+  it('keeps a verdict that lands between a write’s read and its replace, which a blind upsert discarded', async () => {
+    // Before: the writer read { GEMINI: failed }, the verdict wrote
+    // { GEMINI: ok }, and the writer's whole-map upsert put { GEMINI: failed }
+    // back with its own entry beside it. The verdict was lost, and the Keys
+    // row showed a key as rejected that had just worked.
+    const store = buildStore({ 'GEMINI-API-KEY': { lastFailAt: '2026-10-08T09:00:00.000Z' } });
+    const replace = store.replaceDocIfMatch;
+    let raced = false;
+    store.replaceDocIfMatch = vi.fn(async (container, next, options) => {
+      if (!raced) {
+        raced = true;
+        await recordSecretVerdict(
+          { ...store, replaceDocIfMatch: replace },
+          'GEMINI-API-KEY',
+          { ok: true, now: () => '2026-10-08T10:00:00.000Z' },
+          noSleep
+        );
+      }
+      return replace(container, next, options);
+    });
+
+    const written = await writeCatalogSecret(
+      {
+        store,
+        env: {},
+        now: () => '2026-10-08T10:00:01.000Z',
+        vault: {
+          setVaultSecret: vi.fn(async () => ({ version: 'v9' })),
+          refreshKeyVaultReferences: vi.fn(async () => ({ refreshed: true, reason: null })),
+        },
+        log: { error: vi.fn() },
+      },
+      { name: 'CODER-STATUS-TOKEN', value: 'a-good-long-value', actor: 'lab-agent:vps-1' },
+      noSleep
+    );
+
+    expect(written.recorded).toBe(true);
+    // The writer lost the first race, read again, and wrote on top of the verdict.
+    expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(2);
+    const { secrets } = store.current();
+    expect(secrets['GEMINI-API-KEY'].lastOkAt).toBe('2026-10-08T10:00:00.000Z');
+    expect(secrets['GEMINI-API-KEY'].lastFailAt).toBe('2026-10-08T09:00:00.000Z');
+    expect(secrets['CODER-STATUS-TOKEN'].lastWriteBy).toBe('lab-agent:vps-1');
+  });
+
+  it('reads again when two first writes race to create the document', async () => {
+    const store = buildStore();
+    const create = store.createDoc;
+    let raced = false;
+    store.createDoc = vi.fn(async (container, next) => {
+      if (!raced) {
+        raced = true;
+        await create(container, { id: 'secret_state', secrets: { 'GEMINI-API-KEY': { lastOkAt: 'x' } } });
+      }
+      return create(container, next);
+    });
+    await recordSecretVerdict(store, 'OPENAI-API-KEY', { ok: false, status: 401, now: () => 't' }, noSleep);
+    const { secrets } = store.current();
+    expect(secrets['GEMINI-API-KEY'].lastOkAt).toBe('x');
+    expect(secrets['OPENAI-API-KEY'].lastFailStatus).toBe(401);
+  });
+
+  it('changes only the named record, and gives up with CONFLICT after its attempts', async () => {
+    const store = buildStore({ 'GEMINI-API-KEY': { lastOkAt: 'g' }, 'OPENAI-API-KEY': { lastOkAt: 'o' } });
+    const record = await updateSecretRecord(store, 'GEMINI-API-KEY', (r) => ({ ...r, lastFailAt: 'f' }), noSleep);
+    expect(record).toEqual({ lastOkAt: 'g', lastFailAt: 'f' });
+    expect(store.current().secrets['OPENAI-API-KEY']).toEqual({ lastOkAt: 'o' });
+
+    store.replaceDocIfMatch = vi.fn(async () => {
+      throw Object.assign(new Error('precondition failed'), { code: 412 });
+    });
+    await expect(updateSecretRecord(store, 'GEMINI-API-KEY', (r) => r, noSleep)).rejects.toMatchObject({
+      code: 'CONFLICT',
+      message: 'The secret state kept changing while it was written',
+    });
+  });
+
+  it('does not retry an error that is not a lost race', async () => {
+    const store = buildStore({ 'GEMINI-API-KEY': {} });
+    store.replaceDocIfMatch = vi.fn(async () => {
+      throw Object.assign(new Error('forbidden'), { code: 403 });
+    });
+    await expect(updateSecretRecord(store, 'GEMINI-API-KEY', (r) => r, noSleep)).rejects.toMatchObject({ code: 403 });
+    expect(store.replaceDocIfMatch).toHaveBeenCalledTimes(1);
   });
 });

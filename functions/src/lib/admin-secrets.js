@@ -302,16 +302,70 @@ export function presentSecret(entry, ctx) {
   };
 }
 
+const STATE_CONTAINER = 'admin_config';
+const STATE_PK = { partitionKey: ADMIN_CONFIG_PARTITION };
+
+/** Read → change → write-if-unchanged attempts on the state document before a write gives up. */
+export const SECRET_STATE_WRITE_ATTEMPTS = 6;
+
+const secretsOf = (doc) => (doc?.secrets && typeof doc.secrets === 'object' ? doc.secrets : {});
+
 async function readState(store) {
-  const doc = await store.readDoc('admin_config', SECRET_STATE_DOC_ID, ADMIN_CONFIG_PARTITION);
-  return doc?.secrets && typeof doc.secrets === 'object' ? doc.secrets : {};
+  return secretsOf(await store.readDoc(STATE_CONTAINER, SECRET_STATE_DOC_ID, ADMIN_CONFIG_PARTITION));
 }
 
-async function writeState(store, secrets) {
-  await store.upsertDoc('admin_config', {
-    id: SECRET_STATE_DOC_ID,
-    configScope: ADMIN_CONFIG_PARTITION,
-    secrets,
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Change ONE secret's record in the state document, and nothing else in it.
+ *
+ * Three writers share `secret_state`: the Keys tab's PUT, the lab agent's
+ * renewal of the Coder status token, and every key verdict the AI router and
+ * the Publer clients report (key-verdict.js). Until the review of #1030 each
+ * read the document and upserted the whole `secrets` map, so two writes in
+ * the same moment kept only the later one's view of everything: a verdict
+ * landing during a renewal could put the old record back over the new
+ * write, and the Keys row would show green for a token nothing had checked.
+ *
+ * Now each write is conditional on the ETag it read (`createDoc` for the
+ * first, which has a loser too), and a writer that loses reads again and
+ * applies its change to what is there now: the probe-results pattern
+ * (lib/health/probe-results.js). `change(record)` gets this secret's current
+ * record and returns its next one. Resolves to that record; throws with
+ * `code: 'CONFLICT'` when every attempt lost, and with no id or name in the
+ * message, which a caller may log.
+ */
+export async function updateSecretRecord(
+  store,
+  name,
+  change,
+  { attempts = SECRET_STATE_WRITE_ATTEMPTS, sleep = defaultSleep } = {}
+) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (attempt > 0) await sleep(20 * 2 ** Math.min(attempt, 5) + Math.random() * 20);
+    const current = await store.readDoc(STATE_CONTAINER, SECRET_STATE_DOC_ID, ADMIN_CONFIG_PARTITION);
+    const secrets = secretsOf(current);
+    const record = change({ ...(secrets[name] ?? {}) });
+    const next = {
+      id: SECRET_STATE_DOC_ID,
+      configScope: ADMIN_CONFIG_PARTITION,
+      secrets: { ...secrets, [name]: record },
+    };
+    try {
+      if (current) {
+        await store.replaceDocIfMatch(STATE_CONTAINER, { ...next, _etag: current._etag }, STATE_PK);
+      } else {
+        await store.createDoc(STATE_CONTAINER, next);
+      }
+      return record;
+    } catch (error) {
+      // 412: replaced since our read. 409: created since our read found
+      // nothing. Either way, read again and change again.
+      if (error?.code !== 412 && error?.code !== 409) throw error;
+    }
+  }
+  throw Object.assign(new Error('The secret state kept changing while it was written'), {
+    code: 'CONFLICT',
   });
 }
 
@@ -325,23 +379,27 @@ async function writeState(store, secrets) {
 export async function recordSecretVerdict(
   store,
   secretName,
-  { ok, status = null, detail = '', now = () => new Date().toISOString() }
+  { ok, status = null, detail = '', now = () => new Date().toISOString() },
+  options = {}
 ) {
   if (!store || !findBySecretName(secretName)) return;
-  const secrets = await readState(store);
-  const previous = secrets[secretName] ?? {};
-  secrets[secretName] = ok
-    ? { ...previous, lastOkAt: now() }
-    : {
-        ...previous,
-        lastFailAt: now(),
-        lastFailStatus: Number.isFinite(status) ? status : null,
-        // Overwritten on every failure, including with `''` when the provider
-        // gave no reason — a stale sentence from a previous rejection beside a
-        // fresh status is worse than no sentence at all.
-        lastFailDetail: typeof detail === 'string' ? detail.slice(0, 300) : '',
-      };
-  await writeState(store, secrets);
+  await updateSecretRecord(
+    store,
+    secretName,
+    (previous) =>
+      ok
+        ? { ...previous, lastOkAt: now() }
+        : {
+            ...previous,
+            lastFailAt: now(),
+            lastFailStatus: Number.isFinite(status) ? status : null,
+            // Overwritten on every failure, including with `''` when the provider
+            // gave no reason — a stale sentence from a previous rejection beside a
+            // fresh status is worse than no sentence at all.
+            lastFailDetail: typeof detail === 'string' ? detail.slice(0, 300) : '',
+          },
+    options
+  );
 }
 
 /**
@@ -358,26 +416,41 @@ export async function recordSecretVerdict(
  * honest. The value reaches `setVaultSecret` and nothing else: not the state
  * document, not the answer, not a log line.
  *
- * Answers `{ ok: true, entry, record, refresh }`, or `{ ok: false, status,
- * error }` with 400 for a name the catalogue does not declare or a value
- * `rejectSecretValue` refuses, and 502 when Key Vault refuses the write — in
- * which case nothing was recorded, because nothing changed.
+ * NEVER THROWS, AND NEVER HIDES THAT THE VAULT TOOK THE VALUE (review of
+ * #1030). Every answer carries `vaultWritten`:
+ *
+ *   `{ ok: false, vaultWritten: false, status, error }`
+ *       400 for a name the catalogue does not declare or a value
+ *       `rejectSecretValue` refuses; 502 when Key Vault refuses the write.
+ *       Nothing changed, so nothing was recorded.
+ *   `{ ok: true, vaultWritten: true, recorded: true, entry, record, refresh }`
+ *   `{ ok: false, vaultWritten: true, recorded: false, status: 500, error,
+ *     entry, record, refresh }`
+ *       The vault has the value and a step after it failed: the state
+ *       record could not be written. `record` is the record it would have
+ *       written and `error` a clause ("the Keys tab could not record…") a
+ *       caller can put after "Stored, but". A caller that read this as
+ *       "not stored" would have someone paste, or a host mint, again.
  *
  * @param {object} deps
- * @param {{ readDoc: Function, upsertDoc: Function }} deps.store
+ * @param {{ readDoc: Function, createDoc: Function, replaceDocIfMatch: Function }} deps.store
  * @param {Record<string, unknown>} deps.env
  * @param {() => string} deps.now ISO time of the write
  * @param {{ setVaultSecret: Function, refreshKeyVaultReferences: Function }} deps.vault
  * @param {{ error?: Function }} [deps.log]
  * @param {{ name: string, value: string, actor: string }} write
+ * @param {{ attempts?: number, sleep?: Function }} [stateOptions] updateSecretRecord's
  */
-export async function writeCatalogSecret({ store, env, now, vault, log }, { name, value, actor }) {
+export async function writeCatalogSecret(
+  { store, env, now, vault, log },
+  { name, value, actor },
+  stateOptions = {}
+) {
+  const notWritten = (status, error) => ({ ok: false, vaultWritten: false, status, error });
   const entry = findBySecretName(name);
-  if (!entry) {
-    return { ok: false, status: 400, error: `${name || 'that name'} is not a secret this estate declares` };
-  }
+  if (!entry) return notWritten(400, `${name || 'that name'} is not a secret this estate declares`);
   const rejection = rejectSecretValue(value);
-  if (rejection) return { ok: false, status: 400, error: rejection };
+  if (rejection) return notWritten(400, rejection);
 
   let version = null;
   try {
@@ -385,33 +458,53 @@ export async function writeCatalogSecret({ store, env, now, vault, log }, { name
   } catch (error) {
     // The message names the secret and the HTTP status, never the body.
     log?.error?.(`[admin-secrets] could not set ${name}: ${error?.message ?? error}`);
-    return { ok: false, status: 502, error: `Key Vault refused the write for ${name}. The value was not stored.` };
+    return notWritten(502, `Key Vault refused the write for ${name}. The value was not stored.`);
   }
 
-  // The secret is safely in the vault from here on. Nothing below may fail
-  // the request — see secret-vault.js on why the refresh is best-effort.
-  const refresh = await vault.refreshKeyVaultReferences({ env });
+  // The secret is safely in the vault from here on, and nothing below may
+  // throw past this line. The refresh is best-effort by design
+  // (secret-vault.js), and an injected one that throws counts as not done.
+  let refresh;
+  try {
+    refresh = await vault.refreshKeyVaultReferences({ env });
+  } catch {
+    refresh = { refreshed: false, reason: 'refresh call failed' };
+  }
 
-  const secrets = await readState(store);
-  secrets[name] = {
-    ...(secrets[name] ?? {}),
-    lastWriteAt: now(),
-    lastWriteBy: actor || 'unknown',
-    lastWriteVersion: version,
-    // A rotation makes any previous verdict meaningless: the old key's 401
-    // says nothing about the new one.
-    lastOkAt: null,
-    lastFailAt: null,
-    lastFailStatus: null,
-  };
-  await writeState(store, secrets);
-  return { ok: true, entry, record: secrets[name], refresh };
+  let fresh = null;
+  try {
+    fresh = {
+      lastWriteAt: now(),
+      lastWriteBy: actor || 'unknown',
+      lastWriteVersion: version,
+      // A rotation makes any previous verdict meaningless: the old key's 401
+      // says nothing about the new one.
+      lastOkAt: null,
+      lastFailAt: null,
+      lastFailStatus: null,
+    };
+    const record = await updateSecretRecord(store, name, (previous) => ({ ...previous, ...fresh }), stateOptions);
+    return { ok: true, vaultWritten: true, recorded: true, entry, record, refresh };
+  } catch (error) {
+    log?.error?.(`[admin-secrets] ${name} is stored, but its state record failed (${error?.code ?? 'error'})`);
+    return {
+      ok: false,
+      vaultWritten: true,
+      recorded: false,
+      status: 500,
+      error: `the Keys tab could not record the write (${error?.code ?? 'error'}), so its light may lag`,
+      entry,
+      record: fresh,
+      refresh,
+    };
+  }
 }
 
 /**
  * @param {object} deps
  * @param {{requireRole: Function}} deps.guard
- * @param {object} deps.store readDoc/upsertDoc over Cosmos
+ * @param {object} deps.store readDoc/createDoc/replaceDocIfMatch over Cosmos
+ *        (the state document is written under its ETag; see updateSecretRecord)
  */
 export function createAdminSecretHandlers({
   guard,
@@ -475,9 +568,13 @@ export function createAdminSecretHandlers({
       { store, env, now, vault, log },
       { name, value, actor: auth.user?.oid ?? auth.user?.preferred_username ?? 'unknown' }
     );
-    if (!written.ok) return bad(written.status, written.error);
+    if (!written.vaultWritten) return bad(written.status, written.error);
     const { refresh } = written;
 
+    // What the operator should expect, in the words of what actually happened.
+    const live = refresh.refreshed
+      ? 'New workers pick it up immediately; this one keeps the old value until it recycles.'
+      : `It goes live within 24 hours or at the next deploy (${refresh.reason}).`;
     return {
       status: 200,
       jsonBody: {
@@ -488,10 +585,10 @@ export function createAdminSecretHandlers({
           startedAt: workerStartedAt(),
         }),
         refreshed: refresh.refreshed,
-        // What the operator should expect, in the words of what actually happened.
-        message: refresh.refreshed
-          ? 'Stored. New workers pick it up immediately; this one keeps the old value until it recycles.'
-          : `Stored. It goes live within 24 hours or at the next deploy (${refresh.reason}).`,
+        // Stored is stored: a state record that failed after the vault took
+        // the value is said, not reported as a failed write, which would
+        // have the operator paste the key again.
+        message: written.recorded ? `Stored. ${live}` : `Stored, but ${written.error}. ${live}`,
       },
     };
   }

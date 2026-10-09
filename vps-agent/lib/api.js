@@ -18,8 +18,9 @@
  * fully control. What bounds the damage is the server: the four endpoints
  * this file calls are the whole of what the credential can do, and each is
  * constrained further (claim only registered job types, complete only jobs
- * this agent holds, hand over only the Coder status token and only one Coder
- * accepts). See functions/src/lib/lab-agent.js.
+ * this agent holds, hand over only the Coder status token and only a
+ * working, read-only key of the status user, as Coder itself shows it).
+ * See functions/src/lib/lab-agent.js.
  */
 
 import { ClientCertificateCredential } from '@azure/identity';

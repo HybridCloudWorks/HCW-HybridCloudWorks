@@ -21,9 +21,14 @@
  *   stdout  `{"ok":true,"stored":<bool>}` and a newline, exit 0, when the
  *           site recorded the report; `stored` says whether it took a token.
  *   stderr  On any failure, ONE line: the error's class and nothing else
- *           (lib/log.js errorClass), exit 1. `HTTP 422` is a token Coder
- *           refused, `HTTP 400` a report the site would not read, `HTTP 403`
- *           an agent the registry does not know or has deactivated.
+ *           (lib/log.js errorClass), exit 1. `HTTP 422` is a token that
+ *           failed one of the site's checks (it works, it is the status
+ *           user's, it can only read), `HTTP 400` a report the site would
+ *           not read (a host clock more than ten minutes fast among them),
+ *           `HTTP 403` an agent the registry does not know or has
+ *           deactivated. After a 422 the site's sentence is the report's
+ *           `lastError` on the Integrations card, never this output; a 400
+ *           records nothing.
  *           `INVALID_INPUT`, `INPUT_TOO_LARGE` and `MISSING_CONFIG` are this
  *           side's own; `UNEXPECTED_ANSWER` a 2xx that did not say ok.
  *

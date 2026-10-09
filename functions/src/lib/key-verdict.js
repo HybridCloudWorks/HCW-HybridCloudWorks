@@ -116,8 +116,15 @@ async function writeKeyVerdict(settingName, verdict) {
     import('./admin-secrets.js'),
     import('./cosmos-client.js'),
   ]);
+  // The state document is written under its ETag, one secret's record at a
+  // time, so a verdict cannot undo a Keys-tab write or a lab agent renewal
+  // that landed in the same moment (admin-secrets.js updateSecretRecord).
   await recordSecretVerdict(
-    { readDoc: cosmos.readDoc, upsertDoc: cosmos.upsertDoc },
+    {
+      readDoc: cosmos.readDoc,
+      createDoc: cosmos.createDoc,
+      replaceDocIfMatch: cosmos.replaceDocIfMatch,
+    },
     settingToSecret(settingName),
     verdict
   );

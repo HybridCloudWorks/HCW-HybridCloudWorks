@@ -101,10 +101,26 @@ function makeStore(initial = {}) {
   return store;
 }
 
-const coderAnswering = (answer) =>
-  vi.fn(async () =>
-    typeof answer === 'function' ? answer() : { ok: true, status: 200, json: async () => answer }
+const ME_URL = 'https://coder.lab.example/api/v2/users/me';
+const KEY_URL = `https://coder.lab.example/api/v2/users/me/keys/${TOKEN.split('-')[0]}`;
+const READ_SCOPES = ['template:read', 'workspace:read', 'api_key:read', 'user:read'];
+const answered = (a) => (typeof a === 'function' ? a() : { ok: true, status: 200, json: async () => a });
+
+/**
+ * Coder's three verification reads (coder-status.js verifyStatusToken): the
+ * running count as `running` says, and the user and the key record right
+ * (hcw-status, the read scopes) unless `over` says otherwise.
+ */
+const coderAnswering = (running, over = {}) => {
+  const byUrl = {
+    [RUNNING_URL]: running,
+    [ME_URL]: over.me ?? { username: 'hcw-status' },
+    [KEY_URL]: over.key ?? { scopes: READ_SCOPES, scope: '' },
+  };
+  return vi.fn(async (url) =>
+    Object.hasOwn(byUrl, url) ? answered(byUrl[url]) : { ok: false, status: 404, json: async () => ({}) }
   );
+};
 
 const makeVault = () => ({
   setVaultSecret: vi.fn(async () => ({ version: 'v42' })),
@@ -188,7 +204,24 @@ describe('the body is exactly the contract, or a 400 with a sentence', () => {
     ['a version that is not a string', bodyWith({ report: { ...REPORT, templateVersion: 7 } }), /templateVersion must be a non-empty string/],
     ['an error that is too long', bodyWith({ report: { ...REPORT, lastError: 'e'.repeat(301) } }), /at most 300 characters/],
     ['an error that is not a string', bodyWith({ report: { ...REPORT, lastError: { message: 'x' } } }), /lastError must be a string/],
-    ['a token of the wrong shape', bodyWith({ statusToken: 'FAKEKEYID-FAKESECRETFAKESECRET00' }), /statusToken is not a Coder API key/],
+    // A nine-character id, built at run time like TOKEN.
+    ['a token of the wrong shape', bodyWith({ statusToken: TOKEN.slice(1) }), /statusToken is not a Coder API key/],
+    // The host's clock, checked (review of #1030): NOW is 05:00:00Z.
+    [
+      'a checkedAt 11 minutes ahead of the site',
+      bodyWith({ report: { checkedAt: '2026-10-08T05:11:00Z' } }),
+      /^report\.checkedAt is more than 10 minutes ahead of the site's clock; check the lab host's clock$/,
+    ],
+    [
+      'a checkedAt in 2099',
+      bodyWith({ report: { checkedAt: '2099-01-01T00:00:00Z' } }),
+      /report\.checkedAt is more than 10 minutes ahead/,
+    ],
+    [
+      'a template published in the future',
+      bodyWith({ report: { ...REPORT, templatePushedAt: '2026-10-08T06:00:00Z' } }),
+      /report\.templatePushedAt is more than 10 minutes ahead/,
+    ],
     ['a token with a newline on it', bodyWith({ statusToken: `${TOKEN}\n` }), /statusToken is not a Coder API key/],
     ['a token that is null', bodyWith({ statusToken: null }), /statusToken is not a Coder API key/],
   ];
@@ -204,6 +237,26 @@ describe('the body is exactly the contract, or a 400 with a sentence', () => {
     expect(t.store.upsertDoc).not.toHaveBeenCalled();
     expect(t.fetchImpl).not.toHaveBeenCalled();
     expect(t.vault.setVaultSecret).not.toHaveBeenCalled();
+  });
+
+  it('accepts a host clock up to ten minutes ahead, and stores its dates as sent, not clamped', async () => {
+    const t = setup();
+    const { res } = await t.send(
+      bodyWith({
+        report: {
+          checkedAt: '2026-10-08T05:09:59Z',
+          // The expiries are rightly in the future, however far.
+          rotationTokenExpiresAt: '2099-01-01T00:00:00Z',
+          statusTokenExpiresAt: '2099-01-01T00:00:00Z',
+        },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(stored(t.store)).toMatchObject({
+      checkedAt: '2026-10-08T05:09:59.000Z',
+      reportedAt: NOW.toISOString(),
+      rotationTokenExpiresAt: '2099-01-01T00:00:00.000Z',
+    });
   });
 
   it('never repeats a refused token in its sentence', () => {
@@ -230,15 +283,16 @@ describe('a renewed token: verified against Coder, then stored, never the other 
     expect(res.status).toBe(200);
     expect(body).toEqual({ ok: true, stored: true });
 
-    expect(t.fetchImpl).toHaveBeenCalledTimes(1);
-    const [url, options] = t.fetchImpl.mock.calls[0];
-    expect(url).toBe(RUNNING_URL);
-    expect(options.headers['Coder-Session-Token']).toBe(TOKEN);
-    expect(options.redirect).toBe('error');
+    // Works, is the status user's, can only read: three reads, all with the candidate.
+    expect(t.fetchImpl.mock.calls.map(([url]) => url)).toEqual([RUNNING_URL, ME_URL, KEY_URL]);
+    for (const [, options] of t.fetchImpl.mock.calls) {
+      expect(options.headers['Coder-Session-Token']).toBe(TOKEN);
+      expect(options.redirect).toBe('error');
+    }
 
     expect(t.vault.setVaultSecret).toHaveBeenCalledWith('CODER-STATUS-TOKEN', TOKEN, { env: ENV });
     expect(t.vault.refreshKeyVaultReferences).toHaveBeenCalledTimes(1);
-    expect(t.fetchImpl.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(t.fetchImpl.mock.invocationCallOrder[2]).toBeLessThan(
       t.vault.setVaultSecret.mock.invocationCallOrder[0]
     );
 
@@ -314,6 +368,32 @@ describe('a token Coder will not accept is not stored', () => {
       }),
       /Coder could not be reached/,
     ],
+    // Review of #1030: exactly 200, the status user's, and read-only.
+    [
+      'a 201 for the running count',
+      coderAnswering(() => ({ ok: true, status: 201, json: async () => ({ count: 1 }) })),
+      /^Coder answered HTTP 201 to the running-workspaces read; the token was not stored$/,
+    ],
+    [
+      'a working key of another user',
+      coderAnswering({ count: 1 }, { me: { username: 'some-learner' } }),
+      /^User check: the token does not belong to hcw-status; the token was not stored$/,
+    ],
+    [
+      'an unscoped key',
+      coderAnswering({ count: 1 }, { key: { scopes: ['coder:all'], scope: 'all' } }),
+      /^Scope check: the token is unscoped/,
+    ],
+    [
+      'a key that can also change templates',
+      coderAnswering({ count: 1 }, { key: { scopes: [...READ_SCOPES, 'template:update'] } }),
+      /^Scope check: the token carries scopes beyond reading: template:update; the token was not stored$/,
+    ],
+    [
+      'a key without api_key:read',
+      coderAnswering({ count: 1 }, { key: { scopes: ['template:read', 'workspace:read', 'user:read'] } }),
+      /^Scope check: the token lacks api_key:read; the token was not stored$/,
+    ],
   ];
 
   it.each(refusedBy)('on %s: 422 with the reason, no vault write, no audit row', async (_name, fetchImpl, reason) => {
@@ -354,6 +434,22 @@ describe('a token Coder will not accept is not stored', () => {
     expect(doc.lastError.length).toBeLessThanOrEqual(MAX_LAST_ERROR_LENGTH);
   });
 
+  it('checks the user CODER_STATUS_USER names, and never repeats the name a refused key belonged to', async () => {
+    const renamed = setup({
+      env: { ...ENV, CODER_STATUS_USER: 'lab-status' },
+      fetchImpl: coderAnswering({ count: 1 }, { me: { username: 'lab-status' } }),
+    });
+    expect((await renamed.send(bodyWith({ statusToken: TOKEN }))).body).toEqual({ ok: true, stored: true });
+
+    const other = setup({ fetchImpl: coderAnswering({ count: 1 }, { me: { username: 'some-learner' } }) });
+    const { res } = await other.send(bodyWith({ statusToken: TOKEN }));
+    const everything = [res.body, JSON.stringify([...other.store.docs.values()]), ...logLines(other.context)].join('\n');
+    expect(everything).not.toContain('some-learner');
+    expect(other.context.warn).toHaveBeenCalledWith(
+      'reportCoderAutomation: a renewed status token failed the user check (User check: the token does not belong to hcw-status); it was not stored'
+    );
+  });
+
   it('cannot verify, and so does not store, while CODER_URL is unset or not https', async () => {
     for (const env of [{}, { CODER_URL: 'http://coder.lab.example' }]) {
       const t = setup({ env });
@@ -380,6 +476,47 @@ describe('a token Coder will not accept is not stored', () => {
   });
 });
 
+describe('once Key Vault has the token, the host is told so (review of #1030)', () => {
+  it('answers 200 stored: true when recording the write on the Keys tab fails, with the failure as lastError', async () => {
+    const t = setup();
+    const create = t.store.createDoc;
+    t.store.createDoc = vi.fn(async (container, doc) => {
+      if (doc.id === 'secret_state') throw Object.assign(new Error('service unavailable'), { code: 503 });
+      return create(container, doc);
+    });
+    const { res, body } = await t.send(
+      bodyWith({ statusToken: TOKEN, report: { ...REPORT, lastError: 'host note' } })
+    );
+
+    // The token is live: a host told otherwise would mint and hand over another.
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ ok: true, stored: true });
+    expect(t.vault.setVaultSecret).toHaveBeenCalledTimes(1);
+    expect(t.store.audit).toHaveLength(1);
+    const doc = stored(t.store);
+    expect(doc.statusTokenRotatedAt).toBe(NOW.toISOString());
+    expect(doc.lastError).toBe(
+      'The token was stored, but the Keys tab could not record the write (503), so its light may lag — host note'
+    );
+    expect(t.context.warn).toHaveBeenCalledWith(
+      'reportCoderAutomation: the status token was stored, but a step after the vault write failed (500)'
+    );
+  });
+
+  it('answers 200 stored: true when the reference refresh throws, which is best-effort anyway', async () => {
+    const vault = makeVault();
+    vault.refreshKeyVaultReferences = vi.fn(async () => {
+      throw new Error('ARM throttled');
+    });
+    const t = setup({ vault });
+    const { res, body } = await t.send(bodyWith({ statusToken: TOKEN }));
+    expect(res.status).toBe(200);
+    expect(body).toEqual({ ok: true, stored: true });
+    expect(stored(t.store).lastError).toBeNull();
+    expect(t.store.docs.get('secret_state').secrets['CODER-STATUS-TOKEN'].lastWriteVersion).toBe('v42');
+  });
+});
+
 describe('the report document: one, merged under its ETag', () => {
   it('a report without a token stores nothing, calls no one, and answers stored: false', async () => {
     const t = setup();
@@ -395,9 +532,9 @@ describe('the report document: one, merged under its ETag', () => {
   it('keeps when things last happened, and replaces what this check says', async () => {
     const t = setup();
     await t.send(bodyWith({ report: { ...REPORT, lastError: 'template push failed' } }));
-    await t.send(bodyWith({ report: { checkedAt: '2026-10-09T05:00:00Z' } }));
+    await t.send(bodyWith({ report: { checkedAt: '2026-10-08T05:05:00Z' } }));
     const doc = stored(t.store);
-    expect(doc.checkedAt).toBe('2026-10-09T05:00:00.000Z');
+    expect(doc.checkedAt).toBe('2026-10-08T05:05:00.000Z');
     expect(doc.templatePushedAt).toBe('2026-10-07T21:00:00.000Z');
     expect(doc.templateVersion).toBe('brave_turing4');
     expect(doc.rotationTokenExpiresAt).toBe('2026-12-01T00:00:00.000Z');

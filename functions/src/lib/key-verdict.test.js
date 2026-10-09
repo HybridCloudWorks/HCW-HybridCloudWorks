@@ -9,14 +9,19 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// The state document is written under its ETag since the review of #1030
+// (admin-secrets.js updateSecretRecord): createDoc for the first write,
+// replaceDocIfMatch after. readDoc answers null here, so every verdict below
+// is a create, and `createDoc` is the write to look at.
 vi.mock('./cosmos-client.js', () => ({
   ADMIN_CONFIG_PARTITION: 'admin',
   readDoc: vi.fn(async () => null),
-  upsertDoc: vi.fn(async (_container, doc) => doc),
+  createDoc: vi.fn(async (_container, doc) => doc),
+  replaceDocIfMatch: vi.fn(async (_container, doc) => doc),
 }));
 
 import { createKeyVerdictReporter, isCredentialRejected, recordKeyVerdict } from './key-verdict.js';
-import { readDoc, upsertDoc } from './cosmos-client.js';
+import { createDoc, readDoc } from './cosmos-client.js';
 
 const quiet = () => ({ warn: vi.fn() });
 
@@ -117,15 +122,15 @@ describe('createKeyVerdictReporter', () => {
 describe('recordKeyVerdict — the process-wide writer', () => {
   beforeEach(() => {
     readDoc.mockClear();
-    upsertDoc.mockClear();
+    createDoc.mockClear();
     readDoc.mockImplementation(async () => null);
-    upsertDoc.mockImplementation(async (_container, doc) => doc);
+    createDoc.mockImplementation(async (_container, doc) => doc);
   });
 
   it('records a rejection against the vault secret the catalogue names, not the setting', async () => {
     await recordKeyVerdict('PUBLER_API_KEY', { ok: false, status: 401 });
-    expect(upsertDoc).toHaveBeenCalledTimes(1);
-    const [container, doc] = upsertDoc.mock.calls[0];
+    expect(createDoc).toHaveBeenCalledTimes(1);
+    const [container, doc] = createDoc.mock.calls[0];
     expect(container).toBe('admin_config');
     expect(doc.secrets['PUBLER-API-KEY']).toMatchObject({ lastFailStatus: 401 });
     expect(doc.secrets['PUBLER-API-KEY'].lastFailAt).toEqual(expect.any(String));
@@ -136,8 +141,8 @@ describe('recordKeyVerdict — the process-wide writer', () => {
     await recordKeyVerdict('OPENAI_API_KEY', { ok: true });
     await recordKeyVerdict('OPENAI_API_KEY', { ok: true });
     await recordKeyVerdict('OPENAI_API_KEY', { ok: true });
-    expect(upsertDoc).toHaveBeenCalledTimes(1);
-    expect(upsertDoc.mock.calls[0][1].secrets['OPENAI-API-KEY'].lastOkAt).toEqual(expect.any(String));
+    expect(createDoc).toHaveBeenCalledTimes(1);
+    expect(createDoc.mock.calls[0][1].secrets['OPENAI-API-KEY'].lastOkAt).toEqual(expect.any(String));
   });
 
   it('writes the first success after a failure, so the same worker can turn a light green again', async () => {
@@ -145,19 +150,19 @@ describe('recordKeyVerdict — the process-wide writer', () => {
     await recordKeyVerdict('ANTHROPIC_API_KEY', { ok: false, status: 401 });
     await recordKeyVerdict('ANTHROPIC_API_KEY', { ok: true });
     await recordKeyVerdict('ANTHROPIC_API_KEY', { ok: true });
-    expect(upsertDoc).toHaveBeenCalledTimes(3);
-    expect(upsertDoc.mock.calls[2][1].secrets['ANTHROPIC-API-KEY'].lastOkAt).toEqual(expect.any(String));
+    expect(createDoc).toHaveBeenCalledTimes(3);
+    expect(createDoc.mock.calls[2][1].secrets['ANTHROPIC-API-KEY'].lastOkAt).toEqual(expect.any(String));
   });
 
   it('records nothing for a setting outside the catalogue', async () => {
     await recordKeyVerdict('NOT_A_SETTING', { ok: false, status: 401 });
-    expect(upsertDoc).not.toHaveBeenCalled();
+    expect(createDoc).not.toHaveBeenCalled();
   });
 
   it('never rejects when Cosmos does', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      upsertDoc.mockImplementationOnce(async () => {
+      createDoc.mockImplementationOnce(async () => {
         throw new Error('503 from Cosmos');
       });
       await expect(

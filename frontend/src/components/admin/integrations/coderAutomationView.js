@@ -18,7 +18,9 @@
  *             window: nothing will renew it in time without a person.
  *   degraded  the last check failed with the token still well inside its
  *             life; the rotation credential is inside the window; or the
- *             host has not reported for SILENT_AFTER_DAYS.
+ *             site has received no report for SILENT_AFTER_DAYS, counted
+ *             from `reportedAt` (the site's clock), not `checkedAt` (the
+ *             host's).
  *   healthy   none of those.
  *
  * Before the first report there is no status at all, only "Automatic renewal
@@ -65,7 +67,9 @@ function describeRows(report, now) {
   const template = report.templatePushedAt
     ? `Template last published ${day(report.templatePushedAt)}${report.templateVersion ? ` (${report.templateVersion})` : ''}`
     : 'Template not published by the lab host yet';
-  const age = describeAge(report.checkedAt, now);
+  // The age is the site's: `reportedAt`, when the API received the report,
+  // never `checkedAt`, which is the host's clock (see describeProblems).
+  const age = describeAge(report.reportedAt, now);
   return [
     { id: 'renewed', text: `${renewed}${expires}.` },
     {
@@ -78,7 +82,7 @@ function describeRows(report, now) {
     {
       id: 'checked',
       text: report.checkedAt
-        ? `Last automation check ${day(report.checkedAt)}${age ? ` (${age})` : ''}.`
+        ? `Last automation check ${day(report.checkedAt)}${age ? `, reported ${age}` : ''}.`
         : 'No automation check reported.',
     },
   ];
@@ -89,8 +93,13 @@ function describeProblems(report, warningDays, now) {
   const problems = [];
   const tokenDays = daysUntil(report.statusTokenExpiresAt, now);
   const rotationDays = daysUntil(report.rotationTokenExpiresAt, now);
-  const checkedMs = Date.parse(report.checkedAt ?? '');
-  const silentDays = Number.isFinite(checkedMs) ? Math.floor((now - checkedMs) / DAY_MS) : null;
+  // Silence is measured from `reportedAt`, the API's own time of receipt,
+  // never from `checkedAt`: that is the host's clock, and a host whose clock
+  // read 2099 would have kept this from ever firing (review of #1030). The
+  // API now refuses a `checkedAt` ten minutes ahead of it, and this does not
+  // depend on that.
+  const reportedMs = Date.parse(report.reportedAt ?? '');
+  const silentDays = Number.isFinite(reportedMs) ? Math.floor((now - reportedMs) / DAY_MS) : null;
 
   if (tokenDays !== null && tokenDays < 0) {
     problems.push({
