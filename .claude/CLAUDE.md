@@ -99,6 +99,14 @@ so it is recorded here, where every session reads it.
   own checks have been run locally, or it exists to hold a question rather
   than a change, say so in the first line of the description and open it as
   a draft. Otherwise not.
+- **The description follows `.github/pull_request_template.md`.** Owner
+  instruction 2026-10-08, through CodeRabbit's Description check, which
+  warns on a body that skips the template's sections. Keep each section —
+  Summary, Related issue or decision, Type of change, Scope and impact,
+  Verification, Security and data review, Documentation and operations,
+  Author checklist — and tick only the boxes that are true. Drop
+  "Infrastructure changes only" when no infrastructure changed, as the
+  template itself says.
 - **Check for a waiting review before reporting a PR as finished, and again
   whenever the session next touches it.** Owner instruction 2026-09-10, after
   a session opened a PR, watched CI go green, reported it done, and stopped —
@@ -109,15 +117,18 @@ so it is recorded here, where every session reads it.
 
   The verdict and the inline findings live in two different places and a
   session needs both — the review body carries the verdict, and the line
-  comments carry what to actually fix. **The four below are bash (Git Bash),
-  not PowerShell** — the same rule as the top of this file, which applies to
-  a session's own commands as much as to the owner's:
+  comments carry what to actually fix. CodeRabbit's checklist and code
+  scanning's alerts live in two more. **The lines below are bash (Git
+  Bash), not PowerShell** — the same rule as the top of this file, which
+  applies to a session's own commands as much as to the owner's:
 
   ```bash
   PR=$(gh pr view --json number -q .number)
   gh pr view "$PR" --json headRefOid -q .headRefOid
   gh api repos/saulpatinojr/HCW-HybridCloudWorks/pulls/"$PR"/reviews --paginate --jq '.[] | select(.user.login=="copilot-pull-request-reviewer[bot]") | "\(.commit_id[0:8]) \(.state) \((.body // "") | split("\n")[0])"'
   gh api repos/saulpatinojr/HCW-HybridCloudWorks/pulls/"$PR"/comments --paginate --jq '.[] | "\(.path):line \(.line // .original_line // "unknown")\n\(.body)\n"'
+  gh api "repos/saulpatinojr/HCW-HybridCloudWorks/issues/$PR/comments?per_page=100" --paginate --jq '.[] | select(.user.login=="coderabbitai[bot]") | .body' | grep -E 'up to `|Actionable comments posted|Retained concerns|_proposed_|Failed checks|^- \*\*(Critical|High|Medium|Low) ·'
+  gh api "repos/saulpatinojr/HCW-HybridCloudWorks/code-scanning/alerts?ref=refs/pull/$PR/merge&state=open&per_page=100" --paginate --jq '.[] | "#\(.number) \(.rule.id) \(.rule.severity) \(.most_recent_instance.location.path):\(.most_recent_instance.location.start_line)"'
   ```
 
   Every detail in those lines is a mistake someone has already made. Stated
@@ -143,6 +154,15 @@ so it is recorded here, where every session reads it.
     the same actor `copilot-pull-request-reviewer`, with no suffix. A filter
     written for one and run against the other matches nothing and reads
     exactly like "no reviews yet".
+  - **CodeRabbit's checklist is an issue comment, not a review**, edited in
+    place each round, so its line reads the issue comments and keeps the
+    lines that name work. Its `up to` line names the commit that round
+    judged, the same question the reviews line answers for Copilot. While
+    it reads `Currently processing new changes`, the next round is coming.
+  - **Code scanning's alerts are read on the PR's merge ref**
+    (`refs/pull/<n>/merge`), the ref its PR threads come from, with the
+    query in the URL: `-f state=open` beside `--paginate` silently returned
+    nothing for Dependabot alerts on 2026-09-29, while three were open.
 
   Then work the loop: fix every recommendation, push, reply on each thread
   naming the commit, resolve it, and ask for another review of the new head.
@@ -191,28 +211,56 @@ so it is recorded here, where every session reads it.
   recommends changes, or any review thread still unresolved on the head, is
   not that: fix, push, and wait for the next review of the new head. Ready
   for review on its own is still not permission to merge.
-- **Copilot review is off until the owner says otherwise; all green is the
-  merge.** Owner instruction 2026-10-03, after PRs #835 and #836 took three
-  and four Copilot rounds each and the reviews then stopped arriving. This
-  overrides the two bullets above until the owner turns review back on:
+- **Every review bot is worked, for at most three rounds each; then all
+  green is the merge.** Owner instruction 2026-10-08, after Copilot reviews
+  resumed on #1034 and #1035 and CodeRabbit (#1031) began posting a
+  checklist with each review. It replaces the 2026-10-03 bullet that turned
+  Copilot review off and capped it at two rounds once it returned.
 
-  - **While review is off:** a session merges as soon as every required
-    status check is green on the current head and no review thread is
-    unresolved. Do not wait for, or request, a Copilot review. The
-    `copilot_code_review` rule was removed from the `Default` ruleset
-    (20680114) that day. Its parameters were `review_on_push: true` and
-    `review_draft_pull_requests: true`, so turning it back on means adding
-    that rule back with them.
-  - **When review is back on: at most two rounds, then all green is the
-    merge.** A round is one Copilot review of a head, and the fixes pushed
-    in answer to it. Work the loop above for the first and second reviews.
-    After the second round's fixes are pushed, merge once required checks are
-    green and every thread is replied to and resolved. Do not wait for a
-    third review. A review that does arrive on the final head still has its
-    findings answered on their threads before the merge.
+  - **Three reviewers, none optional.** Copilot
+    (`copilot-pull-request-reviewer`), CodeRabbit (`coderabbitai`) and code
+    scanning (`github-advanced-security`, posting CodeQL's alerts) all
+    review a PR. Every finding from each is fixed, or answered on its thread
+    with the reason, and the thread resolved, as the bullets above and below
+    say. A finding is not optional because its bot is not a required check.
+  - **At most three rounds per bot.** A round is one review of a head by one
+    bot, and the fixes pushed in answer to it. Work the loop above for a
+    bot's first three reviews; after the third round's fixes are pushed,
+    merge once required checks are green and every thread is replied to and
+    resolved. Do not request, or wait for, a fourth review, nor a review that
+    has not arrived by the time the checks are green. A review that does
+    arrive on the final head still has its findings answered on their
+    threads before the merge. #835 and #836 ran three and four Copilot
+    rounds; the owner put a loop at "more than 3 turns".
+  - **CodeRabbit's summary is a checklist to work, not to tick.** Its
+    walkthrough comment is not a review thread, so nothing blocks the merge
+    on it, which is what makes it easy to miss. It carries actionable
+    comments, the Merge Risk section's **Retained concerns** and hardening
+    proposals (its `_proposed_` lines), and the **Failed checks** among its
+    pre-merge checks. On #1035 a medium security concern lived there and in
+    no thread. Work every item, then post one PR comment with a table of
+    each item and what was done: the commit that fixed it, or the reason it
+    was not done. Then comment `@coderabbitai run pre-merge checks`. The
+    checkboxes are triggers, not records of work: **Commit to this branch**,
+    **Create a new PR** and **Fix all pre-merge checks with AI** make
+    CodeRabbit write and push code, and **Autopilot** makes it keep pushing
+    past the round cap. Do the work by hand, to the file's own style, and
+    leave them unticked; never tick Autopilot.
+  - **A code scanning alert is fixed in code, or dismissed by the owner.**
+    Its thread closes on the next analysis once the code is fixed. An alert
+    that is right but intended (a test that makes a file world-readable to
+    prove the helper refuses it, alert 398 on #1035) is neither rewritten to
+    slip past the query nor dismissed by a session: a session's dismissal is
+    refused as a CI bypass. Give the owner the alert's page, under
+    `https://github.com/saulpatinojr/HCW-HybridCloudWorks/security/code-scanning/`,
+    and the reason to choose (**Used in tests**, **False positive** or
+    **Won't fix**); their dismissal closes the thread. The `CodeQL` check is
+    not one of the ruleset's required checks (the `Analyze …` jobs are), but
+    an open alert thread blocks the merge all the same.
 
-  Delete this bullet, and restore the two above as written, only when the
-  owner says so.
+  The `copilot_code_review` rule is still absent from the `Default` ruleset
+  (20680114). Its parameters were `review_on_push: true` and
+  `review_draft_pull_requests: true`, should the owner want it back.
 - **Every review conversation is resolved before the merge, including the
   ones that ask for nothing.** Owner instruction 2026-09-06, after a merge
   was blocked with `A conversation must be resolved before this pull request
