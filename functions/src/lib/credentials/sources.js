@@ -48,6 +48,7 @@
  */
 
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
+import { parseDateOnly } from '../reminders/calendar.js';
 import { REMINDERS_CONFIG_ID } from '../reminders/settings.js';
 import { CREDENTIAL_REGISTER } from './register.js';
 
@@ -116,13 +117,31 @@ async function settle(read) {
 }
 
 /**
- * A document's map of records: `{}` when the document is absent, the map
- * when it is a map of records, and null (malformed: unavailable) otherwise.
+ * The one date each kind of record is read for, and what it must be when
+ * present: the Keys tab writes `lastWriteAt` as an ISO instant, and a
+ * recorded rotation `rotatedOn` as a real `YYYY-MM-DD` (review of #1039).
  */
-function recordMap(doc, field) {
+const isInstant = (value) => typeof value === 'string' && value !== '' && Number.isFinite(Date.parse(value));
+const SECRET_DATE = Object.freeze({ field: 'lastWriteAt', valid: isInstant });
+const ROTATION_DATE = Object.freeze({ field: 'rotatedOn', valid: (value) => parseDateOnly(value) !== null });
+
+/**
+ * A document's map of records: `{}` when the document is absent, the map
+ * when it is a map of records whose dates are well formed, and null
+ * (malformed: unavailable) otherwise. A date that is present but not a date
+ * makes the whole source malformed, as a malformed map does: read as a
+ * missing date it would turn a rotation reminder back into a request for
+ * the date, and recordRotation would write over the record (review of
+ * #1039). An absent date is just not known yet.
+ */
+function recordMap(doc, field, date) {
   if (!doc) return {};
   const map = doc[field];
-  return isPlainObject(map) && Object.values(map).every(isPlainObject) ? map : null;
+  if (!isPlainObject(map)) return null;
+  const records = Object.values(map);
+  if (!records.every(isPlainObject)) return null;
+  const wellFormed = records.every((record) => record[date.field] == null || date.valid(record[date.field]));
+  return wellFormed ? map : null;
 }
 
 /**
@@ -186,8 +205,12 @@ export async function readCredentialSources(store) {
     settle(() => readMcpServers(store)),
   ]);
 
-  const secrets = secretState.ok ? projectRecords(recordMap(secretState.value, 'secrets'), 'lastWriteAt') : null;
-  const records = register.ok ? projectRecords(recordMap(register.value, 'credentials'), 'rotatedOn') : null;
+  const secrets = secretState.ok
+    ? projectRecords(recordMap(secretState.value, 'secrets', SECRET_DATE), SECRET_DATE.field)
+    : null;
+  const records = register.ok
+    ? projectRecords(recordMap(register.value, 'credentials', ROTATION_DATE), ROTATION_DATE.field)
+    : null;
   const rows = sheet.ok ? sheetRows(sheet.value) : null;
   const unavailable = [
     ...(rows === null ? ['reminders'] : []),
@@ -233,7 +256,7 @@ export async function recordRotation(
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (attempt > 0) await sleep(20 * 2 ** Math.min(attempt, 5) + Math.random() * 20);
     const current = await store.readDoc(CONTAINER, CREDENTIAL_REGISTER_DOC_ID, ADMIN_CONFIG_PARTITION);
-    const stored = recordMap(current, 'credentials');
+    const stored = recordMap(current, 'credentials', ROTATION_DATE);
     if (stored === null) {
       throw Object.assign(new Error('The credential register document is malformed'), { code: 'MALFORMED' });
     }

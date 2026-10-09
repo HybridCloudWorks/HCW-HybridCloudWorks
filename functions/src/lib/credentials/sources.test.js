@@ -161,6 +161,8 @@ describe('a present but malformed source is unavailable, never empty (review of 
     ['a list', [{ lastWriteAt: AT }]],
     ['a map with a non-record in it', { 'ANTHROPIC-API-KEY': 'x' }],
     ['missing', undefined],
+    ['a record whose lastWriteAt is not a date', { 'ANTHROPIC-API-KEY': { lastWriteAt: 'not-a-date' } }],
+    ['a record whose lastWriteAt is a number', { 'ANTHROPIC-API-KEY': { lastWriteAt: 7 } }],
   ])('secret_state whose secrets is %s', async (_label, secrets) => {
     const store = withMcp({ 'admin_config/secret_state': { id: 'secret_state', secrets } });
     const { sources, unavailable } = await readCredentialSources(store);
@@ -171,6 +173,9 @@ describe('a present but malformed source is unavailable, never empty (review of 
   it.each([
     ['a string', 'nope'],
     ['a map with a non-record in it', { 'lab-agent-certificate': '2026-09-29' }],
+    ['a record whose rotatedOn is not a date', { 'lab-agent-certificate': { rotatedOn: 'not-a-date' } }],
+    ['a record whose rotatedOn is no real day', { 'lab-agent-certificate': { rotatedOn: '2026-02-30' } }],
+    ['a record whose rotatedOn is an instant, not a day', { 'lab-agent-certificate': { rotatedOn: AT } }],
   ])('credential_register whose credentials is %s', async (_label, credentials) => {
     const store = withMcp({ 'admin_config/credential_register': { id: CREDENTIAL_REGISTER_DOC_ID, credentials } });
     const { unavailable } = await readCredentialSources(store);
@@ -304,6 +309,15 @@ describe('recordRotation', () => {
     expect(error.code).toBe('MALFORMED');
     expect(error.message).not.toContain('lab-agent');
     expect(store.get('admin_config', CREDENTIAL_REGISTER_DOC_ID).credentials).toBe('hand-edited');
+    expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
+  });
+
+  it('refuses to write over a register whose stored date is malformed, too (review of #1039)', async () => {
+    const malformed = { id: CREDENTIAL_REGISTER_DOC_ID, credentials: { other: { rotatedOn: 'not-a-date' } } };
+    const store = memoryStore({ 'admin_config/credential_register': malformed });
+    const error = await recordRotation(store, change(), { sleep: noSleep }).catch((e) => e);
+    expect(error.code).toBe('MALFORMED');
+    expect(store.get('admin_config', CREDENTIAL_REGISTER_DOC_ID).credentials).toEqual(malformed.credentials);
     expect(store.replaceDocIfMatch).not.toHaveBeenCalled();
   });
 

@@ -580,9 +580,12 @@ export function createAdminSecretHandlers({
       try {
         await afterSecretWrite();
       } catch (error) {
-        // No secret name: the name is fine to log, but a log line keyed on it
-        // is an inventory of what was rotated when.
-        log.warn?.(`[putSecret] the follow-up after a recorded write failed: ${error?.message || error}`);
+        // A stable code only, never the error's message: a failed Cosmos
+        // call's message can carry request details, and telemetry is
+        // content-free (review of #1039). No secret name either: a log line
+        // keyed on it is an inventory of what was rotated when.
+        const code = error?.code ?? error?.statusCode ?? error?.name ?? 'Error';
+        log.warn?.(`[putSecret] the follow-up after a recorded write failed (${code})`);
       }
     }
 

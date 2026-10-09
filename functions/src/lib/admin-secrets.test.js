@@ -468,7 +468,7 @@ describe('after a recorded write, the credential reminders follow (review of #10
 
   it('keeps the 200 when the follow-up fails, and logs it without the secret name', async () => {
     const afterSecretWrite = vi.fn(async () => {
-      throw new Error('sheet unavailable');
+      throw Object.assign(new Error('read of dbs/hcw/colls/admin_config/docs/reminders failed'), { code: 503 });
     });
     const deps = buildDeps({ afterSecretWrite });
     const response = await createAdminSecretHandlers(deps).putSecret(
@@ -476,7 +476,12 @@ describe('after a recorded write, the credential reminders follow (review of #10
     );
     expect(response.status).toBe(200);
     expect(deps.log.warn).toHaveBeenCalledTimes(1);
-    expect(deps.log.warn.mock.calls[0][0]).not.toContain('GEMINI');
+    const line = deps.log.warn.mock.calls[0][0];
+    expect(line).not.toContain('GEMINI');
+    // A stable code, never the error's message, which can carry request
+    // details such as a document path (review of #1039).
+    expect(line).toContain('(503)');
+    expect(line).not.toContain('dbs/hcw');
   });
 
   it('does not run when Key Vault refused the write', async () => {
