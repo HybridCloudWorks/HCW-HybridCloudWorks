@@ -69,7 +69,10 @@ This project has not cut a tagged release; entries are grouped under
   nothing changes when there is no conflict. A Platform Settings save of the
   sheet is written under the ETag of the read it merged from (412 or 409
   re-reads, three attempts, then 409), so a sync or a stamp that lands
-  between the read and the write is never written over.
+  between the read and the write is never written over. A Keys-tab write
+  syncs the credential reminders at once, so a rotation moves its reminder
+  without waiting for the timer, and the register copies only `lastWriteAt`
+  and `rotatedOn` out of the records it reads.
 
 - **Lab host: Coder automation. The host renews the site's Coder status
   token and publishes the `hcw-lab` template on its own, with one rotation

@@ -236,7 +236,11 @@ function storedCredentialRows(storedDoc) {
  * register rows together pass MAX_REMINDERS.
  */
 export function mergeStoredStamps(value, storedDoc) {
-  const stored = new Map((storedDoc?.reminders ?? []).map((row) => [row?.id, row?.notified]));
+  // A stored `reminders` that is not a list (a malformed sheet) holds no rows
+  // to keep stamps from: this save repairs it, as storedCredentialRows does,
+  // rather than throwing a TypeError into a 500 (review of #1039).
+  const storedRows = Array.isArray(storedDoc?.reminders) ? storedDoc.reminders : [];
+  const stored = new Map(storedRows.map((row) => [row?.id, row?.notified]));
   const ownRows = value.reminders
     .filter((row) => !isCredentialRow(row))
     .map((row) =>

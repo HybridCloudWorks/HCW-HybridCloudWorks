@@ -453,6 +453,51 @@ describe('what it refuses to store', () => {
   });
 });
 
+describe('after a recorded write, the credential reminders follow (review of #1039)', () => {
+  it('runs the follow-up once after the write is recorded, and answers as before', async () => {
+    const afterSecretWrite = vi.fn(async () => ({ synced: true }));
+    const deps = buildDeps({ afterSecretWrite });
+    const response = await createAdminSecretHandlers(deps).putSecret(
+      request({ secret: 'GEMINI-API-KEY', value: 'a-good-long-value' })
+    );
+    expect(response.status).toBe(200);
+    expect(afterSecretWrite).toHaveBeenCalledTimes(1);
+    // After the record, so the sync it starts reads the new lastWriteAt.
+    expect(deps._store.current().secrets['GEMINI-API-KEY'].lastWriteAt).toBe('2026-08-29T12:00:00.000Z');
+  });
+
+  it('keeps the 200 when the follow-up fails, and logs it without the secret name', async () => {
+    const afterSecretWrite = vi.fn(async () => {
+      throw new Error('sheet unavailable');
+    });
+    const deps = buildDeps({ afterSecretWrite });
+    const response = await createAdminSecretHandlers(deps).putSecret(
+      request({ secret: 'GEMINI-API-KEY', value: 'a-good-long-value' })
+    );
+    expect(response.status).toBe(200);
+    expect(deps.log.warn).toHaveBeenCalledTimes(1);
+    expect(deps.log.warn.mock.calls[0][0]).not.toContain('GEMINI');
+  });
+
+  it('does not run when Key Vault refused the write', async () => {
+    const afterSecretWrite = vi.fn();
+    const deps = buildDeps({
+      afterSecretWrite,
+      vault: {
+        setVaultSecret: vi.fn(async () => {
+          throw new Error('HTTP 403');
+        }),
+        refreshKeyVaultReferences: vi.fn(),
+      },
+    });
+    const response = await createAdminSecretHandlers(deps).putSecret(
+      request({ secret: 'GEMINI-API-KEY', value: 'a-good-long-value' })
+    );
+    expect(response.status).not.toBe(200);
+    expect(afterSecretWrite).not.toHaveBeenCalled();
+  });
+});
+
 describe('writing', () => {
   let handlers;
   let deps;

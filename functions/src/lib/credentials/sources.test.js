@@ -80,6 +80,23 @@ describe('readCredentialSources', () => {
     expect(sources).toMatchObject({ secrets: {}, coder: null, records: {}, reminders: [] });
   });
 
+  it('copies out only lastWriteAt and rotatedOn, so nothing else a stored record holds crosses into sources (review of #1039)', async () => {
+    const store = withMcp({
+      'admin_config/secret_state': {
+        id: 'secret_state',
+        secrets: { 'ANTHROPIC-API-KEY': { lastWriteAt: AT, value: LEAK, lastWriteBy: 'admin-1' } },
+      },
+      'admin_config/credential_register': {
+        id: CREDENTIAL_REGISTER_DOC_ID,
+        credentials: { 'lab-agent-certificate': { rotatedOn: '2026-09-29', recordedBy: 'admin-1', note: LEAK } },
+      },
+    });
+    const { sources } = await readCredentialSources(store);
+    expect(sources.secrets).toEqual({ 'ANTHROPIC-API-KEY': { lastWriteAt: AT } });
+    expect(sources.records).toEqual({ 'lab-agent-certificate': { rotatedOn: '2026-09-29' } });
+    expect(JSON.stringify(sources)).not.toContain(LEAK);
+  });
+
   it('reads the sheet before any date source, which the reminders sync relies on', async () => {
     const store = withMcp({});
     await readCredentialSources(store);

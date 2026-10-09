@@ -11,15 +11,21 @@
  */
 import { httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { createDoc, readDoc, replaceDocIfMatch } from '../lib/cosmos-client.js';
+import { createDoc, queryDocs, readDoc, replaceDocIfMatch } from '../lib/cosmos-client.js';
 import { createAdminSecretHandlers } from '../lib/admin-secrets.js';
+import { syncCredentialReminders } from '../lib/credentials/reminders.js';
 
 // createDoc and replaceDocIfMatch, not upsertDoc: the state document is
 // written under its ETag, one secret's record at a time (updateSecretRecord).
+// After a recorded write the credential register's reminders are synced, so a
+// rotation moves its reminder at once (review of #1039); the sync reads the
+// MCP servers by query, hence queryDocs in its store only.
 const handlers = () =>
   createAdminSecretHandlers({
     guard: getDefaultGuard(),
     store: { readDoc, createDoc, replaceDocIfMatch },
+    afterSecretWrite: () =>
+      syncCredentialReminders({ store: { readDoc, queryDocs, createDoc, replaceDocIfMatch } }),
   });
 
 httpRouteByMethod('cmsSecrets', {

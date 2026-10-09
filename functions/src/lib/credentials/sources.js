@@ -125,6 +125,20 @@ function recordMap(doc, field) {
   return isPlainObject(map) && Object.values(map).every(isPlainObject) ? map : null;
 }
 
+/**
+ * The one field each kind of record is read for, copied out by name, so
+ * nothing else a stored record holds (a stray value in a contaminated
+ * secret_state record, or a field added later) crosses into `sources`
+ * (review of #1039). recordRotation keeps reading recordMap whole, because
+ * it writes the register's records back.
+ */
+const projectRecords = (map, field) =>
+  map === null
+    ? null
+    : Object.fromEntries(
+        Object.entries(map).map(([key, record]) => [key, { [field]: stringOrNull(record[field]) }])
+      );
+
 /** The sheet's rows: `[]` for no sheet or no rows yet, null when `reminders` is not a list. */
 function sheetRows(doc) {
   if (!doc || doc.reminders === undefined) return [];
@@ -172,8 +186,8 @@ export async function readCredentialSources(store) {
     settle(() => readMcpServers(store)),
   ]);
 
-  const secrets = secretState.ok ? recordMap(secretState.value, 'secrets') : null;
-  const records = register.ok ? recordMap(register.value, 'credentials') : null;
+  const secrets = secretState.ok ? projectRecords(recordMap(secretState.value, 'secrets'), 'lastWriteAt') : null;
+  const records = register.ok ? projectRecords(recordMap(register.value, 'credentials'), 'rotatedOn') : null;
   const rows = sheet.ok ? sheetRows(sheet.value) : null;
   const unavailable = [
     ...(rows === null ? ['reminders'] : []),

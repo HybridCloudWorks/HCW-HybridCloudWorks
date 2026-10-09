@@ -175,6 +175,15 @@ describe('stamps from two writers', () => {
     expect(merged.reminders[1].notified).toEqual({});
     expect(mergeStoredStamps(saved, null).reminders[0].notified).toEqual({});
   });
+
+  it('repairs a stored sheet whose reminders is not a list, rather than throwing (review of #1039)', () => {
+    const saved = normalizeReminders({ reminders: [reminder({ id: 'a' })] });
+    for (const malformed of [{ reminders: { a: 1 } }, { reminders: 'x' }, { reminders: 7 }]) {
+      const merged = mergeStoredStamps(saved, malformed);
+      expect(merged.reminders.map((r) => r.id)).toEqual(['a']);
+      expect(merged.reminders[0].notified).toEqual({});
+    }
+  });
 });
 
 describe('the credential register’s rows survive any save unchanged (review of #1039)', () => {

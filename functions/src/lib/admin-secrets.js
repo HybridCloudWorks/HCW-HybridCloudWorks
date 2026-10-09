@@ -515,6 +515,12 @@ export function createAdminSecretHandlers({
   vault = { setVaultSecret, refreshKeyVaultReferences },
   randomSecret = defaultRandomSecret,
   log = console,
+  // Run after a write is recorded: the credential register's reminder sync
+  // (admin-secrets-http.js). A sync that read the state before this write
+  // either commits first, and this one corrects it, or loses its ETag to this
+  // one and re-reads, so a rotation never leaves a stale due date on the
+  // sheet (review of #1039). Best effort: it never changes the answer.
+  afterSecretWrite = null,
 }) {
   const workerStartedAt = () => startedAt ?? processStartedAt();
 
@@ -570,6 +576,15 @@ export function createAdminSecretHandlers({
     );
     if (!written.vaultWritten) return bad(written.status, written.error);
     const { refresh } = written;
+    if (written.recorded && afterSecretWrite) {
+      try {
+        await afterSecretWrite();
+      } catch (error) {
+        // No secret name: the name is fine to log, but a log line keyed on it
+        // is an inventory of what was rotated when.
+        log.warn?.(`[putSecret] the follow-up after a recorded write failed: ${error?.message || error}`);
+      }
+    }
 
     // What the operator should expect, in the words of what actually happened.
     const live = refresh.refreshed
