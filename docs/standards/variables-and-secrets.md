@@ -373,8 +373,10 @@ Seeded by hand; referenced from `infra/functionapp.tf` app settings as
 | `GITHUB-APP-PRIVATE-KEY` | not inventoried | Multi-line PEM. **Not referenced by any app setting in `infra/` and read by nothing** — it has no app setting and no seeding path, deliberately. Like the two above, unconfirmed in the vault, and the owner's to delete if it is there (below) |
 | `TURNSTILE-SECRET-KEY` | not inventoried | Cloudflare Turnstile secret key for the Landing Zone Builder's "Validate on the lab" ([ADR 0032](../decisions/0032-learner-labs-platform.md), amendment of 2026-09-28), sent only to Cloudflare's siteverify. Its site key is public and is store 3 (`VITE_TURNSTILE_SITE_KEY`). The widget is created in the Cloudflare dashboard rather than as `cloudflare_turnstile_widget`, because that resource's read-only `secret` attribute would put this value in state, the rule in the next section |
 
-`infra/functionapp.tf` declares **30** `@Microsoft.KeyVault` references and no
-run-time reads (counted 2026-10-09, after #1029 removed the Perplexity one).
+`infra/functionapp.tf` declares **29** `@Microsoft.KeyVault` references and no
+run-time reads (2026-10-09, after #1029 removed the Perplexity one; setting
+lines only, since comments in the module mention the form too, and
+`secret-catalog.test.js` holds the catalogue to the same 29).
 CHECKLIST §1–§8 inventories a handful of them. That gap is recorded below
 rather than papered over.
 

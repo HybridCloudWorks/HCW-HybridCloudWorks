@@ -240,7 +240,7 @@ it, because a repair would hide a regression in that fix.
 
 **Not observed in this pass.** `az keyvault secret list` returned
 `ForbiddenByRbac` — the caller holds no data-plane role, which is itself the
-correct posture. The names below are among the thirty-two (counted 2026-10-09) the Terraform root module
+correct posture. The names below are among the twenty-nine (2026-10-09: setting lines, not comments; `secret-catalog.test.js` holds the catalogue to the same number) the Terraform root module
 in `infra/` references (the Hybrid Lab's `CODER-URL` and `CODER-STATUS-TOKEN`
 are in §4.7, and `functions/src/lib/secret-catalog.js` lists every one) — the
 app-settings map that holds them is in
