@@ -105,8 +105,17 @@ describe('the pulse run', () => {
       templateDigest: digest,
       templateSourceDigest: digest,
     });
+    // And the canary's last run passed, and Coder last accepted the token.
+    store.data.set('lab_canary', {
+      id: 'lab_canary',
+      lastRunAt: minutesAgo(20),
+      lastResult: { ok: true, outcome: 'succeeded', timings: { claimMs: 9000, runMs: 2000 } },
+      lastSuccessAt: minutesAgo(20),
+      consecutiveFailures: 0,
+    });
+    store.data.set('coder_status_token', { id: 'coder_status_token', lastAcceptedAt: minutesAgo(30) });
     const summary = await pulse(store).run();
-    expect(summary).toMatchObject({ checks: 16, recorded: 16, failures: 0 });
+    expect(summary).toMatchObject({ checks: 18, recorded: 18, failures: 0 });
 
     for (const id of [
       'cosmos',
@@ -125,6 +134,8 @@ describe('the pulse run', () => {
       'mcp-servers',
       'lab-drift',
       'coder-template',
+      'lab-canary',
+      'coder-token',
     ]) {
       const doc = stored(store, id);
       expect(doc, id).toBeTruthy();
@@ -140,8 +151,8 @@ describe('the pulse run', () => {
       lastBeatAt: NOW.toISOString(),
       intervalMs: PULSE_INTERVAL_MS,
       lateAfterMs: PULSE_LATE_AFTER_MS,
-      checks: 16,
-      recorded: 16,
+      checks: 18,
+      recorded: 18,
       failures: [],
     });
     expect(store.upsertDoc.mock.calls.at(-1)[1].id).toBe(PULSE_DOC_ID);

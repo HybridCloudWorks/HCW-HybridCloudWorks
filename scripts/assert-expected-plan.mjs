@@ -179,6 +179,75 @@ export const CONDITIONAL_REPLACED = ['azapi_update_resource.cosmos_computed_prop
 const baseAddress = (address) => address.replace(/\[[^\]]*\]$/, '');
 
 /**
+ * alert-timer-overdue's query as Terraform renders it (infra/observability.tf,
+ * PLAT-4): a fixed head and tail around one datatable row per entry of
+ * `local.timer_schedules`, in key order. A timer added to the app changes the
+ * rows, and with them the rule's `criteria[0].query`, which an update can
+ * only declare by its exact values. Both strings below were checked against
+ * `terraform console` (1.16.5) on 2026-10-10, and assert-expected-plan.test.mjs
+ * holds the `after` rows to the map in the tree.
+ */
+const OVERDUE_QUERY_HEAD =
+  'let Grace = 45m;\nlet Now = now();\nlet Expected = datatable(timer: string, period: timespan, anchor: datetime) [\n';
+const OVERDUE_QUERY_TAIL = [
+  '',
+  '];',
+  'let Ingesting = toscalar(requests | where timestamp > Now - 30m | count) > 0;',
+  'let LastSuccess = requests',
+  '  | where tostring(success) =~ "true"',
+  '  | extend timer = replace_string(name, "Functions.", "")',
+  '  | summarize lastSuccess = max(timestamp) by timer;',
+  'let Overdue = Expected',
+  '  | where Ingesting',
+  '  | extend lastDue = bin_at(Now - Grace, period, anchor)',
+  '  | where lastDue > Now - 1d',
+  '  | join kind=leftouter LastSuccess on timer',
+  '  | where isnull(lastSuccess) or lastSuccess < lastDue - 1m;',
+  'let Many = toscalar(Overdue | count) > 5;',
+  'union',
+  '  (Overdue | where not(Many) | project timer),',
+  '  (Overdue | where Many | take 1 | project timer = "more than five timers at once")',
+  '',
+].join('\n');
+
+/** The query for these `[name, period, anchor]` rows, as Terraform writes it. */
+export function overdueQuery(rows) {
+  const lines = [...rows]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, period, anchor]) => `  "${name}", ${period}, datetime(${anchor})`);
+  return `${OVERDUE_QUERY_HEAD}${lines.join(',\n')}${OVERDUE_QUERY_TAIL}`;
+}
+
+/** `local.timer_schedules` as PLAT-4 (#1052) created it, before #1009's labCanary. */
+const PLAT4_TIMER_SCHEDULES = [
+  ['buildWeeklyNewsletter', '7d', '2026-01-05 13:00'],
+  ['checkAgentHealth', '5m', '2026-01-01 00:00'],
+  ['checkLiveLinks', '7d', '2026-01-05 06:00'],
+  ['cleanupRejectedContent', '1d', '2026-01-01 04:00'],
+  ['cleanupSoftDeletedContent', '4h', '2026-01-01 00:00'],
+  ['cleanupTempStorage', '1d', '2026-01-01 00:00'],
+  ['cleanupUnusedCertImages', '1d', '2026-01-01 05:00'],
+  ['cosmosExportScheduler', '1d', '2026-01-01 03:00'],
+  ['fetchBlogListings', '6h', '2026-01-01 00:15'],
+  ['fetchPodcastFeeds', '2h', '2026-01-01 00:30'],
+  ['forgeScheduled', '1d', '2026-01-01 03:30'],
+  ['generateReviewerDigest', '1d', '2026-01-01 07:00'],
+  ['healthPulse', '5m', '2026-01-01 00:02'],
+  ['labsWeeklyRollup', '1d', '2026-01-01 23:55'],
+  ['monitorPublishingPipeline', '6h', '2026-01-01 00:00'],
+  ['platformJobSweeper', '15m', '2026-01-01 00:00'],
+  ['probeAiProviders', '7d', '2026-01-05 06:15'],
+  ['publishScheduledContent', '15m', '2026-01-01 00:00'],
+  ['reVerifyCertifications', '7d', '2026-01-04 00:00'],
+  ['refreshPlaudToken', '12h', '2026-01-01 00:00'],
+  ['refreshToolServiceCache', '1d', '2026-01-01 02:00'],
+  ['scrapeSkillsHubRss', '7d', '2026-01-02 09:00'],
+  ['sendReminders', '1d', '2026-01-01 13:00'],
+  ['syncRssFeeds', '2h', '2026-01-01 00:00'],
+  ['syncSocialCalendarScheduled', '5m', '2026-01-01 00:00'],
+];
+
+/**
  * Intended one-off changes, each declared by the pull request that makes it
  * (#719).
  *
@@ -200,6 +269,33 @@ export const DECLARED = [
     before: 'false',
     after: 'true',
     reason: '#701: PROBE_AI_PROVIDERS added to enabled_timers, arming the weekly probe',
+  },
+  // #1009: the lab canary's timer. Its flag arrives disarmed ('false'), and
+  // alert-timer-overdue starts watching it. When PLAT-4's create has not
+  // applied yet, that rule is created with the row already in it and the
+  // query update below is a NOTE; once it has, the update is this exact one.
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.FEATURE_FLAG_LAB_CANARY',
+    before: undefined,
+    after: 'false',
+    reason: '#1009: the lab canary timer, disarmed until LAB_CANARY is added to enabled_timers',
+  },
+  // The owner's run that arms it, after the one above (docs/runbooks/labs-host.md,
+  // "Arming the canary").
+  {
+    address: 'azurerm_function_app_flex_consumption.hcw',
+    path: 'app_settings.FEATURE_FLAG_LAB_CANARY',
+    before: 'false',
+    after: 'true',
+    reason: '#1009: LAB_CANARY added to enabled_timers, arming the hourly lab canary',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.timer_overdue',
+    path: 'criteria[0].query',
+    before: overdueQuery(PLAT4_TIMER_SCHEDULES),
+    after: overdueQuery([...PLAT4_TIMER_SCHEDULES, ['labCanary', '1h', '2026-01-01 00:20']]),
+    reason: '#1009: alert-timer-overdue watches labCanary too, one row more in its datatable',
   },
   // 2026-10-06: a refused Telegram delivery pages through the action group,
   // after a blocked bot silenced every owner notification for a day.

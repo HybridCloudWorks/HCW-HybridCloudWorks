@@ -11,6 +11,8 @@ import { describe, it, expect, vi } from 'vitest';
 
 import {
   CODER_TEMPLATE_PROBE,
+  CODER_TOKEN_PROBE,
+  LAB_CANARY_PROBE,
   LAB_DRIFT_AGENTS_QUERY,
   LAB_DRIFT_PROBE,
   TEMPLATE_REPORT_COLD_AFTER_MS,
@@ -126,7 +128,9 @@ describe('the readers', () => {
       return report();
     });
     const { checks, drift } = await readLabChecks(s, nowMs, [{ id: 'vps-1', active: true }]);
-    expect(Object.keys(checks).sort()).toEqual([CODER_TEMPLATE_PROBE, LAB_DRIFT_PROBE].sort());
+    expect(Object.keys(checks).sort()).toEqual(
+      [CODER_TEMPLATE_PROBE, CODER_TOKEN_PROBE, LAB_CANARY_PROBE, LAB_DRIFT_PROBE].sort()
+    );
     expect(checks[LAB_DRIFT_PROBE]).toEqual({
       status: 'unknown',
       summary: "The check's data could not be read: Cosmos said 503",

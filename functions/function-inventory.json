@@ -237,6 +237,7 @@
     "forgeScheduled",
     "generateReviewerDigest",
     "healthPulse",
+    "labCanary",
     "labsWeeklyRollup",
     "monitorPublishingPipeline",
     "platformJobSweeper",

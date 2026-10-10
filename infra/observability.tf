@@ -1365,6 +1365,7 @@ locals {
     forgeScheduled              = { period = "1d", anchor = "2026-01-01 03:30" }  # 0 30 3 * * *
     generateReviewerDigest      = { period = "1d", anchor = "2026-01-01 07:00" }  # 0 0 7 * * *
     healthPulse                 = { period = "5m", anchor = "2026-01-01 00:02" }  # 0 2-59/5 * * * *
+    labCanary                   = { period = "1h", anchor = "2026-01-01 00:20" }  # 0 20 */1 * * *
     labsWeeklyRollup            = { period = "1d", anchor = "2026-01-01 23:55" }  # 0 55 23 * * *
     monitorPublishingPipeline   = { period = "6h", anchor = "2026-01-01 00:00" }  # 0 0 */6 * * *
     platformJobSweeper          = { period = "15m", anchor = "2026-01-01 00:00" } # 0 */15 * * * *

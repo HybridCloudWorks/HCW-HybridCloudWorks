@@ -494,9 +494,15 @@ describe('the heartbeat and sync runners', () => {
     expect(await runLabCheck('coder-template')).toMatchObject({ status: 'offline' });
   });
 
-  it('registers both lab checks as live, Test-all-safe probes that read the snapshot', () => {
-    for (const id of ['lab-drift', 'coder-template']) {
+  it('registers every lab check as a live, Test-all-safe probe that reads the snapshot', async () => {
+    for (const id of ['lab-drift', 'coder-template', 'lab-canary', 'coder-token']) {
       expect(byId(id), id).toMatchObject({ kind: 'live', safe: true, hub: 'enhanced' });
+      // Test all may press it: its run reads the snapshot and writes nothing.
+      postJSON.mockResolvedValueOnce({
+        checks: { [id]: { status: 'healthy', summary: `${id} ok` } },
+      });
+      expect(await byId(id).run(), id).toMatchObject({ status: 'healthy', summary: `${id} ok` });
+      expect(postJSON).toHaveBeenLastCalledWith('getLabsSnapshot', {});
     }
   });
 

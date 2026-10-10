@@ -13,6 +13,11 @@
  *                   (admin_config/coder_automation) carries the digest of
  *                   what it last published and the digest of its checkout;
  *                   coderTemplateVerdict below compares them.
+ *   lab-canary      Did the last real lab job run end to end? The hourly
+ *                   canary's record (admin_config/lab_canary, labs/canary.js).
+ *   coder-token     Does Coder accept the site's status token? Coder's last
+ *                   answers to it (admin_config/coder_status_token,
+ *                   labs/coder-status.js recordTokenAnswer).
  *
  * WHY THE TEMPLATE IS COMPARED ON THE HOST'S TWO DIGESTS, NOT THE SITE'S
  * BUILD. A digest of lab-host/coder/templates/hcw-lab computed when the
@@ -32,10 +37,24 @@
  */
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { CODER_AUTOMATION_DOC_ID } from './coder-automation.js';
+import { LAB_CANARY_DOC_ID, UNREACHED_OUTCOMES } from './canary.js';
+import { TOKEN_STATE_DOC_ID, isRefusing } from './coder-status.js';
 import { LAB_DRIFT_DOC_ID, agoText, labDriftVerdict } from './drift.js';
 
 export const LAB_DRIFT_PROBE = 'lab-drift';
 export const CODER_TEMPLATE_PROBE = 'coder-template';
+export const LAB_CANARY_PROBE = 'lab-canary';
+export const CODER_TOKEN_PROBE = 'coder-token';
+
+const HOUR_MS = 60 * 60 * 1000;
+/** Three missed hourly runs: the canary has stopped, and its last result is no longer evidence. */
+export const CANARY_STALE_AFTER_MS = 3 * HOUR_MS;
+/**
+ * A day without a read of Coder with the token: an acceptance that old no
+ * longer vouches for the token. With the canary armed the status is read
+ * hourly; without it, only visitors and the Integrations card read it.
+ */
+export const TOKEN_EVIDENCE_STALE_AFTER_MS = 24 * HOUR_MS;
 
 /** The registry fields the drift verdict reads. */
 export const LAB_DRIFT_AGENTS_QUERY = 'SELECT TOP 200 c.id, c.active, c.applied FROM c';
@@ -104,6 +123,102 @@ export function coderTemplateVerdict(report, nowMs) {
   );
 }
 
+const secondsText = (ms) => `${Math.round(ms / 1000)} s`;
+
+/** "claimed after 12 s, done 3 s later", from whichever timings the run has. */
+function timingsText(timings) {
+  const parts = [];
+  if (Number.isFinite(timings?.claimMs)) parts.push(`claimed after ${secondsText(timings.claimMs)}`);
+  if (Number.isFinite(timings?.runMs)) parts.push(`done ${secondsText(timings.runMs)} later`);
+  return parts.join(', ');
+}
+
+/**
+ * Whether the last real lab job ran end to end. Pure.
+ *
+ * Nothing ran it (no agent online, nobody claimed it) is `offline`, the
+ * status-model's word for silence; a job that ran and failed, a registry with
+ * no agent for the job type, or a job left in flight is `critical`.
+ *
+ * @param {object|null} state admin_config/lab_canary
+ * @param {number} nowMs
+ */
+export function labCanaryVerdict(state, nowMs) {
+  if (!state?.lastRunAt) {
+    return result(
+      'unknown',
+      'The lab canary has not run. Add LAB_CANARY to enabled_timers to run one shell-echo job an hour end to end.'
+    );
+  }
+  const last = state.lastResult ?? {};
+  const when = agoText(state.lastRunAt, nowMs);
+  const timings = timingsText(last.timings);
+  const lastLine = last.ok
+    ? `the last job passed${timings ? ` (${timings})` : ''}`
+    : `the last did not pass (${last.reason || last.outcome || 'no reason recorded'})`;
+  const lastRunMs = Date.parse(String(state.lastRunAt));
+  if (!Number.isFinite(lastRunMs) || nowMs - lastRunMs > CANARY_STALE_AFTER_MS) {
+    return result(
+      'unknown',
+      `The lab canary last ran ${when}, and it runs hourly while LAB_CANARY is armed, so it has stopped; ${lastLine}.`
+    );
+  }
+  if (last.ok) {
+    return result(
+      'healthy',
+      `A shell-echo job ran end to end ${when}${timings ? `: ${timings}` : ''}.`
+    );
+  }
+  const streak = Number(state.consecutiveFailures) > 1 ? ` ${state.consecutiveFailures} runs in a row.` : '';
+  const success = state.lastSuccessAt
+    ? ` The last job that passed ran ${agoText(state.lastSuccessAt, nowMs)}.`
+    : ' No canary job has passed yet.';
+  return result(
+    UNREACHED_OUTCOMES.includes(last.outcome) ? 'offline' : 'critical',
+    `The lab canary did not pass ${when}: ${last.reason || last.outcome || 'no reason recorded'}.${streak}${success}`,
+    last.outcome ? `outcome ${last.outcome}` : null
+  );
+}
+
+const refusalMeaning = (status) =>
+  status === 403
+    ? 'it lacks the template:read or workspace:read scope'
+    : 'it has expired or been revoked';
+
+/**
+ * Whether Coder accepts the site's status token, by its last recorded answers.
+ * Pure. A refusal newer than the last acceptance is critical however old: it
+ * is still the latest evidence. An acceptance older than a day is unknown.
+ *
+ * @param {object|null} state admin_config/coder_status_token
+ * @param {number} nowMs
+ */
+export function coderTokenVerdict(state, nowMs) {
+  if (!state?.lastAcceptedAt && !state?.lastRefusedAt) {
+    return result(
+      'unknown',
+      'No read of Coder with CODER_STATUS_TOKEN has been recorded yet; the labs status read records each one.'
+    );
+  }
+  if (isRefusing(state)) {
+    const status = Number(state.lastRefusedStatus) || 401;
+    const since = state.refusingSince ?? state.lastRefusedAt;
+    return result(
+      'critical',
+      `Coder has refused CODER_STATUS_TOKEN (HTTP ${status}) since ${since}, ${agoText(since, nowMs)}: ${refusalMeaning(status)}, so the labs card's templates and running count are unknown. The lab host's Coder automation renews it daily; Integrations → Hybrid Lab shows its last report.`,
+      state.lastAcceptedAt ? `last accepted ${state.lastAcceptedAt}` : 'never accepted since this check began'
+    );
+  }
+  const acceptedMs = Date.parse(String(state.lastAcceptedAt));
+  if (!Number.isFinite(acceptedMs) || nowMs - acceptedMs > TOKEN_EVIDENCE_STALE_AFTER_MS) {
+    return result(
+      'unknown',
+      `Coder last accepted CODER_STATUS_TOKEN ${agoText(state.lastAcceptedAt, nowMs)}, and nothing has read Coder with it since, so whether it still does is unknown.`
+    );
+  }
+  return result('healthy', `Coder accepted CODER_STATUS_TOKEN ${agoText(state.lastAcceptedAt, nowMs)}.`);
+}
+
 /** The drift verdict from the registry rows given, or read here when none are. */
 export async function readLabDrift(store, nowMs, agentRows = null) {
   const [agents, drift] = await Promise.all([
@@ -117,6 +232,22 @@ export async function readLabDrift(store, nowMs, agentRows = null) {
 export async function readCoderTemplate(store, nowMs) {
   const report = await store.readDoc('admin_config', CODER_AUTOMATION_DOC_ID, ADMIN_CONFIG_PARTITION);
   return coderTemplateVerdict(report, nowMs);
+}
+
+/** The canary verdict from its record. */
+export async function readLabCanary(store, nowMs) {
+  return labCanaryVerdict(
+    await store.readDoc('admin_config', LAB_CANARY_DOC_ID, ADMIN_CONFIG_PARTITION),
+    nowMs
+  );
+}
+
+/** The status-token verdict from Coder's recorded answers. */
+export async function readCoderToken(store, nowMs) {
+  return coderTokenVerdict(
+    await store.readDoc('admin_config', TOKEN_STATE_DOC_ID, ADMIN_CONFIG_PARTITION),
+    nowMs
+  );
 }
 
 /** A check that could not be read is said as such, never as healthy. */
@@ -133,13 +264,20 @@ const unreadable = (error) =>
  * @param {object[]} agentRows the registry rows the snapshot already read
  */
 export async function readLabChecks(store, nowMs, agentRows) {
-  const [drift, template] = await Promise.all([
+  const [drift, template, canary, token] = await Promise.all([
     readLabDrift(store, nowMs, agentRows).catch((error) => ({ ...unreadable(error), agents: {} })),
     readCoderTemplate(store, nowMs).catch(unreadable),
+    readLabCanary(store, nowMs).catch(unreadable),
+    readCoderToken(store, nowMs).catch(unreadable),
   ]);
   const { agents: _perAgent, ...driftCheck } = drift;
   return {
-    checks: { [LAB_DRIFT_PROBE]: driftCheck, [CODER_TEMPLATE_PROBE]: template },
+    checks: {
+      [LAB_DRIFT_PROBE]: driftCheck,
+      [CODER_TEMPLATE_PROBE]: template,
+      [LAB_CANARY_PROBE]: canary,
+      [CODER_TOKEN_PROBE]: token,
+    },
     drift,
   };
 }

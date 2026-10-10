@@ -288,6 +288,26 @@ timer('healthPulse', 'HEALTH_PULSE', '0 2-59/5 * * * *', async (context) => {
   return createHealthPulse({ store, buildSnapshot, log: context }).run();
 });
 
+// The lab canary (#1009): one real shell-echo job an hour, enqueued and
+// waited for until the agent has run it end to end, recorded for the Health
+// Hub's lab-canary probe, and deleted. Twenty past, clear of the five-minute
+// timers' marks. A real job on the owner's host, so off until LAB_CANARY is
+// in enabled_timers. It also reads the labs status once, through the minute
+// cache, so the coder-token probe has evidence with no visitors
+// (lib/labs/canary.js).
+timer('labCanary', 'LAB_CANARY', '0 20 */1 * * *', async (context) => {
+  const [{ createLabCanary }, { createCoderStatusHandlers }] = await Promise.all([
+    import('../lib/labs/canary.js'),
+    import('../lib/labs/coder-status.js'),
+  ]);
+  const coderStatus = createCoderStatusHandlers({ store });
+  return createLabCanary({
+    store,
+    log: context,
+    touchCoderStatus: () => coderStatus.readStatus(context),
+  }).run();
+});
+
 // ── AI ───────────────────────────────────────────────────────────────────────
 
 // The owner's reminders sheet (Platform Settings → Reminders), said on
