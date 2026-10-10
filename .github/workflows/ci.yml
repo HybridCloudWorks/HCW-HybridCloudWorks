@@ -122,10 +122,12 @@ jobs:
           # lab host's "Coder stopped" answer, and the lab launcher's, is the
           # pane's own sentence. catalogue.js is what
           # lab-host-launcher.test.mjs reads: the launcher's workspace names
-          # are the catalogue's.
+          # are the catalogue's. function-inventory.json is what
+          # check-registered-functions.test.mjs parses with the script the
+          # deploy and the registration monitor run (PLAT-2).
           - name: scripts (operations)
             dir: scripts
-            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|frontend/src/(pages/shared/LabPanePage\.jsx|data/labs/catalogue\.js)$|vps-agent/(index\.js|\.env\.example|lib/(capabilities|docker-runner)\.js)$)'
+            filter: '^(scripts/|\.github/workflows/|infra/|infra-lab/|lab-host/|lab-image/|([^/]+/)*package\.json$|([^/]+/)*Dockerfile|frontend/src/lib/landingZone/(avmVersions|labImage|tfConstraints)\.js$|frontend/src/(pages/shared/LabPanePage\.jsx|data/labs/catalogue\.js)$|vps-agent/(index\.js|\.env\.example|lib/(capabilities|docker-runner)\.js)$|functions/function-inventory\.json$)'
             lint: npm run lint
             test: npm test
           # vps-agent shells out to `docker run` with a payload that reached

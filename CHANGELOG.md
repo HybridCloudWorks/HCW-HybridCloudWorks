@@ -4232,6 +4232,45 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **A missing function, an origin lock that is off, and a stranded
+  AzureWebJobsStorage strip each fail a check now (PLAT-2, #962).** The
+  estate assessment found all three passing.
+  - Registration is checked by name. `deploy-functions.yml` asserted more
+    than zero registered functions and `monitor-functions-registered.yml` at
+    least one, so the 2026-08-21 incident (83 deployed, 80 registered, three
+    timers down) passed both. `functions/function-inventory.json` lists all
+    248 functions by trigger, and `function-inventory.test.js` fails, naming
+    each name, when it and the registrations in `index.js` disagree.
+    `scripts/check-registered-functions.mjs` compares a live listing with it
+    and names every function missing. The deploy runs it against its own
+    commit, in a step of its own after the firewall windows close, polling
+    for up to three minutes. The monitor
+    runs it against the commit whose package is live, found from the last
+    successful `Deploy to Azure Functions` step, so a merged and undeployed
+    function is not reported missing. It reads twice more, a minute apart,
+    before believing a miss. It holds `actions: read` to read that run
+    history. Until a deploy carries the inventory, the monitor says the check
+    is not armed and asserts only a non-zero count, as before.
+  - The deploy's origin-lock step read Cloudflare. It curled the proxied
+    hostname, which Bot Fight Mode answers with a 403 whether or not the
+    Azure restriction is on. `scripts/assert-origin-lock.mjs` now reads the
+    Function App's access restriction from the control plane. The step fails
+    unless unmatched requests are `Deny`, no Allow rule admits every address,
+    and every Allow rule is Terraform's `cloudflare-*` or a per-run `ci-*`
+    window, with this run's window gone. A deploy while
+    `functions_origin_lock_enabled` is false now goes red. The deploy
+    identity's Website Contributor on the app already covers the read.
+  - No Terraform ordering can keep a failed apply from stranding the strip.
+    Terraform skips only the dependents of a failed resource, so an error
+    elsewhere cannot stop the strip, and that was already true. An error on
+    the path itself can: the Function App's update, the settings read, the
+    strip, or a cancel or `-target` between them. `infra/functionapp.tf` now
+    says exactly that, and `webjobs-strip-ancestry.test.mjs` fails if the
+    pair gains an ancestor. The deploy now asserts `RUNTIME_CONFIG_WRITER =
+    azapi-strip` as well as an absent `AzureWebJobsStorage`, as the monitor
+    always has. The deployment runbook gives the owner's two PowerShell reads
+    after any apply that did not finish green. It also corrects §5's claim
+    that Terraform "stops scheduling new nodes" on an error.
 - **A Docker data-root switch no longer leaves Coder unreachable, and the
   Coder database volume has one owner.** On the first bootstrap after LAB-5
   (2026-10-08) the old root's bridges stayed in the kernel, down, on the

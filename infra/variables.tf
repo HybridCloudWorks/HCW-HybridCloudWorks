@@ -1016,8 +1016,14 @@ variable "cloudflare_origin_secret" {
 # so anything reaching the origin directly stops working — including, until it
 # was fixed alongside this variable, the post-deploy smoke test in
 # deploy-functions.yml, which curled the azurewebsites.net hostname from a
-# GitHub-hosted runner. That test now goes through the proxied Cloudflare
-# hostname, which is also the path real traffic takes.
+# GitHub-hosted runner. That test now admits its own runner through a per-run
+# allow rule (ci-smoke-<run id>) and removes it afterwards.
+#
+# deploy-functions.yml asserts this posture from the control plane after every
+# deploy (PLAT-2, #962): it fails unless the site's unmatched-request action
+# is Deny, so a deploy run while this is false goes red by design. It used to
+# curl the proxied hostname instead, which Cloudflare's Bot Fight Mode answers
+# with a 403 whatever this variable says.
 #
 # Enable only when cloudflare_origin_secret is set AND the vault holds the same
 # value. Enabling with an empty secret locks the origin without giving

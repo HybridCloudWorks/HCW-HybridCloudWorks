@@ -484,13 +484,52 @@ problem means production is already degraded rather than merely unchanged.
 1. **Assert the Function App is not degraded.** Any apply that writes to
    `azurerm_function_app_flex_consumption.hcw` — including one that only
    changes a site setting — has `azurerm` re-inject a keyless
-   `AzureWebJobsStorage`, which the azapi pair strips two graph hops later. A
-   failure between those two ARM calls leaves the site in the state three
-   recorded incidents came from, and **no alert rule detects it**
-   ([Alerting and support](../runbooks/alerting-and-support.md)). Expect
-   `AzureWebJobsStorage` absent and `RUNTIME_CONFIG_WRITER` equal to
-   `azapi-strip`; the commands are on that page. Re-apply to convergence if
-   either is wrong — do not edit the setting by hand.
+   `AzureWebJobsStorage`, which the azapi pair strips two graph hops later.
+
+   **What Terraform guarantees, and what it cannot** (PLAT-2, #962). A
+   green, untargeted apply that wrote the Function App also ran the strip
+   after that write. An error in
+   any *other* resource cannot strand it: Terraform skips only what depends
+   on a failed resource and keeps running everything else, and the strip
+   depends on nothing but the Function App and the settings read. What can
+   strand it is a failure *on that path*: the Function App's own update
+   failing after `azurerm` has written the settings, the read or the strip
+   failing, the run being cancelled between them, or a `-target` that names
+   the Function App without the pair. No ordering prevents those, because
+   Terraform runs nothing after a resource that failed; `infra/functionapp.tf`
+   gives the reasoning beside the pair. So after **any apply that did not
+   finish green**, and after any targeted apply, do this read before
+   anything else.
+
+   From PowerShell, with the application subscription as the `az` default
+   (`ResourceGroupNotFound` means it is not; `az account show` names the one
+   that is). Listing app settings is an action,
+   `Microsoft.Web/sites/config/list/action`, so `Reader` alone answers
+   `AuthorizationFailed`; the owner's own sign-in carries it. The first should
+   print one row, `RUNTIME_CONFIG_WRITER` with the value `azapi-strip`:
+
+   ```powershell
+   az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'RUNTIME_CONFIG_WRITER' | Select-Object name, value
+   ```
+
+   The second should print `0`, meaning there is no `AzureWebJobsStorage`
+   row. It counts the row rather than printing it, and the identity-based
+   `AzureWebJobsStorage__accountName` is a different name and is not counted:
+
+   ```powershell
+   (az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'AzureWebJobsStorage' | Measure-Object).Count
+   ```
+
+   `azurerm` in the first, or `1` in the second, is the stranded state the
+   three recorded incidents came from. **Re-apply to convergence; do not edit
+   either setting by hand.** The next plan will not look like the permanent
+   diff: a strip that did not complete is absent from state, so the plan
+   shows the settings read and the strip as `create` rather than `replace`,
+   and `tfc-plan-check.yml` reports them. That plan is the repair. Both reads
+   are also what `deploy-functions.yml` asserts before it syncs triggers, and
+   what `monitor-functions-registered.yml` reports on its timer, so a
+   stranded host that nobody reads is caught at the next deploy or monitor
+   run ([Alerting and support](../runbooks/alerting-and-support.md)).
 2. `terraform plan` again → **empty plan** (no immediate drift). Expect the
    permanent 3-add / 1-change / 3-destroy signature from the three azapi
    resources — the app-settings pair and the FTP policy — which
@@ -519,9 +558,13 @@ problem means production is already degraded rather than merely unchanged.
    it is answered by the origin lock with a 403 — the surface job asserted a
    200 from the apex and got that 403 too. This runbook previously said the
    surface half "still runs usefully", which the job history disproves.
-   `deploy-functions.yml` relies on that same 403 to prove the origin lock — it
-   fails the deploy if the same URL answers 200 from a runner — so the workflow
-   could not be fixed without weakening the lock. The operator path is
+   `deploy-functions.yml` used to rely on Cloudflare's 403 to prove the origin
+   lock, which proved nothing: Bot Fight Mode answers a runner with 403
+   whether the Azure restriction is on or off. Since PLAT-2 (#962) it reads
+   the Function App's access restriction from the control plane instead and
+   fails unless unmatched requests are `Deny`
+   (`scripts/assert-origin-lock.mjs`), so a deploy while
+   `functions_origin_lock_enabled` is false goes red by design. The operator path is
    [Edge and DNS verification](edge-dns-verification.md). Making the smoke job
    pass from CI needs the same Cloudflare change that blocked the standard
    availability test (T-519 itself closed 2026-09-01 by routing around it with
@@ -539,9 +582,12 @@ problem means production is already degraded rather than merely unchanged.
 ## 5. Rollback
 
 **A failed apply is not a rollback.** Terraform converges forward: on error it
-stops scheduling new nodes, lets the in-flight ones finish, and leaves state
-wherever it got to. Nothing is undone, and a destroy that has already run is
-gone. So the response to a red apply is §4 step 1 followed by re-running to
+skips everything that depends on the failed resource, still runs everything
+that does not, and leaves state wherever it got to. Nothing is undone, and a
+destroy that has already run is gone. (This paragraph said Terraform "stops
+scheduling new nodes" on an error until 2026-10-09. It does not: its graph
+walker skips only the failed resource's dependents, which is why an error in
+an unrelated resource cannot stop the azapi strip in §4 step 1.) So the response to a red apply is §4 step 1 followed by re-running to
 convergence — investigate from a known state, not from a half-applied one. Most
 partial applies are harmless and self-heal on the next run; the one that does
 not announce itself is the Function App case in §4 step 1.

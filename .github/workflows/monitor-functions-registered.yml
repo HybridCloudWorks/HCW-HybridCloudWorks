@@ -33,6 +33,26 @@
 # Mode is irrelevant. It needs no metric that does not exist. And it names the
 # cause, not a downstream symptom.
 #
+# BY NAME, NOT BY COUNT (PLAT-2, #962). This asserted a minimum of one
+# registered function, and the second incident, 83 deployed and 80 registered
+# with three timers silently down, passed it. It now compares the live listing
+# with the expected set and names every function missing, with its trigger:
+# scripts/check-registered-functions.mjs, the same script deploy-functions.yml
+# runs after SyncTriggers, against functions/function-inventory.json.
+#
+# WHICH inventory matters. Deploys are dispatch-only, so `main` routinely holds
+# functions the host has not been given yet, and comparing with `main` would
+# page "missing" for every merge not yet shipped. `--deployed` reads the
+# inventory at the commit whose package is live: the newest successful
+# `Deploy to Azure Functions` step in the last runs of deploy-functions.yml.
+# Reading that run history is why this job holds `actions: read`. A deployed
+# commit older than the inventory file has no expected set, and the check
+# falls back to "at least one registered", saying so, until the next deploy.
+#
+# The listing method is unchanged: `az functionapp function list` through
+# probe(), so an authorization failure still reads as a broken check rather
+# than an outage. Only what it is compared against changed.
+#
 # The check was never missing — it was manual, or inside deploy-functions.yml,
 # which only runs when someone deploys. Nobody deployed during any of the three
 # incidents. The gap was the timer, not the test.
@@ -100,10 +120,10 @@ on:
     # Offset from the top of the hour, so it does not queue behind every other
     # top-of-the-hour schedule on GitHub's runners.
     - cron: '41 * * * *'
-  # No inputs (checkov CKV_GHA_7). The app, its resource group and the
-  # threshold are fixed below: a manual run checks the same thing the schedule
-  # does, and raising the threshold against an observed count is a reviewed
-  # edit rather than a dispatch field.
+  # No inputs (checkov CKV_GHA_7). The app and its resource group are fixed
+  # below and the expected set is the deployed commit's inventory: a manual
+  # run checks the same thing the schedule does, and nothing about what
+  # "registered" means is a dispatch field.
   workflow_dispatch:
 
 # The workflow-level default. `id-token: write` is granted on the job that uses
@@ -127,10 +147,27 @@ jobs:
     # permissions bug while actually meaning "not deployed yet".
     if: ${{ vars.READER_CLIENT_ID != '' }}
     permissions:
-      contents: read # the checkout, nothing more
+      contents: read # the checkout, and the inventory at the deployed commit
+      actions: read # deploy-functions.yml's run history: which commit is live
       id-token: write # exchanged by azure/login for an Azure access token
     runs-on: ubuntu-26.04
     steps:
+      # For scripts/check-registered-functions.mjs. The inventory it compares
+      # against is fetched at the deployed commit, not read from this checkout.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # No `npm ci`: the script imports Node built-ins and uses global fetch,
+      # and this job holds an OIDC token. No cache either, for the same reason
+      # deploy-functions.yml gives.
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '26'
+          package-manager-cache: false
+
       # READER_CLIENT_ID, not CLIENT_ID (T-728). This workflow reads and
       # changes nothing, so it runs as the read-only identity rather than the
       # one that can deploy code, write blobs and rewrite storage firewalls.
@@ -145,10 +182,13 @@ jobs:
         env:
           APP: func-site-prod-cus-01
           RG: rg-web-site-prod-cus
-          MIN: '1'
           # Empty when the variable is unset, which skips the firewall probes
           # rather than failing the monitor on a missing name (T-713).
           STOR: ${{ vars.FUNCTIONS_STORAGE_ACCOUNT }}
+          # Read-only, by the job's permissions: the deploy run history and
+          # the inventory at the commit it deployed.
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -uo pipefail
 
@@ -189,8 +229,35 @@ jobs:
             return 1
           }
 
-          count=$(probe "function list" \
-            az functionapp function list -n "$APP" -g "$RG" --query "length(@)" -o tsv) || true
+          # Registration, by name (PLAT-2, #962). The listing goes through
+          # probe() exactly as the count did, so UNAUTHORIZED and ERROR keep
+          # their meaning. regstatus: 0 every expected function registered,
+          # 1 some missing (named in regout), 2 the comparison could not run
+          # (regout says why), 3 the listing itself failed.
+          read_registration() {
+            names=$(probe "function list" \
+              az functionapp function list -n "$APP" -g "$RG" --query "[].name" -o tsv) || true
+            case "$names" in
+              UNAUTHORIZED|ERROR)
+                regstatus=3
+                regout="$names" ;;
+              *)
+                regstatus=0
+                regout=$(printf '%s\n' "$names" | node scripts/check-registered-functions.mjs --deployed) || regstatus=$? ;;
+            esac
+          }
+
+          # A run can land in the minute a deploy swaps the package, while
+          # registration is partial and recovering. So "missing" is read twice
+          # more, a minute apart, before it is believed. It costs nothing when
+          # everything is registered and two minutes when something is not.
+          read_registration
+          for reread in 1 2; do
+            [ "$regstatus" -eq 1 ] || break
+            echo "registration read ${reread}: ${regout%%$'\n'*}; reading again in 60 s in case a deploy is mid-swap"
+            sleep 60
+            read_registration
+          done
 
           webjobs=$(probe "AzureWebJobsStorage" \
             az functionapp config appsettings list -n "$APP" -g "$RG" \
@@ -235,17 +302,15 @@ jobs:
             echo "| --- | ---: | :---: |"
           } >> "$report"
 
-          # Registered function count. Zero is the documented condition behind
-          # all three incidents.
-          if [ "$count" = "UNAUTHORIZED" ] || [ "$count" = "ERROR" ]; then
-            echo "| Registered functions | \`$count\` | ⚠️ |" >> "$report"
-            failed=1
-          elif [ "$count" -lt "$MIN" ] 2>/dev/null; then
-            echo "| Registered functions | **$count** | ❌ |" >> "$report"
-            failed=1
-          else
-            echo "| Registered functions | $count | ✅ |" >> "$report"
-          fi
+          # Registered functions against the deployed commit's expected set.
+          # Line 1 of the script's output is the cell; the rest is the detail
+          # printed under the table, which names every missing function.
+          regcell=${regout%%$'\n'*}
+          case "$regstatus" in
+            0) echo "| Registered functions | $regcell | ✅ |" ;;
+            1) echo "| Registered functions | **$regcell** | ❌ |"; failed=1 ;;
+            *) echo "| Registered functions | \`$regcell\` | ⚠️ |"; failed=1 ;;
+          esac >> "$report"
 
           # AzureWebJobsStorage present means the azurerm write came back and
           # the host is preferring a connection string with an empty account
@@ -298,24 +363,31 @@ jobs:
             fi
           fi
 
+          # The registration detail under the table: which expected set, and
+          # every missing function by name and trigger.
+          regdetail=${regout#"$regcell"}
+          if [ -n "${regdetail//[[:space:]]/}" ]; then
+            printf '\n%s\n' "${regdetail#$'\n'}" >> "$report"
+          fi
+
           # A run where nothing could be read is a broken check, not an outage,
           # and must not be reported as one. Counted rather than pattern-matched
           # over the concatenation, which got mixed results wrong.
           unreadable=0
-          for v in "$count" "$webjobs" "$writer"; do
+          for v in "$names" "$webjobs" "$writer"; do
             case "$v" in UNAUTHORIZED|ERROR) unreadable=$((unreadable + 1)) ;; esac
           done
 
           {
             echo
             if [ "$failed" -eq 0 ]; then
-              echo "Functions are registered and the host is not running on an \`azurerm\`-written config."
+              echo "Every expected function is registered and the host is not running on an \`azurerm\`-written config."
             elif [ "$unreadable" -eq 3 ]; then
-              echo "**This check could not read anything, so the platform's state is unknown.** That is a broken check, not an outage — do not read it as one. Every row failed the same way, which points at the identity rather than at the Function App: \`Website Contributor\` on the app is what \`az functionapp function list\` and \`config appsettings list\` need (\`infra/oidc.tf\`). Confirm the grant is applied before trusting or distrusting this workflow."
+              echo "**This check could not read anything, so the platform's state is unknown.** That is a broken check, not an outage — do not read it as one. Every row failed the same way, which points at the identity rather than at the Function App: \`Reader\` on \`rg-web-site-prod-cus\` is what \`az functionapp function list\` needs, and \`HCW Function Settings Reader\` is what \`config appsettings list\` needs (\`infra/oidc.tf\`, T-728). Confirm both grants are applied before trusting or distrusting this workflow."
             else
-              echo "**Investigate.** A function count below \`$MIN\`, or an \`AzureWebJobsStorage\` setting that exists, is the condition behind the 2026-08-20 and 2026-08-21 incidents: the host answers, the functions are not registered, and every route returns 404 — which no alert rule in \`observability.tf\` detects."
+              echo "**Investigate.** An expected function that is not registered, an \`AzureWebJobsStorage\` setting that exists, or a \`RUNTIME_CONFIG_WRITER\` other than \`azapi-strip\` is the condition behind the 2026-08-20 and 2026-08-21 incidents: the host answers, functions are not registered, and routes return 404 or timers silently stop — which no alert rule in \`observability.tf\` detects."
               echo
-              echo "The repair is to re-apply \`infra/\` so the azapi strip runs again. **Do not delete the setting by hand** — that hides the regression from the assertion in \`deploy-functions.yml\`, which is the only other automated detector this failure class has. See *The failure with no alert* in \`docs/runbooks/alerting-and-support.md\` (https://docs.hybridcloudworks.com/runbooks/alerting-and-support/)."
+              echo "When the \`AzureWebJobsStorage\` or \`RUNTIME_CONFIG_WRITER\` row is ❌, the repair is to re-apply \`infra/\` so the azapi strip runs again. **Do not delete the setting by hand** — that hides the regression from the assertion in \`deploy-functions.yml\`. When only the registration row is ❌, the strip is intact and the named functions failed to register on their own: their module's startup error is in the host log. See *The failure with no alert* in \`docs/runbooks/alerting-and-support.md\` (https://docs.hybridcloudworks.com/runbooks/alerting-and-support/)."
               echo
               echo "A ⚠️ row means the check could not run, not that the platform is down. An authorization failure is not an outage."
             fi
