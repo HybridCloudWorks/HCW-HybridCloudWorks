@@ -150,6 +150,29 @@ describe('labDriftVerdict', () => {
     expect(behind.summary).toMatch(/Main was last read 7 h ago\.$/);
   });
 
+  it('keeps a fresh read’s verdict when the newest read failed, and says the newest one failed', () => {
+    const quiet = labDriftVerdict({
+      agents: [agent()],
+      drift: drift({ lastSuccessAt: hoursAgo(2), lastError: 'TIMEOUT: GitHub did not answer within 8000 ms.' }),
+      nowMs,
+    });
+    expect(quiet.status).toBe('healthy');
+    expect(quiet.summary).toMatch(
+      /The latest read of main failed \(TIMEOUT: GitHub did not answer within 8000 ms\.\); this is from the read 2 h ago\.$/
+    );
+
+    const behind = labDriftVerdict({
+      agents: [agent()],
+      drift: drift({ lastSuccessAt: hoursAgo(2), lastError: 'RATE_LIMITED: used up', hostCommits: [commit('b', 40)] }),
+      nowMs,
+    });
+    expect(behind.status).toBe('critical');
+    expect(behind.summary).toMatch(/The latest read of main failed \(RATE_LIMITED: used up\)/);
+
+    // A successful read clears lastError, and then nothing is added.
+    expect(labDriftVerdict({ agents: [agent()], drift: drift(), nowMs }).summary).not.toMatch(/latest read/);
+  });
+
   it('judges active agents only, and says so when there are none', () => {
     const verdict = labDriftVerdict({ agents: [agent({ active: false, applied: null })], drift: drift(), nowMs });
     expect(verdict).toEqual({

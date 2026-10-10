@@ -359,7 +359,17 @@ function agentVerdict(agent, drift, nowMs) {
  */
 function withFreshness(verdict, drift, nowMs) {
   const lastSuccessMs = msOf(drift?.lastSuccessAt);
-  if (!Number.isFinite(lastSuccessMs) || nowMs - lastSuccessMs <= DRIFT_READ_STALE_AFTER_MS) return verdict;
+  if (!Number.isFinite(lastSuccessMs)) return verdict;
+  if (nowMs - lastSuccessMs <= DRIFT_READ_STALE_AFTER_MS) {
+    // Still evidence, so the verdict stands; but the newest attempt failed,
+    // and the reader is told so rather than shown a good read as current
+    // (CodeRabbit, #1054). `lastError` is cleared by every successful read.
+    if (!drift.lastError) return verdict;
+    return {
+      ...verdict,
+      summary: `${verdict.summary} The latest read of main failed (${drift.lastError}); this is from the read ${agoText(drift.lastSuccessAt, nowMs)}.`,
+    };
+  }
   const note = ` Main was last read ${agoText(drift.lastSuccessAt, nowMs)}${drift.lastError ? ` (${drift.lastError})` : ''}.`;
   if (verdict.status === 'healthy') {
     return { ...verdict, status: 'unknown', summary: `${verdict.summary}${note} Newer changes may be missing.` };

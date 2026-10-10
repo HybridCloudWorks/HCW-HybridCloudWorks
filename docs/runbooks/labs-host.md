@@ -727,6 +727,11 @@ closes the gap, so it follows the run, not the next day.
      again every hour and clears only after a read succeeds. If it is still
      there a day later, the host's lag is unknown and the **Lab host runs
      main** card says so.
+   - Any verdict followed by `The latest read of main failed (<code>:
+     <reason>); this is from the read <n> h ago.` The newest hourly read
+     failed, for the reasons above, and the verdict comes from the last good
+     one. It stands while that read is under six hours old; after that a
+     healthy verdict turns unknown, and a host already behind stays critical.
 
 2. Straight after, PowerShell on the workstation. Make the short-lived
    `hcw-setup` token in a pane as step 1 of "The status token for the
