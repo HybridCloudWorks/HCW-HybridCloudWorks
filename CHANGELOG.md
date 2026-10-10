@@ -19,6 +19,50 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Eleven alert rules for what the estate collected and nothing paged on
+  (PLAT-4, #964).** All route to `ag-plat-prod-cus-01`, and all read data
+  that already arrives, so none adds ingestion.
+  - `alert-timer-overdue`: one rule over all 25 timers, one alert per timer
+    through a `timer` dimension, firing when a timer due at least 45 minutes
+    ago has no successful request row since. The schedules live in
+    `local.timer_schedules` (period and anchor). The new
+    `functions/src/functions/timer-alert-schedules.test.js` holds that map to
+    the real `app.timer()` registrations, to each NCRONTAB and to
+    `function-inventory.json`. More than five overdue at once collapse into
+    one alert, and the rule is quiet while no request telemetry arrives at
+    all, so a capped workspace or a dead host does not send 25 mails and 25
+    texts.
+  - `alert-lab-agent-offline`: `checkAgentHealth`'s decision to tell the
+    owner an agent has been offline five minutes, so the owner hears by mail
+    and SMS when Telegram is what failed. The nightly reboot does not fire it.
+  - `alert-jobs-poison`: a successful `PutMessage` to `platform-jobs-poison`,
+    from the storage queue logs already shipped.
+  - `alert-swa-bandwidth`: a metric alert on the Static Web App's `BytesSent`
+    over a day, at a pace that would use 80% of the Free plan's 100 GB month.
+  - `alert-kv-errors` and `alert-kv-data-write`: Key Vault requests answering
+    400 or above (past the routine 401 challenge and unseeded-secret 404s),
+    and data-plane secret or key writes by anyone but the Function App, on
+    both vaults.
+  - `alert-kv-config-write`, `alert-rbac-write-app` and
+    `alert-rbac-write-mgmt`: Activity Log alerts, which are free and need no
+    export, for Resource Manager writes to either vault and role assignment
+    or definition changes in both subscriptions.
+  - `alert-lab-vault-unwrap`: the seal key wrapped or unwrapped from an
+    address the lab host has not heartbeated from, read from the host's own
+    `Heartbeat` rows rather than copied from the `hcw-lab` workspace.
+  - `alert-lab-ssh-burst`: failed SSH lines in 15 minutes at least 50 and
+    four times the day's quarter-hour average.
+  - Each create is declared in `scripts/assert-expected-plan.mjs`.
+    `kql-alert-columns.test.mjs` now reads every `.tf` file, not
+    `observability.tf` alone. `terraform-identity-grants.test.mjs` classifies
+    the Activity Log alert and admits a whole subscription in its `scopes`
+    only (read, not written; ADR 0005's step-two table records it). Every
+    query was parsed and type-checked with Microsoft's Kusto.Language
+    parser. Estimated cost is about USD 4.70 a month. The alerting runbook's
+    new *The PLAT-4 rules* section has the operator table, three pre-apply
+    checks, a fire test for each rule and a fire record. A daily digest of
+    denials needs code and is left as a follow-up.
+
 - **ADR 0035 accepted (2026-10-10, #1044).** The owner confirmed decision 8
   (AddOn containers run beside Coder on the lab host, amending ADR 0032) and
   decision 9 (`allow-downloads` on AddOn panes): the migration catalogue row

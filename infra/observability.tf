@@ -1303,3 +1303,623 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "cosmos_export_full_mi
     azurerm_role_assignment.alerts_app_component,
   ]
 }
+
+# =============================================================================
+# PLAT-4 (#964): silence, the poison queue, the bandwidth ceiling, and the
+# security conditions nothing paged on
+# =============================================================================
+#
+# The estate assessment of 2026-10-06 found the rules above watching errors
+# and latency while four kinds of failure stayed silent: a timer that stopped
+# running, a job the queue gave up on, the Static Web App's monthly bandwidth
+# running out, and every security-relevant change: role assignments, vault
+# configuration, vault data writes, failed vault calls. Every rule below reads
+# data the estate ALREADY collects (the diagnostic settings above, the
+# Application Insights component, the Activity Log), so none of them adds a
+# byte of ingestion against the 0.25 GB/day cap.
+#
+# Two shapes, chosen per condition for cost:
+#
+#   - Activity Log alerts for Azure Resource Manager writes. They are free
+#     ("collection and alerting on the Activity log" carries no charge,
+#     Microsoft's Azure Monitor cost page) and need no export: the Activity
+#     Log is evaluated where it already is. Exporting it to the workspace
+#     would add ingestion and a paid log rule for the same signal.
+#   - Log search alerts for what only a log carries: data-plane vault calls,
+#     queue writes, timer invocations, the agent-health trace. Each is a paid
+#     rule (USD 0.50 a month at a 15-minute frequency, Azure Retail Prices
+#     API, read 2026-10-10), which is why none runs more often than every 15
+#     minutes.
+#
+# Workspace-scoped rules follow logs_daily_cap and the lab rules: Management
+# provider, resource group and identity. Component-scoped rules follow the
+# Telegram rule: application resource group, component scope, classic schema,
+# alerts_app identity. Every one routes to the one action group, and every
+# one is created ENABLED, which is why each has a way to make it fire once in
+# docs/runbooks/alerting-and-support.md ("The PLAT-4 rules").
+
+locals {
+  # The schedule of every timer the Function App registers, as a period and a
+  # moment the schedule is known to fire (an "anchor"), so KQL's bin_at() can
+  # compute the last time each timer was due. NCRONTAB beside each, read from
+  # the code; all are UTC (#416).
+  #
+  # The set must equal the `timer` list in functions/function-inventory.json,
+  # and each pair must match its NCRONTAB in functions/src/functions/:
+  # scripts/timer-alert-schedules.test.mjs fails, naming the timer, when a
+  # timer is added, removed or rescheduled without this map. 2026-01-01 was a
+  # Thursday, so the weekly anchors are 2026-01-02 (Friday), 2026-01-04
+  # (Sunday) and 2026-01-05 (Monday); the test checks each weekday too.
+  timer_schedules = {
+    buildWeeklyNewsletter       = { period = "7d", anchor = "2026-01-05 13:00" }  # 0 0 13 * * 1
+    checkAgentHealth            = { period = "5m", anchor = "2026-01-01 00:00" }  # 0 */5 * * * *
+    checkLiveLinks              = { period = "7d", anchor = "2026-01-05 06:00" }  # 0 0 6 * * 1
+    cleanupRejectedContent      = { period = "1d", anchor = "2026-01-01 04:00" }  # 0 0 4 * * *
+    cleanupSoftDeletedContent   = { period = "4h", anchor = "2026-01-01 00:00" }  # 0 0 */4 * * *
+    cleanupTempStorage          = { period = "1d", anchor = "2026-01-01 00:00" }  # 0 0 0 * * *
+    cleanupUnusedCertImages     = { period = "1d", anchor = "2026-01-01 05:00" }  # 0 0 5 * * *
+    cosmosExportScheduler       = { period = "1d", anchor = "2026-01-01 03:00" }  # 0 0 3 * * *
+    fetchBlogListings           = { period = "6h", anchor = "2026-01-01 00:15" }  # 0 15 */6 * * *
+    fetchPodcastFeeds           = { period = "2h", anchor = "2026-01-01 00:30" }  # 0 30 */2 * * *
+    forgeScheduled              = { period = "1d", anchor = "2026-01-01 03:30" }  # 0 30 3 * * *
+    generateReviewerDigest      = { period = "1d", anchor = "2026-01-01 07:00" }  # 0 0 7 * * *
+    healthPulse                 = { period = "5m", anchor = "2026-01-01 00:02" }  # 0 2-59/5 * * * *
+    labsWeeklyRollup            = { period = "1d", anchor = "2026-01-01 23:55" }  # 0 55 23 * * *
+    monitorPublishingPipeline   = { period = "6h", anchor = "2026-01-01 00:00" }  # 0 0 */6 * * *
+    platformJobSweeper          = { period = "15m", anchor = "2026-01-01 00:00" } # 0 */15 * * * *
+    probeAiProviders            = { period = "7d", anchor = "2026-01-05 06:15" }  # 0 15 6 * * 1
+    publishScheduledContent     = { period = "15m", anchor = "2026-01-01 00:00" } # 0 */15 * * * *
+    reVerifyCertifications      = { period = "7d", anchor = "2026-01-04 00:00" }  # 0 0 0 * * 0
+    refreshPlaudToken           = { period = "12h", anchor = "2026-01-01 00:00" } # 0 0 */12 * * *
+    refreshToolServiceCache     = { period = "1d", anchor = "2026-01-01 02:00" }  # 0 0 2 * * *
+    scrapeSkillsHubRss          = { period = "7d", anchor = "2026-01-02 09:00" }  # 0 0 9 * * 5
+    sendReminders               = { period = "1d", anchor = "2026-01-01 13:00" }  # 0 0 13 * * *
+    syncRssFeeds                = { period = "2h", anchor = "2026-01-01 00:00" }  # 0 0 */2 * * *
+    syncSocialCalendarScheduled = { period = "5m", anchor = "2026-01-01 00:00" }  # 0 */5 * * * *
+  }
+
+  # The map as KQL datatable rows, one per line.
+  timer_schedule_rows = join(",\n", [
+    for name, s in local.timer_schedules : "  \"${name}\", ${s.period}, datetime(${s.anchor})"
+  ])
+
+  # 100 GB a month is the Static Web Apps bandwidth included on every plan,
+  # and on Free there is no overage to buy ("Overage bandwidth: Unavailable",
+  # Microsoft's Static Web Apps quotas page). Decimal gigabytes.
+  static_web_app_monthly_bandwidth_bytes = 100 * 1000 * 1000 * 1000
+
+  # The rule fires on a DAY that, repeated for thirty days, would use 80% of
+  # that. A metric alert cannot look back further than one day, and BytesSent
+  # cannot be exported to the workspace (its DS Export is "No"), so a month's
+  # running total is not something any Azure rule can read. A daily burn rate
+  # is the furthest-reaching signal there is: it pages on the first heavy day,
+  # weeks before the allowance runs out, instead of on the day it does.
+  static_web_app_daily_bandwidth_alert_bytes = floor(local.static_web_app_monthly_bandwidth_bytes * 0.8 / 30)
+
+  # The vaults the Key Vault rules read, as the lower-case _ResourceId the
+  # AzureDiagnostics rows carry (the platform lower-cases it; see the lab
+  # rules' note in lab-hybrid.tf). Both vaults ship AuditEvent here: the
+  # site's through azurerm_monitor_diagnostic_setting.key_vault above, the
+  # lab's through azurerm_monitor_diagnostic_setting.lab_hybrid_key_vault.
+  key_vault_resource_ids = join(", ", [
+    for id in [azurerm_key_vault.hcw.id, azurerm_key_vault.lab_hybrid.id] : "\"${lower(id)}\""
+  ])
+}
+
+# ---------------------------------------------------------------------------
+# Timers — one that should have run has no successful run
+# ---------------------------------------------------------------------------
+#
+# Before this, one timer in twenty-five had a silence alert (the Cosmos
+# exporter's two, above) and the other twenty-four could stop for a week
+# unnoticed. The registration monitor catches a timer that is not REGISTERED;
+# nothing caught one that is registered and not running, or running and
+# failing every time.
+#
+# ONE RULE, ONE TIME SERIES PER TIMER. The query returns a row for each timer
+# that was due and has no successful invocation since, and `timer` is the
+# dimension, so each overdue timer is its own alert naming itself, opens once
+# and resolves once.
+#
+# HOW "DUE" IS COMPUTED. For each timer, bin_at(now() - grace, period, anchor)
+# is the last scheduled time at least `grace` ago. A success (requests, the
+# function's own row, success true) at or after that time means it ran. The
+# grace is 45 minutes: the 30-minute non-HTTP timeout on Flex Consumption,
+# plus ingestion delay, because a request row is written when the invocation
+# ENDS. A disarmed timer still runs and returns early (schedulers.js), and
+# that run succeeds, so the rule watches whether the host is running the
+# timer at all, not whether its flag is on.
+#
+# THE 2-DAY CEILING, AGAIN. A log alert cannot read more than two days, so a
+# weekly timer can only be judged for the day after it was due; outside that
+# day its row is filtered out and it is neither healthy nor overdue. That is
+# the reading the cap permits, the same one alert-cosmos-export-full takes.
+#
+# ONE ALERT, NOT TWENTY-FIVE, WHEN THE CAUSE IS SHARED. More than five timers
+# overdue at once is one fault (the host stopped running timers, as on
+# 2026-08-21, or the request rows stopped matching the names below), so the
+# query collapses them into a single series named "more than five timers at
+# once". `take 1`, not a summarize: a summarize with no `by` returns a row
+# even from empty input, which would hold that series open forever.
+#
+# SILENT WHEN NOTHING AT ALL ARRIVES. If the component has received no
+# request row in 30 minutes (and three timers run every five), the cause is
+# not one timer: the workspace is capped, or the app is down. Without the
+# `Ingesting` guard that would open one alert per timer, twenty-five mails
+# and twenty-five texts for one fault. alert-logs-capacity and
+# alert-api-reachability own those two, and the reachability rule fires on
+# both, so this rule stays quiet rather than repeating them.
+#
+# A timer merged but not yet deployed is due and has never succeeded, so it
+# pages from the first apply after its merge until the code deploy lands.
+# That is true (the host is not running it) and closes with the deploy.
+#
+# `requests`, not AppRequests: the scope is the component, which resolves the
+# classic schema (see alert-app-exceptions). Host.Results stays at
+# Information in host.json precisely so these rows exist (T-514, T-719).
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "timer_overdue" {
+  name                = "alert-timer-overdue-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = azurerm_resource_group.app["web"].location
+  scopes              = [azurerm_application_insights.hcw.id]
+  description         = "A Function App timer that was due has no successful run since. The alert names the timer. The host is not running it, or every run is failing; AppExceptions for that function says which. PLAT-4."
+  severity            = 2
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "P2D"
+
+  # Stateful: each timer's alert opens once and resolves on the first good run
+  # (two clean evaluations, half an hour, at this frequency).
+  auto_mitigation_enabled = true
+
+  criteria {
+    query                   = <<-KQL
+      let Grace = 45m;
+      let Now = now();
+      let Expected = datatable(timer: string, period: timespan, anchor: datetime) [
+      ${local.timer_schedule_rows}
+      ];
+      let Ingesting = toscalar(requests | where timestamp > Now - 30m | count) > 0;
+      let LastSuccess = requests
+        | where tostring(success) =~ "true"
+        | extend timer = replace_string(name, "Functions.", "")
+        | summarize lastSuccess = max(timestamp) by timer;
+      let Overdue = Expected
+        | where Ingesting
+        | extend lastDue = bin_at(Now - Grace, period, anchor)
+        | where lastDue > Now - 1d
+        | join kind=leftouter LastSuccess on timer
+        | where isnull(lastSuccess) or lastSuccess < lastDue - 1m;
+      let Many = toscalar(Overdue | count) > 5;
+      union
+        (Overdue | where not(Many) | project timer),
+        (Overdue | where Many | take 1 | project timer = "more than five timers at once")
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    dimension {
+      name     = "timer"
+      operator = "Include"
+      values   = ["*"]
+    }
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# Lab — an agent has been offline long enough to tell the owner
+# ---------------------------------------------------------------------------
+#
+# checkAgentHealth decides when a lab agent's outage is worth the owner's
+# attention: offline for OFFLINE_NOTIFY_AFTER_MS (five minutes), once per
+# outage, whether the agent went quiet or announced its own shutdown
+# (lib/timers/agent-health.js, #1009). That decision, not the raw mark, is
+# what this reads. The mark after 90 seconds of silence also fires on the
+# nightly 04:30 reboot, which is back in under a minute; the decision does
+# not, which is the reason #1009 moved the owner's message behind it.
+#
+# The decision writes one of three Warning traces, all past host.json's
+# Warning floor and all content-free:
+#
+#   [checkAgentHealth] offline message sent for <n> agent(s)
+#   [checkAgentHealth] offline message for <n> agent(s) not sent (<reason>)…
+#   [checkAgentHealth] owner notification failed: <error>
+#
+# Any of them pages through the action group, so an offline agent reaches the
+# owner by mail and SMS, and most of all when Telegram is the thing that is
+# broken (the second and third lines; alert-telegram-delivery covers the
+# refusal itself). The host-level view is alert-lab-heartbeat in
+# lab-hybrid.tf: the host can be up with the agent down, which is the case
+# this one catches. CHECK_AGENT_HEALTH must be armed for any of it.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_agent_offline" {
+  name                = "alert-lab-agent-offline-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = azurerm_resource_group.app["web"].location
+  scopes              = [azurerm_application_insights.hcw.id]
+  description         = "A lab agent has been offline for five minutes or more: checkAgentHealth decided to tell the owner (sent or not). Public lab jobs wait until it heartbeats again. Check hcw-labs-agent on the lab host. PLAT-4."
+  severity            = 2
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT30M"
+
+  auto_mitigation_enabled = true
+
+  criteria {
+    query                   = "traces | where message startswith \"[checkAgentHealth] offline message\" or message startswith \"[checkAgentHealth] owner notification failed\""
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_app.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [
+    azurerm_role_assignment.alerts_app_workspace,
+    azurerm_role_assignment.alerts_app_component,
+  ]
+}
+
+# ---------------------------------------------------------------------------
+# Jobs — a message landed in the poison queue
+# ---------------------------------------------------------------------------
+#
+# platformJobWorker reads `platform-jobs` on the Functions host account; a
+# message the host cannot hand to it five times is moved to
+# `platform-jobs-poison` (jobs-worker.js) and nothing reads it again. lib/jobs.js
+# makes that rare by never throwing for a job-level failure, so a poisoned
+# message is a crash the job record does not show.
+#
+# ARRIVALS, NOT DEPTH. Queue depth is an account-wide metric with no queue
+# dimension, so it cannot single out the poison queue. Every arrival is a
+# PutMessage to it, which the functions_queue diagnostic setting above
+# already ships to StorageQueueLogs (StorageWrite). AccountName rather than
+# _ResourceId, because the storage table carries the account by name and the
+# queue in the URI, and both are exact. Successful puts only: a message that
+# landed is the incident, and a refused put (no such queue, no role) is
+# not a job the host gave up on.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "jobs_poison" {
+  provider = azurerm.mgmt
+
+  name                = "alert-jobs-poison-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = azurerm_resource_group.platform_mgmt.location
+  scopes              = [azurerm_log_analytics_workspace.hcw.id]
+  description         = "A message landed in the platform-jobs-poison queue: the host failed to hand a job to platformJobWorker five times. Read the poisoned message and AppExceptions for platformJobWorker. PLAT-4."
+  severity            = 2
+
+  evaluation_frequency = "PT15M"
+  # An hour, so a row that is ingested late is still inside some window.
+  window_duration = "PT1H"
+
+  auto_mitigation_enabled = true
+
+  criteria {
+    query                   = <<-KQL
+      StorageQueueLogs
+      | where AccountName == "${azurerm_storage_account.functions.name}"
+      | where OperationName == "PutMessage"
+      | where ObjectKey contains "/platform-jobs-poison" or Uri contains "/platform-jobs-poison/"
+      | where toint(StatusCode) between (200 .. 299)
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
+}
+
+# ---------------------------------------------------------------------------
+# Static Web App — a day heavy enough to exhaust the month's bandwidth
+# ---------------------------------------------------------------------------
+#
+# The site is on the Free plan (frontend.tf, owner decision #341). Free
+# includes 100 GB of bandwidth a month and sells no more, so past it the
+# site stops serving. BytesSent ("Data Out") is the platform metric for it.
+# A metric alert, not a log rule: no ingestion, keeps evaluating through a
+# capped workspace, and the first ten metric time series are free (Azure
+# Retail Prices API, "Alerts Metric Monitored", read 2026-10-10).
+resource "azurerm_monitor_metric_alert" "swa_bandwidth" {
+  name                = "alert-swa-bandwidth-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  scopes              = [azurerm_static_web_app.hcw.id]
+  description         = "The Static Web App sent more than 80% of a thirtieth of the Free plan's 100 GB monthly bandwidth in the last 24 hours. Thirty such days use 80% of the month; past 100 GB Free stops serving. PLAT-4."
+  severity            = 2
+  frequency           = "PT1H"
+  window_size         = "P1D"
+
+  criteria {
+    metric_namespace = "Microsoft.Web/staticSites"
+    metric_name      = "BytesSent"
+    aggregation      = "Total"
+    operator         = "GreaterThan"
+    threshold        = local.static_web_app_daily_bandwidth_alert_bytes
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.ops.id
+  }
+
+  tags = local.tags
+}
+
+# ---------------------------------------------------------------------------
+# Key Vault — calls that did not succeed
+# ---------------------------------------------------------------------------
+#
+# Both vaults' AuditEvent rows, every request that answered 400 or above.
+# Two kinds are excluded by name because they are routine, not because they
+# are quiet:
+#
+#   - Authentication 401. Every Key Vault client's first request carries no
+#     token and is answered with a 401 challenge; Microsoft's own failure
+#     query excludes exactly this pair (Monitor Azure Key Vault, "Are there
+#     any failures?").
+#   - SecretGet 404. The platform resolves every @Microsoft.KeyVault
+#     reference, and the references left unseeded on purpose
+#     (scripts/check-unresolved-secrets.mjs, EXPECTED_UNRESOLVED) answer 404
+#     each time it does.
+#
+# What is left is a 403 (an RBAC refusal or the vault firewall), a 429, a
+# 5xx, or a 404 on something other than a secret read: each one either a
+# misconfiguration or someone reaching for what they may not have.
+#
+# THRESHOLD ASSUMPTION: more than zero in an hour. The baseline has never
+# been measured; the runbook gives the query that measures it. If it is not
+# zero, exclude the named operation, as the two above are, rather than raise
+# the count.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "key_vault_errors" {
+  provider = azurerm.mgmt
+
+  name                = "alert-kv-errors-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = azurerm_resource_group.platform_mgmt.location
+  scopes              = [azurerm_log_analytics_workspace.hcw.id]
+  description         = "A Key Vault request (site or lab vault) answered 400 or above, other than the 401 authentication challenge and a 404 on an unseeded secret: an RBAC or firewall refusal, throttling, or a service error. PLAT-4."
+  severity            = 2
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT1H"
+
+  auto_mitigation_enabled = true
+
+  criteria {
+    query                   = <<-KQL
+      AzureDiagnostics
+      | where ResourceProvider == "MICROSOFT.KEYVAULT"
+      | where tolower(_ResourceId) in (${local.key_vault_resource_ids})
+      | where httpStatusCode_d >= 400
+      | where not(OperationName == "Authentication" and httpStatusCode_d == 401)
+      | where not(OperationName == "SecretGet" and httpStatusCode_d == 404)
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
+}
+
+# ---------------------------------------------------------------------------
+# Key Vault — a secret or key written through the data plane by anyone but
+# the Function App
+# ---------------------------------------------------------------------------
+#
+# A secret written through the data plane (the Admin → API Keys page, the
+# MCP token refresh, the break-glass script) never touches Resource Manager,
+# so no Activity Log alert can see it; only AuditEvent can. The Function
+# App's own identity writes secrets routinely and by design (the 2026-08-29
+# vault-write decision), so its writes are excluded by object id. Any other
+# caller writing, deleting, purging or restoring a secret or key in either
+# vault pages: a human seeding by script, or anything else. Whatever the
+# result: a refused attempt by an unexpected caller is as worth knowing as a
+# write that went through, and the result is in the row for whoever reads it.
+#
+# The caller's object id is one of two columns depending on the token's
+# claims; column_ifexists keeps the query valid if either has never been
+# ingested into this workspace.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "key_vault_data_writes" {
+  provider = azurerm.mgmt
+
+  name                = "alert-kv-data-write-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = azurerm_resource_group.platform_mgmt.location
+  scopes              = [azurerm_log_analytics_workspace.hcw.id]
+  description         = "An identity other than the Function App's wrote, deleted, purged, restored or backed up a secret or key in the site or lab vault through the data plane, or tried to. PLAT-4."
+  severity            = 1
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT1H"
+
+  auto_mitigation_enabled = true
+
+  criteria {
+    query                   = <<-KQL
+      AzureDiagnostics
+      | where ResourceProvider == "MICROSOFT.KEYVAULT"
+      | where tolower(_ResourceId) in (${local.key_vault_resource_ids})
+      | where OperationName in ("SecretSet", "SecretUpdate", "SecretDelete", "SecretPurge", "SecretRestore", "SecretRecover", "SecretBackup", "KeyCreate", "KeyImport", "KeyUpdate", "KeyDelete", "KeyPurge", "KeyRestore", "KeyRecover", "KeyBackup", "KeyRotate", "KeyRotationPolicySet")
+      | extend CallerObjectId = tolower(coalesce(tostring(column_ifexists("identity_claim_oid_g", "")), tostring(column_ifexists("identity_claim_http_schemas_microsoft_com_identity_claims_objectidentifier_g", ""))))
+      | where CallerObjectId != "${lower(azurerm_function_app_flex_consumption.hcw.identity[0].principal_id)}"
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
+}
+
+# ---------------------------------------------------------------------------
+# Activity Log — vault configuration and role assignments
+# ---------------------------------------------------------------------------
+#
+# Free, and no export: an Activity Log alert is evaluated on the Activity Log
+# itself. The alternative the assessment named, a diagnostic setting sending
+# the Activity Log to the workspace plus a log rule, costs a paid rule and
+# ingestion for the same Resource Manager events.
+#
+# Succeeded and Failed only. A write logs Started and then one of those, so
+# without the filter every change would page twice; a Failed write is kept
+# because a refused attempt to grant a role is as worth knowing as a granted
+# one.
+#
+# An Activity Log alert watches the subscription it is in, so role
+# assignments need one rule per subscription that holds a grant this estate
+# depends on: the application subscription, and Management, where the
+# workspace and the alert identities' grants live.
+#
+# Every HCP Terraform apply that creates or deletes a role assignment fires
+# the RBAC rule for that subscription. That is intended: it is the second
+# witness an apply does what its plan said, and the one place an assignment
+# made OUTSIDE an apply shows up.
+
+# Vault configuration: anything Resource Manager writes on either vault or
+# beneath it. That covers the network ACL and every other vault property, a
+# delete, keys and secrets written through Resource Manager, and role
+# assignments scoped to a vault. Scopes are resource ids used as prefixes, so
+# naming the two vaults is the whole filter.
+resource "azurerm_monitor_activity_log_alert" "key_vault_config_writes" {
+  name                = "alert-kv-config-write-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = "global"
+  scopes              = [azurerm_key_vault.hcw.id, azurerm_key_vault.lab_hybrid.id]
+  description         = "Azure Resource Manager wrote to the site or lab Key Vault: its network ACL or properties, a key or secret through ARM, a delete, or a role assignment on it. Expected only from an HCP Terraform apply. PLAT-4."
+
+  criteria {
+    category = "Administrative"
+    statuses = ["Succeeded", "Failed"]
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.ops.id
+  }
+
+  tags = local.tags
+}
+
+resource "azurerm_monitor_activity_log_alert" "rbac_writes_app" {
+  name                = "alert-rbac-write-app-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.app["web"].name
+  location            = "global"
+  scopes              = ["/subscriptions/${var.subscription_app}"]
+  description         = "A role assignment or role definition was created, changed or deleted in the application subscription, or an attempt failed. Expected from an HCP Terraform apply that grants or removes a role; anything else is not. PLAT-4."
+
+  criteria {
+    category       = "Administrative"
+    resource_types = ["Microsoft.Authorization/roleAssignments", "Microsoft.Authorization/roleDefinitions"]
+    statuses       = ["Succeeded", "Failed"]
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.ops.id
+  }
+
+  tags = local.tags
+}
+
+resource "azurerm_monitor_activity_log_alert" "rbac_writes_mgmt" {
+  provider = azurerm.mgmt
+
+  name                = "alert-rbac-write-mgmt-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = "global"
+  scopes              = ["/subscriptions/${var.subscription_mgmt}"]
+  description         = "A role assignment or role definition was created, changed or deleted in the Management subscription, or an attempt failed. Expected from an HCP Terraform apply that grants or removes a role; anything else is not. PLAT-4."
+
+  criteria {
+    category       = "Administrative"
+    resource_types = ["Microsoft.Authorization/roleAssignments", "Microsoft.Authorization/roleDefinitions"]
+    statuses       = ["Succeeded", "Failed"]
+  }
+
+  action {
+    action_group_id = azurerm_monitor_action_group.ops.id
+  }
+
+  tags = local.tags
+}

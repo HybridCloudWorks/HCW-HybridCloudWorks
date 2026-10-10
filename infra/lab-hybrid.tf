@@ -563,3 +563,147 @@ resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_unit_faile
 
   depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
 }
+
+# -----------------------------------------------------------------------------
+# Lab security alerts (PLAT-4, estate review 2026-10-06)
+# -----------------------------------------------------------------------------
+# Two rules on signals this file already ships to the Management workspace and
+# nothing paged on: the seal key's audit rows (the diagnostic setting above)
+# and the auth syslog (the data collection rule). Same provider, resource
+# group, identity and host predicate as the three LAB-2 rules above.
+
+# The seal key used from anywhere but the host. The vault's network stays
+# open on purpose (the note on azurerm_key_vault.lab_hybrid), and the comment
+# there names the audit row's caller address as "the check the open network
+# relies on". This is that check.
+#
+# THE HOST'S ADDRESS IS READ FROM ITS OWN HEARTBEAT, not written here.
+# infra/ does not read the hcw-lab workspace that owns the VPS (ADR 0032
+# decision 1), so no address can be copied in, and a copied one would drift.
+# Heartbeat.ComputerIP is the public address the Azure Monitor Agent reaches
+# Azure from, and Vault on the same host reaches Key Vault from the same one.
+# When the host has written no heartbeat in the window, the list is empty and
+# every wrap or unwrap pages, which is right: no live host, no legitimate
+# caller.
+#
+# ASSUMPTION, recorded because the first fire test settles it: the agent and
+# Vault leave the host by the same address family. If the host's Heartbeat
+# rows carry an IPv6 address while Vault calls over IPv4 (or the reverse),
+# this pages on Vault's own 10-minute health check, at once and every
+# evaluation; the runbook's fire test is also the check for that.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_vault_unwrap" {
+  provider = azurerm.mgmt
+
+  name                = "alert-lab-vault-unwrap-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = azurerm_resource_group.platform_mgmt.location
+  scopes              = [azurerm_log_analytics_workspace.hcw.id]
+  description         = "The lab vault's seal key was asked to wrap or unwrap from an address the lab host has not heartbeated from in the last hour. Vault's identity is in use off the host, or the host's address changed. PLAT-4."
+  severity            = 1
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "PT1H"
+
+  auto_mitigation_enabled = true
+
+  criteria {
+    query                   = <<-KQL
+      let HostAddresses = Heartbeat
+        | ${local.lab_hybrid_host_rows}
+        | distinct ComputerIP;
+      AzureDiagnostics
+      | where ResourceProvider == "MICROSOFT.KEYVAULT"
+      | where tolower(_ResourceId) == "${lower(azurerm_key_vault.lab_hybrid.id)}"
+      | where OperationName in ("KeyUnwrap", "KeyWrap")
+      | where CallerIPAddress !in (HostAddresses)
+    KQL
+    time_aggregation_method = "Count"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
+}
+
+# A burst of failed SSH logins. Port 22 is open to the internet (the hardening
+# role's ufw allowlist) with keys only and fail2ban banning a source after
+# five failures in ten minutes, so a steady trickle of failures is the
+# internet's background, not an incident. A BURST is: the last 15 minutes
+# hold more than four times the average quarter-hour of the 23 hours 45
+# minutes before them, and at least 50 lines. A relative threshold, because
+# the background has never been measured here and a fixed number would be a
+# guess; the floor keeps a quiet day's handful from tripping it.
+#
+# The lines counted are sshd's own (`sshd`, and `sshd-session`, the
+# per-connection process OpenSSH 9.8 split out): an invalid user, a known
+# user that failed to authenticate, and any "Failed …" method. One failed
+# connection can write two of them; the ratio does not care, the floor does,
+# and 50 lines is at most 50 attempts.
+#
+# summarize with no `by` always returns one row, so Burst is always exactly
+# one value, 0 or 1 — the same construction as alert-cosmos-export-full.
+resource "azurerm_monitor_scheduled_query_rules_alert_v2" "lab_hybrid_ssh_burst" {
+  provider = azurerm.mgmt
+
+  name                = "alert-lab-ssh-burst-${var.environment}-${var.region_abbreviation}"
+  resource_group_name = azurerm_resource_group.platform_mgmt.name
+  location            = azurerm_resource_group.platform_mgmt.location
+  scopes              = [azurerm_log_analytics_workspace.hcw.id]
+  description         = "Failed SSH logins on the lab host in the last 15 minutes are more than four times the day's quarter-hour average, and at least 50. A distributed attempt fail2ban's per-source ban does not stop, or a broken key. PLAT-4."
+  severity            = 2
+
+  evaluation_frequency = "PT15M"
+  window_duration      = "P1D"
+
+  auto_mitigation_enabled = true
+
+  criteria {
+    query                   = <<-KQL
+      Syslog
+      | ${local.lab_hybrid_host_rows}
+      | where Facility in ("auth", "authpriv")
+      | where ProcessName startswith "sshd"
+      | where SyslogMessage contains "invalid user" or SyslogMessage contains "authenticating user" or SyslogMessage startswith "Failed "
+      | summarize Recent = countif(TimeGenerated > ago(15m)), Earlier = countif(TimeGenerated <= ago(15m))
+      | project Burst = iff(Recent >= 50 and Recent > 4.0 * Earlier / 95, 1, 0)
+    KQL
+    time_aggregation_method = "Maximum"
+    metric_measure_column   = "Burst"
+    operator                = "GreaterThan"
+    threshold               = 0
+
+    failing_periods {
+      number_of_evaluation_periods             = 1
+      minimum_failing_periods_to_trigger_alert = 1
+    }
+  }
+
+  action {
+    action_groups = [azurerm_monitor_action_group.ops.id]
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.alerts_mgmt.id]
+  }
+
+  tags = local.tags
+
+  depends_on = [azurerm_role_assignment.alerts_mgmt_workspace]
+}

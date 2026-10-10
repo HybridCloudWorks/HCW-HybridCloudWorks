@@ -68,12 +68,21 @@
  * A refusal means reserved. Add it below with the date.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
-const observability = readFileSync(join(repoRoot, 'infra', 'observability.tf'), 'utf8');
+import { INFRA, MIN_TF_FILES } from './terraform-source.mjs';
+
+/**
+ * Every `.tf` file in the module, read one at a time. Until PLAT-4 (#964) this
+ * read observability.tf alone, and the lab rules in lab-hybrid.tf, which
+ * measure columns too, were never checked. Per file rather than one joined
+ * string because `alertBlocks` ends a block at the next `resource`, and a
+ * file boundary is the nearer of the two for the last rule in a file.
+ */
+const tfFiles = readdirSync(INFRA).filter((name) => name.endsWith('.tf'));
+if (tfFiles.length < MIN_TF_FILES) throw new Error(`only ${tfFiles.length} .tf files in ${INFRA}`);
+const moduleBlocks = () => tfFiles.flatMap((name) => alertBlocks(readFileSync(join(INFRA, name), 'utf8')));
 
 /** Column names measured on 2026-09-08 to be refused by KQL. */
 export const MEASURED_RESERVED = new Set([
@@ -199,8 +208,8 @@ export function producedColumns(body) {
   );
 }
 
-describe('scheduled-query alerts in infra/observability.tf', () => {
-  const blocks = alertBlocks(observability);
+describe('scheduled-query alerts in infra/', () => {
+  const blocks = moduleBlocks();
 
   it('finds the alert rules, so a parse that silently matches nothing fails', () => {
     // Without this, every assertion below passes vacuously the day the file
@@ -233,7 +242,7 @@ describe('scheduled-query alerts in infra/observability.tf', () => {
 });
 
 describe('the query/Terraform boundary', () => {
-  const blocks = alertBlocks(observability);
+  const blocks = moduleBlocks();
 
   it('reads columns out of the KQL only, never out of the HCL around it', () => {
     // The regression PR #414 was reviewed for. Before `queryTexts`, the match
@@ -271,6 +280,9 @@ describe('the query/Terraform boundary', () => {
     expect(byName.cosmos_export_full_missing).toEqual(['fulls', 'missing_full']);
     expect(byName.function_response_time).toEqual(['P95DurationMs']);
     expect(byName.logs_daily_cap).toEqual(['IngestedGb']);
+    // From lab-hybrid.tf, which this file did not read before PLAT-4.
+    expect(byName.lab_hybrid_disk_used).toEqual(['UsedPct']);
+    expect(byName.lab_hybrid_ssh_burst).toEqual(['Recent', 'Earlier', 'Burst']);
   });
 });
 

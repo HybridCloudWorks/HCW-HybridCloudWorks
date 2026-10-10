@@ -208,6 +208,64 @@ export const DECLARED = [
     action: 'create',
     reason: 'Telegram refused or failed a send; the owner hears by SMS and mail instead of nobody',
   },
+  // PLAT-4 (#964): the alert conditions the estate assessment found nothing
+  // paging on. Eleven new rules, no other change: they read data already
+  // collected, so no diagnostic setting, grant or identity moves with them.
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.timer_overdue',
+    action: 'create',
+    reason: 'PLAT-4: a timer that was due has no successful run since, one alert per timer',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_agent_offline',
+    action: 'create',
+    reason: 'PLAT-4: a lab agent offline five minutes or more; pages by mail and SMS, not only Telegram',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.jobs_poison',
+    action: 'create',
+    reason: 'PLAT-4: a message landed in platform-jobs-poison',
+  },
+  {
+    address: 'azurerm_monitor_metric_alert.swa_bandwidth',
+    action: 'create',
+    reason: 'PLAT-4: a day of Static Web App bandwidth on pace to use 80% of the Free plan month',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.key_vault_errors',
+    action: 'create',
+    reason: 'PLAT-4: a Key Vault request answered 400 or above, past the routine 401 challenge and unseeded 404s',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.key_vault_data_writes',
+    action: 'create',
+    reason: 'PLAT-4: a secret or key written through the data plane by anyone but the Function App',
+  },
+  {
+    address: 'azurerm_monitor_activity_log_alert.key_vault_config_writes',
+    action: 'create',
+    reason: 'PLAT-4: Resource Manager wrote to either vault (ACL, properties, ARM key or secret writes)',
+  },
+  {
+    address: 'azurerm_monitor_activity_log_alert.rbac_writes_app',
+    action: 'create',
+    reason: 'PLAT-4: a role assignment or definition changed in the application subscription',
+  },
+  {
+    address: 'azurerm_monitor_activity_log_alert.rbac_writes_mgmt',
+    action: 'create',
+    reason: 'PLAT-4: a role assignment or definition changed in the Management subscription',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_vault_unwrap',
+    action: 'create',
+    reason: 'PLAT-4: the lab seal key wrapped or unwrapped from an address the host has not heartbeated from',
+  },
+  {
+    address: 'azurerm_monitor_scheduled_query_rules_alert_v2.lab_hybrid_ssh_burst',
+    action: 'create',
+    reason: 'PLAT-4: failed SSH logins on the lab host at four times the day\'s quarter-hour average',
+  },
   // #1029: the Perplexity key's reference goes; nothing read it.
   // #1043 added the migration AddOn's address for its status proxy. A plain
   // value, not a secret; #1043 did not declare it, so run-tsRi4e3Te4vxe5nX
