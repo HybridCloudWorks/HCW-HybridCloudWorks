@@ -4,6 +4,9 @@ This repository is the HybridCloudWorks website, its Azure backend, supporting
 infrastructure, and delivery source. It runs under a strict documentation and
 review discipline — read this before your first pull request.
 
+Everyone taking part follows the [code of conduct](CODE_OF_CONDUCT.md). For
+questions and requests rather than changes, see [SUPPORT.md](SUPPORT.md).
+
 ## Where things go
 
 | Content | Home |
