@@ -48,8 +48,19 @@
  * The stamps that record a message went (`offlineNotifiedAt`, the "back
  * online" clear) are not guarded: they record a fact about the message, true
  * whatever else changed on the document.
+ *
+ * ONCE AN HOUR, MAIN (#1009). After the three decisions, a run whose last
+ * read of main is DRIFT_READ_INTERVAL_MS old reads main's lab-host/ and
+ * vps-agent/ commits from GitHub into admin_config/lab_drift
+ * (labs/drift.js), starting at the oldest commit an active agent reports
+ * having converged from. Here because this timer already reads the registry
+ * every five minutes and is armed, and the health pulse, which judges the
+ * lag, calls no third party. Last, and never fatal: the marks and messages
+ * above are done before GitHub is asked anything, and a failed read is
+ * recorded on the document and logged at warn, not thrown.
  */
 import { AGENT_DOWN_STATUSES, AGENT_STALE_AFTER_MS } from '../labs.js';
+import { refreshDriftRecord } from '../labs/drift.js';
 
 export const STALE_AFTER_MS = AGENT_STALE_AFTER_MS;
 /** How long an agent must have been offline before the owner is told (#1009). */
@@ -63,11 +74,12 @@ export const AGENT_ONLINE_SOURCE = 'lab_agent_online';
 
 /**
  * The whole registry, once a run. It holds a handful of documents; TOP bounds
- * a mistake. The fields are every one the three decisions read, and `_etag`,
- * which guards the marks those decisions write.
+ * a mistake. The fields are every one the three decisions read, `_etag`,
+ * which guards the marks those decisions write, and `applied`, where the
+ * hourly read of main starts (#1009).
  */
 export const AGENT_HEALTH_QUERY =
-  'SELECT TOP 100 c.id, c.agentId, c.active, c.status, c.lastSeenAt, c.hostname, c.offlineSince, c.offlineNotifiedAt, c.backOnlineAt, c._etag FROM c';
+  'SELECT TOP 100 c.id, c.agentId, c.active, c.status, c.lastSeenAt, c.hostname, c.offlineSince, c.offlineNotifiedAt, c.backOnlineAt, c.applied, c._etag FROM c';
 
 const isPreconditionFailed = (error) => error?.code === 412 || error?.statusCode === 412;
 
@@ -198,7 +210,22 @@ export async function tellOwnerAgentBack({ notifier, agent, backAtMs, log = {}, 
   return false;
 }
 
-export function createAgentHealthCheck({ store, notifier = null, now = () => new Date(), log = {} }) {
+/**
+ * @param {object} deps
+ * @param {object} deps.store
+ * @param {object|null} [deps.notifier]
+ * @param {() => Date} [deps.now]
+ * @param {object} [deps.log]
+ * @param {{ hostCommits: Function }|null} [deps.driftReader] main's history
+ *   (labs/drift.js createMainHistoryReader); null skips the hourly read
+ */
+export function createAgentHealthCheck({
+  store,
+  notifier = null,
+  now = () => new Date(),
+  log = {},
+  driftReader = null,
+}) {
   const patchAgent = (agent, updates, options = {}) =>
     store.patchDoc('lab_agents', agentIdOf(agent), updates, { partitionKey: agentIdOf(agent), ...options });
 
@@ -275,7 +302,32 @@ export function createAgentHealthCheck({ store, notifier = null, now = () => new
       atMs
     );
     const notifiedBack = await tellOwnerBack(plan.notifyBack, atMs);
-    return { markedOffline: marked, heartbeatWon: lost.size, notifiedOffline, notifiedBack };
+    const summary = { markedOffline: marked, heartbeatWon: lost.size, notifiedOffline, notifiedBack };
+    if (driftReader) summary.mainRead = await readMain(agents, atMs);
+    return summary;
+  }
+
+  /**
+   * The hourly read of main for the drift check: 'read', 'failed' or 'not
+   * due'. Never throws; the run's own work is already done.
+   */
+  async function readMain(agents, atMs) {
+    try {
+      const outcome = await refreshDriftRecord({
+        store,
+        reader: driftReader,
+        agents,
+        now: () => new Date(atMs),
+        log,
+      });
+      if (!outcome.read) return 'not due';
+      return outcome.ok ? 'read' : 'failed';
+    } catch (error) {
+      log.warn?.(
+        `[checkAgentHealth] the drift record could not be written (${error?.code ?? 'error'}); the next run tries again`
+      );
+      return 'failed';
+    }
   }
   return { run };
 }

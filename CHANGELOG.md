@@ -19,6 +19,44 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Hybrid Lab: the site raises a host that lags `main`, and a Coder
+  template the host did not publish (#1009, "PR 2: prevent recurrence";
+  the heartbeat half of LAB-4, #950).** On 2026-10-08 the host was six
+  merged pull requests behind and nothing said so. It raises; nothing here
+  re-runs the playbook.
+  - The host records what it converged from. `site.yml`'s last task, after
+    every role, handler and privilege check, writes
+    `/etc/hcw/applied-commit.json` (`root:root` `0644`; the commit, its
+    committer date, the time the run finished;
+    `lab_host_applied_commit_file`). A failed run leaves the previous
+    record and a `--check` run writes nothing.
+  - The agent reads it on every heartbeat (`vps-agent/lib/applied-commit.js`)
+    and sends it as `applied`; `heartbeatAgent` checks it (a full sha, two
+    ISO dates, none more than ten minutes ahead of the site's clock) and
+    stores it on the agent's registry document only when it changed.
+  - `checkAgentHealth` reads `main`'s commits under `lab-host/` and
+    `vps-agent/` from GitHub's public REST API once an hour, from the oldest
+    commit an active host reports, into `admin_config/lab_drift`
+    (`functions/src/lib/labs/drift.js`), through the Drafts import's pinned,
+    redirect-refusing, size-capped fetch. No token and no new secret: the
+    repository is public. The Functions app's own build commit was not used,
+    because deploys are by hand and say nothing about `main`. A failed read
+    keeps the last list and records why (`RATE_LIMITED`, `TIMEOUT`, …), and
+    the run's marks and messages come first and never wait on it.
+  - Two Health Hub probes, recorded by the health pulse every five minutes
+    and shown by the Labs snapshot, judged by the same functions
+    (`functions/src/lib/labs/lab-checks.js`): **Lab host runs main**
+    (`lab-drift`) is critical once a host-path commit has waited more than
+    24 hours unapplied, or when an active host has never reported a commit;
+    **Coder template published** (`coder-template`) is critical when the
+    template Coder serves is not the converged commit's, from two digests
+    the host's daily Coder upkeep report now carries (`templateDigest`, what
+    `push-template` last published; `templateSourceDigest`, the checkout
+    now), and when the automation never published one. A stale read of
+    `main`, or a report without the digests, is unknown, never healthy.
+  - The Labs **Agents** tab shows each host's `commit <8 hex> · converged
+    <time>` and the drift verdict, in its colour.
+
 - **Eleven alert rules for what the estate collected and nothing paged on
   (PLAT-4, #964).** All route to `ag-plat-prod-cus-01`, and all read data
   that already arrives, so none adds ingestion.

@@ -707,6 +707,18 @@ closes the gap, so it follows the run, not the next day.
    https://github.com/saulpatinojr/HCW-HybridCloudWorks.git`, once, and
    every run logs `fetching` with the address it really fetches from.
 
+   The run's last task, **Record the commit this host converged from, for
+   the agent's heartbeat**, is `changed` on every successful run. Within a
+   minute the agent's card on
+   <https://hybridcloudworks.com/admin/labs?tab=agents> reads `commit
+   <first 8 of the sha the run logged> · converged <now>`, and the line
+   under it begins `vps-hostinger-01 converged from` and ends `nothing under
+   lab-host/ or vps-agent/ has merged to main since.` A line that says `main
+   has not been read yet` means `checkAgentHealth` has not run since the
+   Functions deploy that brought the check; it reads `main` on its first run
+   and then hourly, so that line clears within five minutes and is not a
+   failure.
+
 2. Straight after, PowerShell on the workstation. Make the short-lived
    `hcw-setup` token in a pane as step 1 of "The status token for the
    site" in `lab-host/README.md` shows, paste this line, then paste the

@@ -138,14 +138,54 @@ export function isAgentOnline(agent, nowMs) {
   return lastSeenMs > 0 && nowMs - lastSeenMs < AGENT_STALE_AFTER_MS;
 }
 
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:?\d{2})$/;
+const isDateTime = (value) =>
+  typeof value === 'string' && ISO_DATE_TIME.test(value) && Number.isFinite(Date.parse(value));
+
+/**
+ * The commit an agent's host last converged from, when its registry document
+ * holds a whole record of it, or null (#1009). lib/lab-agent.js writes
+ * `applied` from the heartbeat; the drift check (labs/drift.js) and the
+ * snapshot below read it through this, so a half-written or hand-edited
+ * record is no record, said the same way everywhere.
+ *
+ * @returns {{ commit: string, committedAt: string, appliedAt: string } | null}
+ */
+export function appliedOf(agent) {
+  const applied = agent?.applied;
+  if (!applied || typeof applied !== 'object') return null;
+  if (typeof applied.commit !== 'string' || !COMMIT_SHA.test(applied.commit)) return null;
+  if (!isDateTime(applied.committedAt) || !isDateTime(applied.appliedAt)) return null;
+  return applied;
+}
+
+/**
+ * The lab recurrence checks for the snapshot (labs/lab-checks.js), imported
+ * when a snapshot is built rather than with this module: this module is the
+ * online rule, which the browser-side tests load through
+ * health/pulse-checks.js, and the checks bring the Cosmos and Key Vault
+ * clients with them.
+ */
+const readLabChecksLazily = async (...args) =>
+  (await import('./labs/lab-checks.js')).readLabChecks(...args);
+
 /**
  * @param {object} deps
  * @param {{ requireRole: Function }} deps.guard
  * @param {{ queryDocs: Function, readDoc: Function, upsertDoc: Function, patchDoc: Function }} deps.store
  * @param {() => Date} [deps.now]
  * @param {() => string} [deps.uuid]
+ * @param {(store: object, nowMs: number, agentRows: object[]) => Promise<{checks: object, drift: object}>} [deps.readChecks]
+ *   the lab recurrence checks (labs/lab-checks.js readLabChecks); tests only
  */
-export function createLabHandlers({ guard, store, now = () => new Date(), uuid = randomUUID }) {
+export function createLabHandlers({
+  guard,
+  store,
+  now = () => new Date(),
+  uuid = randomUUID,
+  readChecks = readLabChecksLazily,
+}) {
   return {
     /** POST /api/enqueueLabJob — editor; allowlisted type + payload cap. */
     async enqueueLabJob(request, context) {
@@ -270,8 +310,19 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
           store.queryDocs('lab_jobs', "SELECT VALUE COUNT(1) FROM c WHERE c.status = 'queued'", []),
         ]);
 
+        // The recurrence checks (#1009): whether each host runs main and
+        // whether Coder serves its template, judged by the same functions the
+        // health pulse records them with (labs/lab-checks.js). Each failed read
+        // is that check's `unknown`, and even the checks failing to load at
+        // all leaves the snapshot standing, without them; never a 500.
+        const labChecks = await readChecks(store, nowMs, agentRows).catch((error) => {
+          context.warn?.(`getLabsSnapshot: the lab checks could not be read (${error?.code ?? 'error'})`);
+          return { checks: {}, drift: { agents: {} } };
+        });
+
         const agents = agentRows.map((data) => {
           const lastSeenMs = toMs(data.lastSeenAt);
+          const applied = appliedOf(data);
           return {
             agentId: data.id,
             hostname: data.hostname || null,
@@ -289,6 +340,16 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
             active: data.active === true,
             oid: typeof data.oid === 'string' ? data.oid : null,
             registeredAt: toIsoOrNull(data.registeredAt),
+            // The commit the host last converged from, as its heartbeat
+            // reported it, and the drift verdict for this agent (#1009).
+            applied: applied
+              ? {
+                  commit: applied.commit,
+                  committedAt: applied.committedAt,
+                  appliedAt: applied.appliedAt,
+                }
+              : null,
+            drift: labChecks.drift.agents?.[data.id] ?? null,
           };
         });
 
@@ -320,6 +381,9 @@ export function createLabHandlers({ guard, store, now = () => new Date(), uuid =
             payloadEncodings: spec.payloadEncodings,
           })),
           statuses: JOB_STATUSES,
+          // By Health Hub probe id: the browser's run of each lab check reads
+          // its verdict here (probeRunners.js runLabCheck).
+          checks: labChecks.checks,
           generatedAt: now().toISOString(),
         });
       } catch (error) {

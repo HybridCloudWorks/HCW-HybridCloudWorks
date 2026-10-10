@@ -74,6 +74,20 @@ describe('every call', () => {
     });
   });
 
+  it('carries the applied-commit record on a heartbeat when there is one, and leaves it out when there is not', async () => {
+    const applied = {
+      commit: '0123456789abcdef0123456789abcdef01234567',
+      committedAt: '2026-10-09T23:02:14-05:00',
+      appliedAt: '2026-10-10T04:31:07Z',
+    };
+    const { api, calls } = client();
+    await api.heartbeat({ status: 'idle', activeJobs: 0, hostname: 'h', version: '2.0.0', applied });
+    await api.heartbeat({ status: 'idle', activeJobs: 0, hostname: 'h', version: '2.0.0', applied: null });
+
+    assert.deepEqual(calls[0].body.applied, applied);
+    assert.equal(Object.hasOwn(calls[1].body, 'applied'), false);
+  });
+
   it('cannot be made to send a different agentId through a body field', async () => {
     // The spread puts agentId first, so a caller-supplied key could replace
     // it. The three methods pass only named fields, which is what keeps it.

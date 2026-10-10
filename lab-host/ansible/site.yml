@@ -105,3 +105,36 @@
     - name: Check the container runtime's privilege separation
       ansible.builtin.import_role:
         name: privilege_checks
+
+    # Last of all, once every role, the handlers they notified and the checks
+    # above have passed: the commit this host now runs, for the agent to send
+    # on its heartbeat and the site to compare with main (#1009; the
+    # heartbeat half of LAB-4, #950). A run that fails before here leaves the
+    # previous record, so the record only ever names a commit the whole
+    # playbook converged from, and the site keeps saying the host is behind.
+    # Check mode reads the commit and writes nothing.
+    - name: Read the commit this playbook runs from, and its committer date
+      ansible.builtin.command:
+        argv:
+          - git
+          - -C
+          - "{{ playbook_dir }}"
+          - log
+          - -1
+          - --format=%H%n%cI
+      register: lab_host_applied_commit
+      changed_when: false
+      check_mode: false
+
+    - name: Record the commit this host converged from, for the agent's heartbeat
+      ansible.builtin.copy:
+        dest: "{{ lab_host_applied_commit_file }}"
+        content: "{{ lab_host_applied_commit_record | to_nice_json }}\n"
+        owner: root
+        group: root
+        mode: "0644"
+      vars:
+        lab_host_applied_commit_record:
+          commit: "{{ lab_host_applied_commit.stdout_lines[0] }}"
+          committedAt: "{{ lab_host_applied_commit.stdout_lines[1] }}"
+          appliedAt: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"

@@ -16,6 +16,14 @@ lab_host_ubuntu_releases:
   resolute: "26.04"
   noble: "24.04"
 
+# Where site.yml's last task records the commit this host converged from:
+# root:root 0644, so the agent (hcw-labs-agent) can read it and not change it.
+# The agent sends it on every heartbeat (vps-agent/lib/applied-commit.js, which
+# names the same path and whose test holds the two equal), and the site raises
+# a host that lags main's lab-host/ and vps-agent/ changes by more than a day
+# (#1009; the heartbeat half of LAB-4, #950).
+lab_host_applied_commit_file: /etc/hcw/applied-commit.json
+
 # Hardening. SSH and the two web ports are the only inbound ports: vps-agent is
 # pull-based and node_exporter listens on loopback. The admin user's keys
 # default to whatever the provisioner installed for root, so the first run

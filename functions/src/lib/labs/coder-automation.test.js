@@ -210,6 +210,11 @@ describe('the body is exactly the contract, or a 400 with a sentence', () => {
     ['a version with a Coder key inside it', bodyWith({ report: { ...REPORT, templateVersion: `v1 ${TOKEN}` } }), /templateVersion must not carry a Coder API key/],
     ['an error that is too long', bodyWith({ report: { ...REPORT, lastError: 'e'.repeat(301) } }), /at most 300 characters/],
     ['an error that is not a string', bodyWith({ report: { ...REPORT, lastError: { message: 'x' } } }), /lastError must be a string/],
+    // The template digests (#1009): the host's SHA-256, 64 lower-case hex.
+    ['a template digest that is too short', bodyWith({ report: { ...REPORT, templateDigest: 'a'.repeat(63) } }), /report\.templateDigest must be a SHA-256 digest/],
+    ['a template digest in upper case', bodyWith({ report: { ...REPORT, templateDigest: 'A'.repeat(64) } }), /report\.templateDigest must be a SHA-256 digest/],
+    ['a source digest that is not a string', bodyWith({ report: { ...REPORT, templateSourceDigest: 7 } }), /report\.templateSourceDigest must be a SHA-256 digest/],
+    ['a source digest carrying a Coder key', bodyWith({ report: { ...REPORT, templateSourceDigest: TOKEN } }), /report\.templateSourceDigest must be a SHA-256 digest/],
     // A nine-character id, built at run time like TOKEN.
     ['a token of the wrong shape', bodyWith({ statusToken: TOKEN.slice(1) }), /statusToken is not a Coder API key/],
     // The host's clock, checked (review of #1030): NOW is 05:00:00Z.
@@ -560,6 +565,25 @@ describe('the report document: one, merged under its ETag', () => {
     expect(t.store.replaceDocIfMatch).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps the published template digest until a report names another, and replaces the checkout digest every report (#1009)', async () => {
+    const published = 'a'.repeat(64);
+    const checkout = 'b'.repeat(64);
+    const t = setup();
+    await t.send(
+      bodyWith({ report: { ...REPORT, templateDigest: published, templateSourceDigest: published } })
+    );
+    expect(stored(t.store)).toMatchObject({ templateDigest: published, templateSourceDigest: published });
+
+    await t.send(bodyWith({ report: { checkedAt: '2026-10-08T05:05:00Z', templateSourceDigest: checkout } }));
+    expect(stored(t.store)).toMatchObject({ templateDigest: published, templateSourceDigest: checkout });
+
+    // A report from a host that cannot read its checkout says nothing about it,
+    // and an earlier checkout's digest is not this one's.
+    await t.send(bodyWith({ report: { checkedAt: '2026-10-08T05:06:00Z' } }));
+    expect(stored(t.store).templateDigest).toBe(published);
+    expect(stored(t.store)).not.toHaveProperty('templateSourceDigest');
+  });
+
   it('removes anything shaped like a Coder key from lastError before storing it', async () => {
     const t = setup();
     await t.send(bodyWith({ report: { ...REPORT, lastError: `coder said no to ${TOKEN} at 04:59` } }));
@@ -726,6 +750,8 @@ describe('GET /api/cms/labs/coder-automation (editor)', () => {
         rotationTokenExpiresAt: null,
         templatePushedAt: null,
         templateVersion: 'brave_turing4',
+        templateDigest: null,
+        templateSourceDigest: null,
         lastError: null,
       },
     });

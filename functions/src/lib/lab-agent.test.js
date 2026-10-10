@@ -8,7 +8,12 @@
  * status that hides work, or grant itself new capabilities.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createLabAgentHandlers, AGENT_TERMINAL_STATUSES, OUTPUT_CAP_BYTES } from './lab-agent.js';
+import {
+  createLabAgentHandlers,
+  AGENT_TERMINAL_STATUSES,
+  OUTPUT_CAP_BYTES,
+  parseAppliedRecord,
+} from './lab-agent.js';
 import { AGENT_ONLINE_SOURCE, BACK_ONLINE_SENT } from './timers/agent-health.js';
 
 const context = { log: vi.fn(), error: vi.fn(), warn: vi.fn() };
@@ -393,6 +398,71 @@ describe('heartbeatAgent', () => {
     await h.heartbeatAgent(req({ agentId: 'vps-1', status: 'pwned' }), context);
 
     expect(store.patchDoc.mock.calls[0][2].status).toBe('idle');
+  });
+});
+
+describe('heartbeatAgent: the applied commit (#1009)', () => {
+  const APPLIED = {
+    commit: '0123456789abcdef0123456789abcdef01234567',
+    committedAt: '2026-08-09T22:02:14-05:00',
+    appliedAt: '2026-08-10T03:31:07Z',
+  };
+  // Stored normalised to UTC, as every date the site keeps.
+  const STORED = {
+    commit: APPLIED.commit,
+    committedAt: '2026-08-10T03:02:14.000Z',
+    appliedAt: '2026-08-10T03:31:07.000Z',
+  };
+
+  it('stores the host’s applied commit on its registry document, as one field', async () => {
+    const store = emptyStore();
+    await make(allowGuard(), store).heartbeatAgent(req({ agentId: 'vps-1', applied: APPLIED }), context);
+    const updates = store.patchDoc.mock.calls[0][2];
+    expect(updates.applied).toEqual(STORED);
+    expect(Object.keys(updates).filter((key) => key.startsWith('applied'))).toEqual(['applied']);
+  });
+
+  it('writes nothing for it when the stored record already says the same', async () => {
+    const store = emptyStore();
+    await make(allowGuard({ applied: STORED }), store).heartbeatAgent(
+      req({ agentId: 'vps-1', applied: APPLIED }),
+      context
+    );
+    expect(store.patchDoc.mock.calls[0][2]).not.toHaveProperty('applied');
+  });
+
+  it('keeps the stored record when a heartbeat carries none, or a malformed one', async () => {
+    for (const applied of [
+      undefined,
+      null,
+      'abc',
+      { ...APPLIED, commit: 'abc' },
+      { ...APPLIED, commit: APPLIED.commit.toUpperCase() },
+      { ...APPLIED, appliedAt: '2026-08-10' },
+      { ...APPLIED, committedAt: 'yesterday' },
+    ]) {
+      const store = emptyStore();
+      await make(allowGuard({ applied: STORED }), store).heartbeatAgent(
+        req({ agentId: 'vps-1', applied }),
+        context
+      );
+      const updates = store.patchDoc.mock.calls[0][2];
+      expect(updates, JSON.stringify(applied)).not.toHaveProperty('applied');
+      expect(Object.values(updates).every((v) => v !== undefined)).toBe(true);
+    }
+  });
+
+  it('refuses dates ahead of the site’s clock by more than the skew the Coder report allows', () => {
+    // NOW is 04:00:00Z; ten minutes is the allowance.
+    expect(parseAppliedRecord({ ...APPLIED, appliedAt: '2026-08-10T04:09:59Z' }, NOW.getTime())).not.toBeNull();
+    expect(parseAppliedRecord({ ...APPLIED, appliedAt: '2026-08-10T04:10:01Z' }, NOW.getTime())).toBeNull();
+    expect(parseAppliedRecord({ ...APPLIED, committedAt: '2099-01-01T00:00:00Z' }, NOW.getTime())).toBeNull();
+  });
+
+  it('takes only the three fields, whatever else the body carries', () => {
+    expect(
+      parseAppliedRecord({ ...APPLIED, capabilities: ['terraform-validate'], active: true }, NOW.getTime())
+    ).toEqual(STORED);
   });
 });
 

@@ -47,6 +47,7 @@ import { createCertImageCleanup } from '../lib/timers/cert-image-cleanup.js';
 import { createSkillsHubScrape } from '../lib/timers/skills-hub.js';
 import { createMcpTokenRefresh } from '../lib/timers/mcp-token-refresh.js';
 import { createAgentHealthCheck } from '../lib/timers/agent-health.js';
+import { createMainHistoryReader } from '../lib/labs/drift.js';
 import { createTempStorageCleanup } from '../lib/timers/temp-storage.js';
 import { createForgeScheduled } from '../lib/timers/forge-scheduled.js';
 import { findDuplicateContent, buildDedupFields } from '../lib/cms/content-dedup.js';
@@ -259,11 +260,14 @@ timer('refreshPlaudToken', 'REFRESH_PLAUD_TOKEN', '0 0 */12 * * *', (context) =>
 
 timer('checkAgentHealth', 'CHECK_AGENT_HEALTH', '0 */5 * * * *', (context) =>
   // The notifier is how the owner hears that the lab closed (LAB-2); the
-  // mark itself never depends on it.
+  // mark itself never depends on it. The drift reader is main's lab-host/
+  // and vps-agent/ history, read once an hour for the lab-drift check
+  // (#1009, labs/drift.js), after the marks and messages.
   createAgentHealthCheck({
     store,
     notifier: createNotifier({ store, log: context }),
     log: context,
+    driftReader: createMainHistoryReader(),
   }).run()
 );
 

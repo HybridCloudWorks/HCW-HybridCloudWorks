@@ -329,11 +329,17 @@ directory. Until the credential exists the unit is skipped by
    Key Vault reference can take 24 hours to pick up a new version). The
    rotation credential and any token with other scopes are never touched.
 5. **Reports** to the site, every run, with the same CLI and no token:
-   `{"report":{"checkedAt","statusTokenExpiresAt","statusTokenRotatedAt","rotationTokenExpiresAt","templatePushedAt","templateVersion","lastError"}}`,
+   `{"report":{"checkedAt","statusTokenExpiresAt","statusTokenRotatedAt","rotationTokenExpiresAt","templatePushedAt","templateVersion","templateDigest","templateSourceDigest","lastError"}}`,
    each time ISO 8601 UTC to the second, and any field it does not know
    left out: `statusTokenExpiresAt` only once a delivered token is live,
    `lastError` only when something failed, at most 300 characters of the
-   helper's own words, never Coder's or the CLI's.
+   helper's own words, never Coder's or the CLI's. `templateDigest` is the
+   SHA-256 `push-template` recorded for its last publish (below), and
+   `templateSourceDigest` the same digest of `/opt/hcw-src` as it is now,
+   the commit the host converged from; the site's Health Hub raises a pair
+   that differs as **Coder template published**, critical: Coder serves a
+   template the host's last `bootstrap.sh` run did not publish (#1009,
+   finding 8).
 6. Records what it did in `/var/lib/hcw-coder-automation/state.json`
    (`root` `0600`; the live token's id and name, the template's publish,
    the last error, never a token: a token's id is the part before the dash,
@@ -390,8 +396,8 @@ previous template version names. It keeps a SHA-256 of exactly what
 that differs from its last successful publish, so a failed publish is
 retried by the next run and an unchanged one costs nothing. It hands the
 push helper the credential on stdin, as the owner's line hands it the
-owner's token, records `templatePushedAt` and `templateVersion` for the
-report, and prints `hcw-coder-automation: published hcw-lab with the
+owner's token, records `templatePushedAt`, `templateVersion` and that
+SHA-256 (`templateDigest`) for the report, and prints `hcw-coder-automation: published hcw-lab with the
 rotation credential; active version <name>`, which is the task's
 `changed_when`. Exit 3, with a line saying to seed, when there is no
 credential or Coder refuses it: the run carries on. Any other failure fails
