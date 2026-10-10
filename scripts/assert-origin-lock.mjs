@@ -38,10 +38,12 @@
  *   5. An Allow rule is named neither `cloudflare-*` (Terraform's) nor `ci-*`
  *      (a workflow's per-run window). It was added outside Terraform.
  *   6. Unmatched requests are refused and a declared Cloudflare range has no
- *      Allow rule that takes effect: none at all, or one that a Deny rule with
- *      a smaller priority number (evaluated first) overrides. Cloudflare's
- *      edges in that range are refused at the origin; with none admitted the
- *      API is unreachable through Cloudflare, which is not a lock that works.
+ *      Allow rule that takes effect: none at all, one that a Deny rule
+ *      evaluated first overrides (a smaller priority number, or the same
+ *      number listed earlier), or one narrowed by a header filter Terraform
+ *      does not write. Cloudflare's edges in that range are refused at the
+ *      origin; with none admitted the API is unreachable through Cloudflare,
+ *      which is not a lock that works.
  *   7. `--window-closed <rule>` was given and that rule is still present: the
  *      caller's own window did not close.
  *
@@ -137,17 +139,38 @@ export function overlaps(address, range) {
 /**
  * The first Deny rule App Service evaluates before `allow` that refuses any
  * part of `range`, or undefined. Rules are evaluated in ascending priority,
- * so a Deny with a smaller number wins over the Allow, whatever the Allow
- * says.
+ * and rules of equal priority in the order they are listed, so a Deny with a
+ * smaller number, or the same number listed earlier, wins over the Allow
+ * whatever the Allow says.
  */
 function shadowingDeny(rules, allow, range) {
   const at = Number(allow?.priority);
   if (!Number.isFinite(at)) return undefined;
+  const allowIndex = rules.indexOf(allow);
+  const first = (deny) => {
+    const priority = Number(deny?.priority);
+    return priority < at || (priority === at && rules.indexOf(deny) < allowIndex);
+  };
   return rules
     .filter(isDeny)
-    .filter((deny) => Number(deny?.priority) < at)
-    .sort((x, y) => Number(x.priority) - Number(y.priority))
+    .filter(first)
+    .sort((x, y) => Number(x.priority) - Number(y.priority) || rules.indexOf(x) - rules.indexOf(y))
     .find((deny) => addressesOf(deny).some((address) => overlaps(address, range)));
+}
+
+/**
+ * A rule's header filter, when it has one. Terraform writes none on the
+ * Cloudflare rules, and App Service admits through a filtered rule only the
+ * requests whose headers match, so a filtered rule is not unconditional.
+ */
+export function headerFilterOf(rule) {
+  const headers = rule?.headers;
+  if (!headers || typeof headers !== 'object') return null;
+  const names = Object.keys(headers).filter((name) => {
+    const values = headers[name];
+    return Array.isArray(values) ? values.length > 0 : values !== null && values !== undefined && values !== '';
+  });
+  return names.length > 0 ? names : null;
 }
 
 /**
@@ -212,17 +235,25 @@ function allowRuleProblems(rule, declared) {
 
   if (name.startsWith('cloudflare-')) {
     const foreign = addresses.filter((address) => !declared.has(address));
-    admitted.push(...addresses.filter((address) => declared.has(address)));
-    return {
-      problems:
-        foreign.length === 0
-          ? []
-          : [
-              `The Allow rule ${label} admits \`${foreign.join(', ')}\`, which is not a Cloudflare range ` +
-                `\`infra/variables.tf\` declares (\`${RANGES_VARIABLE}\`). A rule's name is not what makes it Cloudflare's.`,
-            ],
-      admitted,
-    };
+    const problems =
+      foreign.length === 0
+        ? []
+        : [
+            `The Allow rule ${label} admits \`${foreign.join(', ')}\`, which is not a Cloudflare range ` +
+              `\`infra/variables.tf\` declares (\`${RANGES_VARIABLE}\`). A rule's name is not what makes it Cloudflare's.`,
+          ];
+    // A header filter Terraform does not write: the rule admits only the
+    // requests that match it, so its ranges are not counted as admitted.
+    const filtered = headerFilterOf(rule);
+    if (filtered) {
+      problems.push(
+        `The Allow rule ${label} carries a header filter (\`${filtered.join(', ')}\`) that Terraform does not ` +
+          'write, so it admits only the requests that match it and its ranges are not counted as admitted.'
+      );
+    } else {
+      admitted.push(...addresses.filter((address) => declared.has(address)));
+    }
+    return { problems, admitted };
   }
   if (name.startsWith('ci-')) {
     // One address, and one host: two /32s in one rule admit a second caller
@@ -325,7 +356,7 @@ export function report(doc, options = {}) {
   const declared = new Set(options.declaredRanges ?? []);
   const allows = doc.ipSecurityRestrictions.filter(isAllow);
   const admitted = new Set();
-  for (const rule of allows.filter((r) => String(r?.name ?? '').startsWith('cloudflare-'))) {
+  for (const rule of allows.filter((r) => String(r?.name ?? '').startsWith('cloudflare-') && !headerFilterOf(r))) {
     for (const address of addressesOf(rule)) {
       if (declared.has(address) && !shadowingDeny(doc.ipSecurityRestrictions, rule, address)) admitted.add(address);
     }

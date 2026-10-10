@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addressesOf,
   declaredCloudflareRanges,
+  headerFilterOf,
   ipv4Interval,
   isSingleAddress,
   LOCK_VARIABLE,
@@ -84,6 +85,18 @@ describe('declaredCloudflareRanges', () => {
 
   it('finds nothing in a module without the variable, rather than guessing', () => {
     expect(declaredCloudflareRanges('variable "other" {\n  default = ["1.2.3.0/24"]\n}\n')).toEqual([]);
+  });
+});
+
+describe('headerFilterOf', () => {
+  it.each([
+    [null, null],
+    [{}, null],
+    [{ 'x-forwarded-host': [] }, null],
+    [{ 'x-forwarded-host': ['example.com'] }, ['x-forwarded-host']],
+    [{ 'x-azure-fdid': ['00000000-0000-0000-0000-000000000001'], 'x-fd-healthprobe': [] }, ['x-azure-fdid']],
+  ])('%j has a filter on %j', (headers, expected) => {
+    expect(headerFilterOf({ headers })).toEqual(expected);
   });
 });
 
@@ -201,6 +214,32 @@ describe('lockProblems', () => {
 
   it('ignores a Deny evaluated after the Cloudflare rules, as Terraform writes its own deny-all', () => {
     expect(problemsOf(locked([rule('late-deny', '173.245.48.0/24', 'Deny', 70000)]))).toEqual([]);
+  });
+
+  it('counts a Deny of the same priority listed before the Allow as evaluated first', () => {
+    // App Service evaluates equal priorities in listed order.
+    const doc = locked();
+    const first = doc.ipSecurityRestrictions[0];
+    doc.ipSecurityRestrictions.unshift(rule('same-priority-deny', first.ip_address, 'Deny', first.priority));
+    const problems = problemsOf(doc);
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('`same-priority-deny`');
+  });
+
+  it('ignores a Deny of the same priority listed after the Allow', () => {
+    const doc = locked();
+    const first = doc.ipSecurityRestrictions[0];
+    doc.ipSecurityRestrictions.splice(1, 0, rule('same-priority-deny', first.ip_address, 'Deny', first.priority));
+    expect(problemsOf(doc)).toEqual([]);
+  });
+
+  it('does not count a header-filtered Cloudflare rule as admitting its range', () => {
+    const doc = locked();
+    doc.ipSecurityRestrictions[0] = { ...doc.ipSecurityRestrictions[0], headers: { 'x-forwarded-host': ['example.com'] } };
+    const problems = problemsOf(doc);
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toContain('header filter (`x-forwarded-host`)');
+    expect(problems[1]).toContain(`\`${RANGES[0]}\``);
   });
 
   it('fails an Allow rule added outside Terraform, naming it', () => {
