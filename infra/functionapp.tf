@@ -971,11 +971,11 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 #   - Re-applying converges. Both are replaced through replace_triggered_by,
 #     and Terraform destroys the old instances before the Function App update
 #     they depend on (DestroyEdgeTransformer, internal/terraform/
-#     transform_destroy_edge.go). A failed or skipped create therefore leaves
-#     the list or the strip absent from state, and the next plan creates it,
-#     whether or not the Function App still shows a change. That plan shows
-#     them as `create` rather than the permanent `replace`, so
-#     tfc-plan-check.yml reports them; it is the repair, and the owner's read
+#     transform_destroy_edge.go). A skipped create therefore leaves the list
+#     or the strip absent from state, and one whose own call failed may leave
+#     it tainted, so the next plan creates or replaces it whether or not the
+#     Function App still shows a change. That plan is not the permanent diff,
+#     so tfc-plan-check.yml reports it; it is the repair, and the owner's read
 #     after it is docs/runbooks/deployment-runbook.md, section 4 step 1.
 
 # SECRETS-IN-STATE: THIS EXPORT IS THE WHOLE LIVE SETTINGS MAP (T-723).

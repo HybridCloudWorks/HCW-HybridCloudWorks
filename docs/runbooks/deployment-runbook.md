@@ -522,10 +522,11 @@ problem means production is already degraded rather than merely unchanged.
 
    `azurerm` in the first, or `1` in the second, is the stranded state the
    three recorded incidents came from. **Re-apply to convergence; do not edit
-   either setting by hand.** The next plan will not look like the permanent
-   diff: a strip that did not complete is absent from state, so the plan
-   shows the settings read and the strip as `create` rather than `replace`,
-   and `tfc-plan-check.yml` reports them. That plan is the repair. Both reads
+   either setting by hand.** The next plan may not look like the permanent
+   diff. A settings read or strip that was skipped is absent from state, and
+   one whose own call failed may be tainted, so the plan creates or replaces
+   it without the usual trio and `tfc-plan-check.yml` reports the difference.
+   That plan is the repair. Both reads
    are also what `deploy-functions.yml` asserts before it syncs triggers, and
    what `monitor-functions-registered.yml` reports on its timer, so a
    stranded host that nobody reads is caught at the next deploy or monitor
