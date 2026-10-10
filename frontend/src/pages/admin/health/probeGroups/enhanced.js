@@ -43,6 +43,30 @@ export const ENHANCED_PROBES = [
     href: LABS,
     run: () => runLabCheck('coder-template'),
   }),
+  liveProbe({
+    id: 'lab-canary',
+    label: 'Lab job canary',
+    hub: 'enhanced',
+    covers:
+      'One real shell-echo job an hour, enqueued and waited for until the agent has run it and reported the payload back; the job is deleted after.',
+    impact: 'Lab jobs, the public Validate on the lab included, are not running.',
+    action:
+      'Read the agent on the lab host (journalctl -u hcw-labs-agent); arm LAB_CANARY if the card says it has not run.',
+    href: LABS,
+    run: () => runLabCheck('lab-canary'),
+  }),
+  liveProbe({
+    id: 'coder-token',
+    label: 'Coder status token',
+    hub: 'enhanced',
+    covers:
+      'Whether Coder accepts CODER-STATUS-TOKEN, from its answers to the labs status read and the Integrations card.',
+    impact: 'The labs card cannot show its templates or running workspaces.',
+    action:
+      'Check the host’s Coder automation on Integrations → Hybrid Lab; it renews the token daily.',
+    href: LABS,
+    run: () => runLabCheck('coder-token'),
+  }),
   sessionProbe({
     id: 'labs-noop',
     label: 'Labs job round trip',

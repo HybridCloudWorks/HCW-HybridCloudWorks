@@ -762,6 +762,47 @@ closes the gap, so it follows the run, not the next day.
    active version` in its output, or `ok` with `nothing was published` when
    the template did not change.
 
+## The lab canary and the status-token check
+
+Two Health Hub probes watch what #1009 found broken with nothing saying so,
+beside **Lab host runs main** and **Coder template published** (above). All
+four are on the **Checks** tab,
+<https://hybridcloudworks.com/admin/health?tab=checks>, under Enhanced, and
+the health pulse records each every five minutes.
+
+- **Lab job canary.** Once an hour, at 20 past, `labCanary` enqueues one
+  `shell-echo` job whose payload is `hcw-canary <job id>`, waits up to 150
+  seconds for the agent to claim it, run it and report the payload back, and
+  deletes the job. It enqueues nothing when no active agent registered for
+  `shell-echo` is online. Healthy reads `A shell-echo job ran end to end <n>
+  min ago: claimed after <n> s, done <n> s later.` Offline means nothing ran
+  it (no agent online, or nobody claimed it); critical means it ran and
+  failed, echoed something else, or the agent's registration lacks
+  `shell-echo` (re-register it on the Labs **Agents** tab with that job type
+  ticked). A job still running at the deadline is left to finish and
+  deleted by the next run, and no second one is enqueued meanwhile.
+- **Coder status token.** Every read of Coder with `CODER-STATUS-TOKEN` (the
+  labs status, through its one-minute cache, and the Integrations card's
+  expiry read) records Coder's answer. Critical from the first 401 or 403
+  until Coder accepts the token again, naming since when; unknown when
+  nothing has read Coder for a day. The canary reads the labs status once an
+  hour, so with it armed the evidence stays fresh. A 401 also writes a
+  warning line starting `coder-status: Coder refused CODER_STATUS_TOKEN
+  (401)` (no alert rule pages on it yet; "What these still do not cover" in
+  `alerting-and-support.md` has the query). The fix is the automatic renewal
+  below, run now with `--rotate-now`.
+
+**Arming the canary.** It is a real job on the host every hour, so it is off
+until the owner arms it. In the browser, open
+<https://app.terraform.io/app/hcw/workspaces/hcw-azure/variables>, edit
+`enabled_timers` (HCL) to add `"LAB_CANARY"` to the list, save, and start a
+run from <https://app.terraform.io/app/hcw/workspaces/hcw-azure/runs>. The
+plan's one change beyond the usual three replacements is
+`FEATURE_FLAG_LAB_CANARY` from `false` to `true` on the Function App, which
+the plan check reads as `DECLARED`. Confirm it. Within the hour, at 20
+past, the **Lab job canary** card turns healthy; until its first run it
+reads `The lab canary has not run`.
+
 ## Automatic renewal
 
 Owner approval 2026-10-08. The lab host renews the site's Coder status

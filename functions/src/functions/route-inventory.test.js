@@ -509,9 +509,12 @@ describe('non-HTTP triggers', () => {
     // FEATURE_FLAG_LABS_WEEKLY_ROLLUP; the twenty-fourth is sendReminders
     // (schedulers.js, owner request 2026-10-06), behind
     // FEATURE_FLAG_SEND_REMINDERS; the twenty-fifth is healthPulse
-    // (schedulers.js, #1010), behind FEATURE_FLAG_HEALTH_PULSE.
-    expect(timerRegistrations.size).toBe(25);
+    // (schedulers.js, #1010), behind FEATURE_FLAG_HEALTH_PULSE; the
+    // twenty-sixth is labCanary (schedulers.js, #1009), behind
+    // FEATURE_FLAG_LAB_CANARY.
+    expect(timerRegistrations.size).toBe(26);
     expect(timerRegistrations.has('healthPulse')).toBe(true);
+    expect(timerRegistrations.has('labCanary')).toBe(true);
     expect(timerRegistrations.has('platformJobSweeper')).toBe(true);
     expect(timerRegistrations.has('cosmosExportScheduler')).toBe(true);
     expect(timerRegistrations.has('refreshToolServiceCache')).toBe(true);

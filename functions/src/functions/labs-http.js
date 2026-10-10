@@ -21,7 +21,15 @@
  */
 import { httpRoute, httpRouteByMethod } from '../lib/auth/http-route.js';
 import { getDefaultGuard } from '../lib/auth/default-guard.js';
-import { createDoc, deleteDoc, queryDocs, readDoc, upsertDoc, patchDoc } from '../lib/cosmos-client.js';
+import {
+  createDoc,
+  deleteDoc,
+  queryDocs,
+  readDoc,
+  replaceDocIfMatch,
+  upsertDoc,
+  patchDoc,
+} from '../lib/cosmos-client.js';
 import { createLabHandlers } from '../lib/labs.js';
 import { createAgentRegistryHandlers } from '../lib/labs/agent-registry.js';
 import { createCoderStatusHandlers } from '../lib/labs/coder-status.js';
@@ -85,9 +93,14 @@ httpRouteByMethod('cmsLabAgent', {
 });
 
 // When the status token expires, for the Integrations card (#763): the
-// same module as the public status read, with the editor guard.
+// same module as the public status read, with the editor guard. The two
+// conditional writes record Coder's answer to the token for the health
+// pulse (#1009, admin_config/coder_status_token).
 const coderToken = () =>
-  createCoderStatusHandlers({ guard: getDefaultGuard(), store: { readDoc, upsertDoc } });
+  createCoderStatusHandlers({
+    guard: getDefaultGuard(),
+    store: { readDoc, upsertDoc, createDoc, replaceDocIfMatch },
+  });
 
 httpRoute('cmsLabsCoderToken', {
   methods: ['GET'],

@@ -70,6 +70,18 @@
  * slugs the labs card lists, and version names are what an operator would
  * say aloud. No URL, no workspace name, no owner, no id —
  * nothing that describes the deployment beyond those names and two numbers.
+ *
+ * A REFUSED TOKEN IS RAISED, NOT ONLY ABSORBED (#1009). From 2026-10-06T01:25Z
+ * Coder refused the status token for about 32 hours, and the only sign was
+ * a card that said "unknown". Now every read that reaches Coder with the
+ * token records Coder's answer in admin_config/coder_status_token
+ * (recordTokenAnswer): when it last accepted the token, when it last refused
+ * it and with which status, and since when it has been refusing. The health
+ * pulse raises a refusal newer than the last acceptance as the `coder-token`
+ * probe, critical (labs/lab-checks.js). And a 401 writes one warning-level
+ * line that starts with TOKEN_REFUSED_401_LOG, content-free (the setting's
+ * name and a status, never the token or Coder's address), for a log alert
+ * to match. Neither is in the public answer, which says what it always said.
  */
 
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
@@ -77,6 +89,20 @@ import { readSetting } from '../http/read-setting.js';
 import { createMinuteCache, jsonResponse, MINUTE_CACHE_SECONDS } from './minute-cache.js';
 
 export const CODER_STATUS_CACHE_ID = 'labs:coder-status';
+/** Coder's last answers to the status token (#1009): admin_config, read by the health pulse. */
+export const TOKEN_STATE_DOC_ID = 'coder_status_token';
+export const TOKEN_STATE_DOC_TYPE = 'coder_status_token';
+/**
+ * An unchanged answer is written again at most this often, so the record's
+ * age says how fresh the evidence is without a write for every minute's read.
+ */
+export const TOKEN_STATE_REFRESH_MS = 60 * 60 * 1000;
+/**
+ * The start of the warning a 401 for the status token writes, fixed so a log
+ * alert can match it (`message startswith`). Content-free: a setting's name
+ * and a status.
+ */
+export const TOKEN_REFUSED_401_LOG = 'coder-status: Coder refused CODER_STATUS_TOKEN (401)';
 export const CODER_STATUS_CACHE_SECONDS = MINUTE_CACHE_SECONDS;
 /** A Coder that has not answered in five seconds is reported unreachable, not waited for. */
 export const CODER_TIMEOUT_MS = 5_000;
@@ -473,7 +499,7 @@ async function readDetail({ fetchImpl, config, context }) {
  * already answered by the time this runs, and missing detail must not close
  * the panes.
  */
-async function readDetailOrUnknown({ fetchImpl, config, context }) {
+async function readDetailOrUnknown({ fetchImpl, config, context, onTokenAnswer = null }) {
   const unknown = { templates: [], capacity: { running: null, max: config.max } };
   if (!config.token) {
     context?.warn?.(
@@ -483,15 +509,98 @@ async function readDetailOrUnknown({ fetchImpl, config, context }) {
   }
   try {
     const detail = await readDetail({ fetchImpl, config, context });
+    await onTokenAnswer?.(null);
     return { templates: detail.templates, capacity: { running: detail.running, max: config.max } };
   } catch (error) {
-    const refused = error?.status === 401 || error?.status === 403;
-    context?.warn?.(
-      refused
-        ? `coder-status: Coder refused CODER_STATUS_TOKEN (${error.status}), so it has expired or been revoked; templates and running workspaces are reported as unknown`
-        : `coder-status: the templates and workspaces read failed, and both are reported as unknown: ${error?.message ?? error}`
-    );
+    if (error?.status === 401) {
+      context?.warn?.(
+        `${TOKEN_REFUSED_401_LOG}: it has expired or been revoked; templates and running workspaces are reported as unknown`
+      );
+    } else if (error?.status === 403) {
+      context?.warn?.(
+        'coder-status: Coder refused CODER_STATUS_TOKEN (403): it lacks the template:read or workspace:read scope; templates and running workspaces are reported as unknown'
+      );
+    } else {
+      context?.warn?.(
+        `coder-status: the templates and workspaces read failed, and both are reported as unknown: ${error?.message ?? error}`
+      );
+    }
+    if (error?.status === 401 || error?.status === 403) await onTokenAnswer?.(error.status);
     return unknown;
+  }
+}
+
+const isPast = (iso, nowMs, ageMs) => {
+  const ms = Date.parse(String(iso ?? ''));
+  return !Number.isFinite(ms) || nowMs - ms >= ageMs;
+};
+
+/** Whether a stored state says Coder is refusing the token now: a refusal newer than any acceptance. */
+export function isRefusing(state) {
+  const refused = Date.parse(String(state?.lastRefusedAt ?? ''));
+  if (!Number.isFinite(refused)) return false;
+  const accepted = Date.parse(String(state?.lastAcceptedAt ?? ''));
+  return !Number.isFinite(accepted) || refused > accepted;
+}
+
+/** The state after this answer: `refusedStatus` null for an acceptance, or Coder's 401 or 403. Pure. */
+export function nextTokenState(current, refusedStatus, atIso) {
+  const base = {
+    id: TOKEN_STATE_DOC_ID,
+    configScope: 'admin_config',
+    docType: TOKEN_STATE_DOC_TYPE,
+    lastAcceptedAt: current?.lastAcceptedAt ?? null,
+    lastRefusedAt: current?.lastRefusedAt ?? null,
+    lastRefusedStatus: current?.lastRefusedStatus ?? null,
+    refusingSince: null,
+  };
+  if (refusedStatus === null) return { ...base, lastAcceptedAt: atIso };
+  return {
+    ...base,
+    lastRefusedAt: atIso,
+    lastRefusedStatus: refusedStatus,
+    // One outage keeps its start however often it is seen again.
+    refusingSince: isRefusing(current) ? (current.refusingSince ?? current.lastRefusedAt) : atIso,
+  };
+}
+
+/** Whether this answer is news: a change of verdict or status, or the same answer gone an hour unwritten. */
+function worthWriting(current, refusedStatus, nowMs) {
+  if (!current) return true;
+  if (refusedStatus === null) {
+    return isRefusing(current) || isPast(current.lastAcceptedAt, nowMs, TOKEN_STATE_REFRESH_MS);
+  }
+  if (!isRefusing(current) || current.lastRefusedStatus !== refusedStatus) return true;
+  return isPast(current.lastRefusedAt, nowMs, TOKEN_STATE_REFRESH_MS);
+}
+
+/**
+ * Record Coder's answer to the status token: `refusedStatus` null when it
+ * accepted it, 401 or 403 when it refused. Read, decide, write under the
+ * ETag (`replaceDocIfMatch`, or `createDoc` for the first answer); a 412 or
+ * 409 means another worker recorded an answer at the same moment, which is
+ * as good. Best effort and never throws: the status read it rides on must
+ * answer whatever happens here. A store without the conditional writes (a
+ * read-only test double) records nothing.
+ */
+export async function recordTokenAnswer({ store, refusedStatus, now = () => Date.now(), context }) {
+  if (!store?.readDoc || !store?.createDoc || !store?.replaceDocIfMatch) return false;
+  try {
+    const nowMs = now();
+    const current = await store.readDoc('admin_config', TOKEN_STATE_DOC_ID, 'admin_config');
+    if (!worthWriting(current, refusedStatus, nowMs)) return false;
+    const next = nextTokenState(current, refusedStatus, new Date(nowMs).toISOString());
+    if (current) {
+      await store.replaceDocIfMatch('admin_config', { ...next, _etag: current._etag }, { partitionKey: 'admin_config' });
+    } else {
+      await store.createDoc('admin_config', next);
+    }
+    return true;
+  } catch (error) {
+    if (error?.code !== 412 && error?.code !== 409) {
+      context?.warn?.(`coder-status: Coder's answer to the status token could not be recorded (${error?.code ?? 'error'})`);
+    }
+    return false;
   }
 }
 
@@ -542,7 +651,10 @@ function reasonForRefusal(error, context) {
     );
     return 'scope';
   }
-  if (error?.status === 401) return 'refused';
+  if (error?.status === 401) {
+    context?.warn?.(`${TOKEN_REFUSED_401_LOG}: it has expired or been revoked; its expiry cannot be read`);
+    return 'refused';
+  }
   const status = Number.isInteger(error?.status) ? `Coder answered ${error.status}` : 'no answer';
   context?.warn?.(`coder-status: the token's own record could not be read (${status})`);
   return 'error';
@@ -586,6 +698,10 @@ export function createCoderStatusHandlers({
     seconds: CODER_STATUS_CACHE_SECONDS,
   });
 
+  /** Coder's answer to the token, recorded for the health pulse (#1009). Never throws. */
+  const onTokenAnswer = (context) => (refusedStatus) =>
+    recordTokenAnswer({ store, refusedStatus, now, context });
+
   /**
    * The status body — the same object the route returns, for the estate read
    * (estate.js) to fold in without a second Coder call or a second cache.
@@ -606,7 +722,12 @@ export function createCoderStatusHandlers({
     let body;
     try {
       await readReachable(fetchImpl, config);
-      const detail = await readDetailOrUnknown({ fetchImpl, config, context });
+      const detail = await readDetailOrUnknown({
+        fetchImpl,
+        config,
+        context,
+        onTokenAnswer: onTokenAnswer(context),
+      });
       body = { configured: true, reachable: true, ...detail, asOf };
     } catch (error) {
       context?.warn?.(`coder-status: Coder unreachable: ${error?.message ?? error}`);
@@ -638,6 +759,10 @@ export function createCoderStatusHandlers({
       if (!config) return privateJson(200, { configured: false });
       try {
         const token = await readTokenExpiry({ fetchImpl, config, context, now });
+        // Coder's own answer to the token, for the health pulse: a 401 here is
+        // as much a refusal as one on the public read (#1009).
+        if (token.reason === 'refused') await onTokenAnswer(context)(401);
+        else if (token.known) await onTokenAnswer(context)(null);
         return privateJson(200, { configured: true, token, warningDays: TOKEN_RENEW_WARNING_DAYS });
       } catch (error) {
         context.error('cmsLabsCoderToken failed:', error);
