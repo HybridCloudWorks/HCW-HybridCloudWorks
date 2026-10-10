@@ -4254,12 +4254,16 @@ This project has not cut a tagged release; entries are grouped under
   - The deploy's origin-lock step read Cloudflare. It curled the proxied
     hostname, which Bot Fight Mode answers with a 403 whether or not the
     Azure restriction is on. `scripts/assert-origin-lock.mjs` now reads the
-    Function App's access restriction from the control plane. The step fails
-    unless unmatched requests are `Deny`, no Allow rule admits every address,
-    and every Allow rule is Terraform's `cloudflare-*` or a per-run `ci-*`
-    window, with this run's window gone. A deploy while
-    `functions_origin_lock_enabled` is false now goes red. The deploy
-    identity's Website Contributor on the app already covers the read.
+    Function App's access restriction from the control plane and holds it to
+    `infra/`. Unmatched requests must be `Deny`. Every address in every
+    Allow rule is read, so none can admit everyone beside a permitted one.
+    `cloudflare-*` rules may list only the declared `cloudflare_ip_ranges`,
+    and each declared range must be admitted. `ci-*` windows may admit one
+    address, and this run's window must be gone. It runs whenever the Azure
+    sign-in succeeded, so a deploy that fails early still checks the
+    standing lock. A deploy while `functions_origin_lock_enabled` is false
+    now goes red. The deploy identity's Website Contributor on the app
+    already covers the read.
   - No Terraform ordering can keep a failed apply from stranding the strip.
     Terraform skips only the dependents of a failed resource, so an error
     elsewhere cannot stop the strip, and that was already true. An error on

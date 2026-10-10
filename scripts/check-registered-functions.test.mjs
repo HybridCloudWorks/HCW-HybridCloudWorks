@@ -29,6 +29,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
 const SCRIPT = join(HERE, 'check-registered-functions.mjs');
 const COMMITTED = readFileSync(join(ROOT, INVENTORY_PATH), 'utf8');
+/** A workflow file's text, by file name. */
 const workflow = (name) => readFileSync(join(ROOT, '.github', 'workflows', name), 'utf8');
 
 /** An inventory with `http` names plus three timers, one queue and one feed. */
@@ -41,13 +42,16 @@ function inventoryDoc(httpCount = MIN_EXPECTED) {
     storageQueue: ['platformJobWorker'],
   };
 }
+/** An inventory document as the file holds it. */
 const inventoryText = (doc = inventoryDoc()) => JSON.stringify(doc);
+/** Every function name an inventory document lists, in trigger order. */
 const allNames = (doc = inventoryDoc()) => TRIGGERS.flatMap((t) => doc[t] ?? []);
 /** As `az ... --query "[].name" -o tsv` prints them. */
 const tsv = (names) => names.map((name) => `func-site-prod-cus-01/${name}`).join('\n');
 
 const scratch = mkdtempSync(join(tmpdir(), 'check-registered-functions-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
+/** An inventory document written to a scratch file, for run() to read. */
 function inventoryFile(doc = inventoryDoc()) {
   const path = join(scratch, `inventory-${Math.random().toString(36).slice(2)}.json`);
   writeFileSync(path, JSON.stringify(doc));
@@ -223,7 +227,13 @@ function github({ runs = [], jobs = {}, inventories = {}, failAt = null } = {}) 
     });
     if (failAt && url.includes(failAt)) return respond(500, {});
     expect(init.headers.Authorization).toBe('Bearer t0ken');
-    if (url.includes(`/workflows/${DEPLOY_WORKFLOW}/runs`)) return respond(200, { workflow_runs: runs });
+    if (url.includes(`/workflows/${DEPLOY_WORKFLOW}/runs`)) {
+      // As the API answers: newest first, `status=success` meaning the run's
+      // conclusion, and no more than per_page.
+      const perPage = Number(/per_page=(\d+)/.exec(url)?.[1] ?? 30);
+      const pool = url.includes('status=success') ? runs.filter((r) => r.conclusion === 'success') : runs;
+      return respond(200, { workflow_runs: pool.slice(0, perPage) });
+    }
     const jobsMatch = /\/runs\/(\d+)\/jobs\?filter=all/.exec(url);
     if (jobsMatch) return respond(200, { jobs: jobs[jobsMatch[1]] ?? [] });
     const contents = /\/contents\/functions\/function-inventory\.json\?ref=([0-9a-f]+)$/.exec(url);
@@ -237,7 +247,9 @@ function github({ runs = [], jobs = {}, inventories = {}, failAt = null } = {}) 
   return { fetchImpl, calls };
 }
 
+/** A job step as the jobs API returns it. */
 const step = (conclusion, completedAt, name = DEPLOY_STEP) => ({ name, conclusion, completed_at: completedAt });
+/** A job as the jobs API returns it. */
 const job = (...steps) => ({ name: 'Deploy to Azure Functions', steps });
 const ENV = { GITHUB_TOKEN: 't0ken', GITHUB_REPOSITORY: 'saulpatinojr/HCW-HybridCloudWorks' };
 const SHA_NEW = 'aaaaaaa1111111111111111111111111111111aa';
@@ -247,8 +259,8 @@ describe('findDeployedCommit: the commit whose package is live', () => {
   it('takes the newest successful deploy step, even when that run failed a later check', async () => {
     const { fetchImpl } = github({
       runs: [
-        { id: 2, run_number: 42, head_sha: SHA_NEW },
-        { id: 1, run_number: 41, head_sha: SHA_OLD },
+        { id: 2, run_number: 42, head_sha: SHA_NEW, conclusion: 'failure' },
+        { id: 1, run_number: 41, head_sha: SHA_OLD, conclusion: 'success' },
       ],
       jobs: {
         2: [job(step('success', '2026-10-09T10:05:00Z'), step('failure', '2026-10-09T10:07:00Z', 'Assert AzureWebJobsStorage is absent, then sync triggers'))],
@@ -287,11 +299,32 @@ describe('findDeployedCommit: the commit whose package is live', () => {
     expect(found.sha).toBe(SHA_OLD);
   });
 
-  it('asks for every attempt and no more than MAX_RUNS runs', async () => {
+  it('asks for the newest outright success, the last MAX_RUNS runs, and every attempt of each', async () => {
     const { fetchImpl, calls } = github({ runs: [{ id: 1, run_number: 1, head_sha: SHA_OLD }], jobs: {} });
     await findDeployedCommit({ token: 't0ken', owner: 'o', repo: 'r', fetchImpl });
-    expect(calls[0]).toContain(`per_page=${MAX_RUNS}`);
-    expect(calls[1]).toContain('filter=all');
+    expect(calls.some((url) => url.includes('status=success&per_page=1'))).toBe(true);
+    expect(calls.some((url) => url.endsWith(`/runs?per_page=${MAX_RUNS}`))).toBe(true);
+    expect(calls.filter((url) => url.includes('/jobs?')).every((url) => url.includes('filter=all'))).toBe(true);
+  });
+
+  it('finds the last outright success behind more failed dispatches than MAX_RUNS', async () => {
+    // Review's case: a run of dispatches refused before the upload (wrong
+    // ref, busy workspace, never approved) used to push the deployed run out
+    // of the window and leave the monitor unarmed.
+    const refused = Array.from({ length: MAX_RUNS + 2 }, (_, i) => ({
+      id: 100 + i,
+      run_number: 200 - i,
+      head_sha: SHA_NEW,
+      conclusion: 'failure',
+    }));
+    const jobs = Object.fromEntries(refused.map((run) => [run.id, [job(step('skipped', null))]]));
+    jobs[1] = [job(step('success', '2026-10-01T09:00:00Z'))];
+    const { fetchImpl } = github({
+      runs: [...refused, { id: 1, run_number: 41, head_sha: SHA_OLD, conclusion: 'success' }],
+      jobs,
+    });
+    const found = await findDeployedCommit({ token: 't0ken', owner: 'o', repo: 'r', fetchImpl });
+    expect(found).toEqual({ sha: SHA_OLD, runNumber: 41, completedAt: '2026-10-01T09:00:00Z' });
   });
 
   it('returns null when no recent run uploaded a package', async () => {
@@ -308,6 +341,7 @@ describe('findDeployedCommit: the commit whose package is live', () => {
 });
 
 describe('run --deployed (the monitor)', () => {
+  /** A GitHub whose one deploy run uploaded `sha`, with these inventories. */
   const deployedAt = (sha, inventories) =>
     github({
       runs: [{ id: 9, run_number: 77, head_sha: sha }],
@@ -403,6 +437,7 @@ describe('the CLI actually executes', () => {
   // Spawned for real: a guard that stops matching exits 0 having checked
   // nothing, which a monitor would read as healthy.
   const names = parseInventory(COMMITTED).map((e) => e.name);
+  /** Run the script as the workflows do, from the repository root. */
   const spawn = (args, input) => {
     try {
       return { code: 0, stdout: execFileSync(process.execPath, [SCRIPT, ...args], { input, encoding: 'utf8', cwd: ROOT }) };

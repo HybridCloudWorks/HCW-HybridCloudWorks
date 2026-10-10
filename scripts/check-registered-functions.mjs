@@ -35,11 +35,14 @@
  * owner deploys, and comparing against `main` would page "missing" for every
  * function merged and not yet shipped. `--deployed` reads the inventory at the
  * commit whose package is live: the newest successful `Deploy to Azure
- * Functions` step among the last runs of `deploy-functions.yml`. The STEP, not
- * the run: a run that uploads and then fails a later check has still replaced
- * the package, so its commit is the one running. Re-run attempts are included
+ * Functions` step among the newest run of `deploy-functions.yml` that
+ * succeeded outright and its last ten runs of any outcome. The STEP, not the
+ * run: a run that uploads and then fails a later check has still replaced the
+ * package, so its commit is the one running. Re-run attempts are included
  * (`filter=all`), and "newest" is the step's completion time, so an old run
- * re-run later counts as the later upload it was.
+ * re-run later counts as the later upload it was. The outright success is
+ * asked for on its own, so later dispatches that never reached the upload
+ * cannot push it out of view.
  *
  * When no such run is found, or the deployed commit predates the inventory
  * file, there is no expected set to compare with. That is reported as "not
@@ -272,6 +275,7 @@ export function formatUnreadable(reason) {
   };
 }
 
+/** A GitHub REST request with the token and API version every call here sends. */
 async function ghFetch(fetchImpl, url, token, accept = 'application/vnd.github+json') {
   return fetchImpl(url, {
     headers: {
@@ -282,22 +286,15 @@ async function ghFetch(fetchImpl, url, token, accept = 'application/vnd.github+j
   });
 }
 
+/** A GitHub REST response body, or an error naming the status and URL. */
 async function ghJson(fetchImpl, url, token) {
   const res = await ghFetch(fetchImpl, url, token);
   if (!res.ok) throw new Error(`GitHub answered ${res.status} for ${url}`);
   return res.json();
 }
 
-/**
- * The commit whose package is live: the newest successful `DEPLOY_STEP`
- * across the last `MAX_RUNS` runs of `DEPLOY_WORKFLOW`, every attempt.
- *
- * @returns {Promise<{ sha: string, runNumber: number|null, completedAt: string } | null>}
- *   null when none of those runs uploaded a package.
- */
-export async function findDeployedCommit({ token, owner, repo, fetchImpl = fetch }) {
-  const base = `${API}/repos/${owner}/${repo}/actions`;
-  const body = await ghJson(fetchImpl, `${base}/workflows/${DEPLOY_WORKFLOW}/runs?per_page=${MAX_RUNS}`, token);
+/** The `workflow_runs` array of a runs payload, or an error saying it is not one. */
+function runsOf(body) {
   const runs = body?.workflow_runs;
   if (!Array.isArray(runs)) {
     throw new Error(
@@ -305,9 +302,36 @@ export async function findDeployedCommit({ token, owner, repo, fetchImpl = fetch
         `response of GET /repos/:owner/:repo/actions/workflows/${DEPLOY_WORKFLOW}/runs.`
     );
   }
+  return runs;
+}
+
+/**
+ * The commit whose package is live: the newest successful `DEPLOY_STEP`
+ * among the newest run that succeeded outright and the last `MAX_RUNS` runs
+ * of any outcome, every attempt of each.
+ *
+ * The run that succeeded is asked for separately (`status=success`) so that
+ * a string of later dispatches that never reached the upload (refused on the
+ * ref, on a busy workspace, or never approved) cannot push it out of the
+ * window and leave the monitor unarmed. The recent runs of any outcome are
+ * there for the case a successful run cannot show: one that uploaded and
+ * then failed a later check, or is still running, and so is the package
+ * that is live.
+ *
+ * @returns {Promise<{ sha: string, runNumber: number|null, completedAt: string } | null>}
+ *   null when no run has ever uploaded a package that this can find.
+ */
+export async function findDeployedCommit({ token, owner, repo, fetchImpl = fetch }) {
+  const base = `${API}/repos/${owner}/${repo}/actions`;
+  const succeeded = runsOf(
+    await ghJson(fetchImpl, `${base}/workflows/${DEPLOY_WORKFLOW}/runs?status=success&per_page=1`, token)
+  );
+  const recent = runsOf(await ghJson(fetchImpl, `${base}/workflows/${DEPLOY_WORKFLOW}/runs?per_page=${MAX_RUNS}`, token));
+  const candidates = new Map();
+  for (const run of [...recent.slice(0, MAX_RUNS), ...succeeded.slice(0, 1)]) candidates.set(run?.id, run);
 
   let best = null;
-  for (const run of runs.slice(0, MAX_RUNS)) {
+  for (const run of candidates.values()) {
     if (typeof run?.id !== 'number' || typeof run.head_sha !== 'string' || !run.head_sha) {
       throw new Error('A deploy run came back without an id or a head_sha, so nothing can be compared.');
     }
@@ -381,7 +405,8 @@ export async function run({ args = [], input = '', env = {}, fetchImpl = fetch, 
   if (!deployed) {
     return formatNotArmed(
       new Set(live.map((name) => name.toLowerCase())).size,
-      `None of the last ${MAX_RUNS} runs of \`${DEPLOY_WORKFLOW}\` completed its \`${DEPLOY_STEP}\` step, so which commit is live is not known.`
+      `No run of \`${DEPLOY_WORKFLOW}\` has succeeded, and none of its last ${MAX_RUNS} completed its ` +
+        `\`${DEPLOY_STEP}\` step, so which commit is live is not known.`
     );
   }
   const short = deployed.sha.slice(0, 7);
@@ -405,6 +430,7 @@ export async function run({ args = [], input = '', env = {}, fetchImpl = fetch, 
   );
 }
 
+/** All of stdin, as text. */
 async function readStdin() {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);

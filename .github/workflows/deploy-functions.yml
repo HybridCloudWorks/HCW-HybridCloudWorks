@@ -114,6 +114,7 @@ jobs:
       # the token's subject against the `federated_subjects`
       # output — the usual cause is a ref or repository name that has moved.
       - name: Azure Login
+        id: login
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ vars.CLIENT_ID }}
@@ -556,26 +557,36 @@ jobs:
       # Function App's restriction said. Setting functions_origin_lock_enabled
       # to false would have left it green.
       #
-      # Now it reads the restriction itself from the control plane and fails
-      # unless unmatched requests are Deny (what the variable sets, and what
-      # decides IPv6), no Allow rule admits every address, every Allow rule is
-      # Terraform's (cloudflare-*) or a workflow's per-run window (ci-*), and
-      # this run's ci-smoke window is gone. The rules and their tests are in
-      # scripts/assert-origin-lock.mjs.
+      # Now it reads the restriction itself from the control plane and holds
+      # it to infra/: unmatched requests must be Deny (what the variable sets,
+      # and what decides IPv6); every address in every Allow rule is read,
+      # not the field as one string; a cloudflare-* rule may list only ranges
+      # cloudflare_ip_ranges declares, a ci-* window only one address, and no
+      # other Allow rule may exist; every declared range must be admitted; and
+      # this run's ci-smoke window must be gone. The rules and their tests are
+      # in scripts/assert-origin-lock.mjs.
       #
       # AFTER the window closes, so what it reads is the standing posture and
-      # it can prove the window went. It runs even when the smoke test failed,
-      # because the lock does not depend on the app being healthy. The deploy
-      # identity's Website Contributor on the app covers the read; the SCM
-      # window steps above already make the same call.
+      # it can prove the window went. It runs whenever the sign-in succeeded
+      # and the run was not cancelled, even when an earlier step failed: the
+      # standing lock does not depend on this deploy getting far. Whether this
+      # run's own window closed is asserted only when the run may have opened
+      # one, on the close step's own condition. The deploy identity's Website
+      # Contributor on the app covers the read; the SCM window steps above
+      # already make the same call.
       - name: Assert the origin lock is enforcing
-        if: ${{ !cancelled() && steps.appfw.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.login.outcome == 'success' }}
         env:
           APP: ${{ vars.FUNCTION_APP_NAME }}
           RG: ${{ vars.RESOURCE_GROUP }}
+          WINDOW_OPENED: ${{ steps.appfw.outputs.runner_ip != '' }}
         run: |
           set -euo pipefail
+          args=()
+          if [ "$WINDOW_OPENED" = "true" ]; then
+            args=(--window-closed "ci-smoke-${GITHUB_RUN_ID}")
+          fi
           restrictions=$(az functionapp config access-restriction show -n "$APP" -g "$RG" -o json --only-show-errors)
           printf '%s\n' "$restrictions" \
-            | node scripts/assert-origin-lock.mjs --window-closed "ci-smoke-${GITHUB_RUN_ID}" \
+            | node scripts/assert-origin-lock.mjs "${args[@]}" \
             | tee -a "$GITHUB_STEP_SUMMARY"

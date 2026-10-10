@@ -1078,6 +1078,13 @@ variable "functions_scm_lock_enabled" {
 #
 # Re-check it when Cloudflare announces a change; the ranges have been stable
 # for years but they are not immutable.
+#
+# Change it HERE, not as an hcw-azure workspace variable. After every deploy,
+# deploy-functions.yml holds the Function App's live Allow rules to this
+# default (scripts/assert-origin-lock.mjs reads it from this file, PLAT-2):
+# a range the live rules admit that this list lacks, or one it lists that no
+# rule admits, fails the deploy, so an override set only in the workspace
+# would turn every deploy red.
 variable "cloudflare_ip_ranges" {
   description = "Cloudflare IPv4 ranges allowed to reach the Function App origin when the origin lock is on"
   type        = list(string)

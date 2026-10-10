@@ -563,8 +563,8 @@ problem means production is already degraded rather than merely unchanged.
    lock, which proved nothing: Bot Fight Mode answers a runner with 403
    whether the Azure restriction is on or off. Since PLAT-2 (#962) it reads
    the Function App's access restriction from the control plane instead and
-   fails unless unmatched requests are `Deny`
-   (`scripts/assert-origin-lock.mjs`), so a deploy while
+   fails unless unmatched requests are `Deny` and every Allow rule matches
+   what `infra/` declares (`scripts/assert-origin-lock.mjs`), so a deploy while
    `functions_origin_lock_enabled` is false goes red by design. The operator path is
    [Edge and DNS verification](edge-dns-verification.md). Making the smoke job
    pass from CI needs the same Cloudflare change that blocked the standard
