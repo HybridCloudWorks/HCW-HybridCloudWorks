@@ -251,6 +251,36 @@ describe('a run', () => {
   });
 });
 
+describe('a job it cannot follow', () => {
+  it('keeps the id of a job it created when reading it fails, and the next run settles that job first', async () => {
+    const s = store();
+    const realRead = s.readDoc.getMockImplementation();
+    // The canary record reads fine; the job read after the create does not.
+    s.readDoc.mockImplementation(async (container, id) => {
+      if (container === 'lab_jobs') throw Object.assign(new Error(`read ${id} failed`), { code: 503 });
+      return realRead(container, id);
+    });
+    const first = harness({ s });
+    expect(await first.canary.run()).toMatchObject({ ok: false, outcome: 'error', jobLeftInFlight: true });
+    expect(s.data.lab_jobs.get(JOB_ID).status).toBe('queued');
+    expect(s.data.admin_config.get(LAB_CANARY_DOC_ID).pendingJobId).toBe(JOB_ID);
+    expect(first.log.warn).toHaveBeenCalledWith(
+      '[labCanary] the canary job could not be followed after it was created (503); the next run settles it'
+    );
+    for (const [line] of first.log.warn.mock.calls) expect(line).not.toContain(JOB_ID);
+
+    // Reads work again: the queued leftover is cancelled and deleted before
+    // anything new is enqueued (the harness reuses the id, so a second create
+    // while it existed would be a 409).
+    s.readDoc.mockImplementation(realRead);
+    const second = harness({ s });
+    await second.canary.run();
+    expect(s.createDoc.mock.calls.filter(([container]) => container === 'lab_jobs')).toHaveLength(2);
+    expect(s.data.admin_config.get(LAB_CANARY_DOC_ID).lastResult.outcome).toBe('not-claimed');
+    expect(s.data.lab_jobs.size).toBe(0);
+  });
+});
+
 describe('what an earlier run left', () => {
   const leftover = (fields) => ({ id: JOB_ID, type: 'shell-echo', createdAt: at(-3_600_000), ...fields });
 
