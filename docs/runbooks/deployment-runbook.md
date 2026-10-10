@@ -535,17 +535,20 @@ problem means production is already degraded rather than merely unchanged.
    permanent 3-add / 1-change / 3-destroy signature from the three azapi
    resources — the app-settings pair and the FTP policy — which
    `infra/functionapp.tf` documents beside them.
-3. **Prove alert delivery, if the run created or changed an alert rule.** Two
-   tests, answering different questions, and neither substitutes for the other:
-   - `az monitor action-group test-notifications create` against
-     `ag-plat-prod-cus-01` in `rg-mgmt-plat-prod-cus` — pass `--subscription`
-     explicitly or it resolves in the wrong one. This exercises the action
-     group's own receivers.
-   - Then make an **application-subscription** rule actually fire once:
-     temporarily lower `function_response_time` or `cosmos_throttled` to a
-     threshold certain to trip, wait one evaluation window, restore. Only this
-     exercises a rule in one subscription invoking an action group in another,
-     which is the hop nothing has yet proven.
+3. **Check the alert fabric, if the run created or changed an alert rule or the
+   action group.** Delivery itself is proven: both receivers delivered a CLI
+   test notification on 2026-08-30, and a rule in the application subscription
+   reached the action group across the boundary on 2026-08-25
+   ([Alerting and support](alerting-and-support.md#delivery-is-proven-on-both-channels)).
+   What an apply can still break is a rule's own state, so:
+   - Run [Verify Alert Rule State](https://github.com/saulpatinojr/HCW-HybridCloudWorks/actions/workflows/verify-alert-state.yml)
+     and expect every declared rule `OK`, or `GATED OFF` where its gate is
+     off. It derives the rule list from `infra/`, so a rule the run added is
+     in it.
+   - If the run changed the action group itself, re-send the CLI test
+     notifications on that page and watch for both the mail and the text.
+   - A **new** rule has not been seen to fire until it has: make it fire once
+     and record the firing on that page, beside the rule.
 
    A rule that exists and pages nobody is worse than a visibly empty alert
    inventory, because it looks fixed.

@@ -417,9 +417,12 @@ resource "azurerm_monitor_diagnostic_setting" "lab_hybrid_key_vault" {
 #     (the Coder backup, the labs agent, Caddy, Vault). The notifier writes one
 #     line at daemon.err; the DCR ships daemon at Warning and above.
 #
-# verify-alert-state.yml reads the web resource group only, so these are not
-# in its list yet (PLAT-4 of the same review); `az monitor scheduled-query
-# list -g rg-mgmt-plat-prod-cus` shows them.
+# verify-alert-state.yml derives its list from these declarations since PLAT-4
+# (#964), so these three are in it. Its identity, github_reader, holds no role
+# in the Management subscription yet, so it reports them NOT AUTHORIZED until
+# a read grant on this resource group is applied; `az monitor scheduled-query
+# list -g rg-mgmt-plat-prod-cus --subscription sub-plat-mgmt-prod-cus` shows
+# them meanwhile.
 locals {
   lab_hybrid_machine_name = "arcs-lab-hybrid-${var.environment}-${var.region_abbreviation}-01"
   # How the three rules below find the host's rows. NOT `Computer ==

@@ -86,6 +86,20 @@ describe('entry-point guards fire when the script is invoked directly', () => {
     expect(bad.stderr).toContain('Unknown argument: --bogus');
   });
 
+  it('verify-alert-state.mjs lists the declared rules offline, and exits 2 for an unknown flag', () => {
+    // --list touches no Azure: the inventory is read out of infra/ alone, and
+    // the printed table is the proof main() ran rather than exiting 0 unseen.
+    const list = run('verify-alert-state.mjs', ['--list'], process.env);
+    expect(list.code).toBe(0);
+    expect(list.stdout).toContain('| `alert-logs-capacity` | log | `rg-mgmt-plat-prod-cus` |');
+    const help = run('verify-alert-state.mjs', ['--help'], process.env);
+    expect(help.code).toBe(0);
+    expect(help.stdout).toContain('Usage: node scripts/verify-alert-state.mjs');
+    const bad = run('verify-alert-state.mjs', ['--bogus'], process.env);
+    expect(bad.code).toBe(2);
+    expect(bad.stderr).toContain('Unknown argument: --bogus');
+  });
+
   it('build-content-manifest.mjs fails loudly without FUNCTION_ORIGIN', () => {
     const env = { ...process.env };
     delete env.FUNCTION_ORIGIN;

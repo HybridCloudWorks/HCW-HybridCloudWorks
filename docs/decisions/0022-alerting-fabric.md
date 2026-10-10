@@ -150,7 +150,13 @@ is for planned windows only; it outlives the reason for it otherwise.
   subscription boundary. ARM accepting the reference is proven; a notification
   arriving is not. Two post-apply tests settle it and they answer different
   questions ([Deployment Runbook](../runbooks/deployment-runbook.md#4-post-apply-verification)
-  §4).
+  §4). **Settled after the apply, recorded 2026-10-10 (PLAT-4, #964):** the
+  cross-subscription hop delivered when `alert-app-exceptions-prod-cus` fired
+  on 2026-08-25, and both receivers delivered a CLI test notification on
+  2026-08-30, email and then SMS (T-709 closed). Both are in
+  [CHANGELOG.md](../repo/changelog.md);
+  [Alerting and support](../runbooks/alerting-and-support.md#delivery-is-proven-on-both-channels)
+  has the evidence and the commands that re-prove it.
 - **Every threshold is an estimate**, stated as such beside each resource. They
   are to be tuned against the first week of real firing, not preserved because
   they are written down. That week began on 2026-08-25 with
