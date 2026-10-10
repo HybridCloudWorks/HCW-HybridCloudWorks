@@ -438,10 +438,12 @@ timer as overdue: do not confirm the run, and say so on #964.
 
 **The seal key's caller is the address the host heartbeats from.**
 `alert-lab-vault-unwrap` assumes Vault reaches Key Vault from the same address
-the Azure Monitor Agent reports.
+the Azure Monitor Agent reports. The first query reads the lab vault only,
+`kv-labhybrid-prod-cus-01`, by the same `_ResourceId` the rule matches, so a call
+to the site vault cannot fail the comparison.
 
 ```powershell
-az monitor log-analytics query -w $ws --analytics-query "AzureDiagnostics | where TimeGenerated > ago(1h) | where OperationName in ('KeyWrap', 'KeyUnwrap') | summarize Calls = count() by CallerIPAddress" -o json | ConvertFrom-Json | Format-Table
+az monitor log-analytics query -w $ws --analytics-query "AzureDiagnostics | where TimeGenerated > ago(1h) | where ResourceProvider == 'MICROSOFT.KEYVAULT' | where tolower(_ResourceId) endswith '/providers/microsoft.keyvault/vaults/kv-labhybrid-prod-cus-01' | where OperationName in ('KeyWrap', 'KeyUnwrap') | summarize Calls = count() by CallerIPAddress" -o json | ConvertFrom-Json | Format-Table
 ```
 
 ```powershell
@@ -473,7 +475,35 @@ PowerShell, from any directory, signed in with `az login` as the owner.
 **`alert-timer-overdue`**: stop one harmless timer for an hour.
 `healthPulse` only refreshes the Health Hub, which shows the pulse as stale
 meanwhile. Disabling a function is an app setting, so this restarts the app
-once on the way in and once on the way out.
+once on the way in and once on the way out. The test records the setting's
+prior state in a file first, and puts back exactly that.
+
+```powershell
+$hf = Join-Path $HOME 'plat4-timer-test.json'
+```
+
+**Stop conditions.** The first must print `False` (`True` means an earlier run
+did not finish: do its recovery, below, first). The second must not show a
+value of `true`: if it does, the timer is already off and the test would
+change nothing.
+
+```powershell
+Test-Path -LiteralPath $hf
+```
+
+```powershell
+$prior = az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'AzureWebJobs.healthPulse.Disabled'
+```
+
+```powershell
+$prior | Select-Object name, value
+```
+
+Record it, then disable the timer:
+
+```powershell
+@{ present = [bool]$prior; value = $prior.value } | ConvertTo-Json | Set-Content -LiteralPath $hf
+```
 
 ```powershell
 az functionapp config appsettings set -n func-site-prod-cus-01 -g rg-web-site-prod-cus --settings AzureWebJobs.healthPulse.Disabled=true -o none
@@ -481,14 +511,32 @@ az functionapp config appsettings set -n func-site-prod-cus-01 -g rg-web-site-pr
 
 Success is a mail and a text for `alert-timer-overdue-prod-cus` naming
 `healthPulse`, within about 75 minutes (45 of grace, then the next 15-minute
-evaluation, then delivery). Then remove the setting, which also takes it back
-out of Terraform's view, so the next plan does not report it:
+evaluation, then delivery). Then restore from the record: the prior value if
+there was one, and otherwise delete the setting, which also takes it back out
+of Terraform's view. The same two lines are the recovery after an interruption,
+in any window:
 
 ```powershell
-az functionapp config appsettings delete -n func-site-prod-cus-01 -g rg-web-site-prod-cus --setting-names AzureWebJobs.healthPulse.Disabled -o none
+$h = Get-Content -LiteralPath (Join-Path $HOME 'plat4-timer-test.json') -Raw | ConvertFrom-Json
 ```
 
-Then confirm the two writes left the strip intact, with the two reads in
+```powershell
+if ($h.present) { az functionapp config appsettings set -n func-site-prod-cus-01 -g rg-web-site-prod-cus --settings ('AzureWebJobs.healthPulse.Disabled=' + $h.value) -o none } else { az functionapp config appsettings delete -n func-site-prod-cus-01 -g rg-web-site-prod-cus --setting-names AzureWebJobs.healthPulse.Disabled -o none }
+```
+
+Success is this read matching the record (no row if `present` was `false`):
+
+```powershell
+az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'AzureWebJobs.healthPulse.Disabled' | Select-Object name, value
+```
+
+Only then remove the record:
+
+```powershell
+Remove-Item -LiteralPath (Join-Path $HOME 'plat4-timer-test.json')
+```
+
+Then confirm the writes left the strip intact, with the two reads in
 *[The failure with no alert](#the-failure-with-no-alert)*: one
 `RUNTIME_CONFIG_WRITER` row reading `azapi-strip`, and an `AzureWebJobsStorage`
 count of `0`. The Resolved mail follows the first good run.
@@ -501,14 +549,23 @@ means the health timer that decides is armed:
 az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'FEATURE_FLAG_CHECK_AGENT_HEALTH' | Select-Object name, value
 ```
 
+**Stop condition:** this must print `active`. Anything else means the agent is
+already down; do not run the test, and find out why instead.
+
+```powershell
+ssh hcw-lab 'systemctl is-active hcw-labs-agent'
+```
+
 ```powershell
 ssh hcw-lab 'sudo systemctl stop hcw-labs-agent'
 ```
 
-Wait until the Telegram "offline" message arrives (five to ten minutes), then:
+Wait until the Telegram "offline" message arrives (five to ten minutes), then
+start it again. This line is also the recovery if the test is interrupted, from
+any window, and success is its last line reading `active`:
 
 ```powershell
-ssh hcw-lab 'sudo systemctl start hcw-labs-agent'
+ssh hcw-lab 'sudo systemctl start hcw-labs-agent; systemctl is-active hcw-labs-agent'
 ```
 
 Success is Telegram's "offline" and "back online" messages, and the mail and
@@ -667,24 +724,39 @@ That is that rule's test done as well.
 **`alert-swa-bandwidth`**: lower the threshold to one byte for an hour and
 put it back. Driving 2.7 GB of real traffic would spend nearly 3% of the
 month's allowance, and Cloudflare's cache would absorb most of it before it
-reached the Static Web App. The first lines read the rule as ARM holds it,
-keep the real threshold in `$orig`, and name a temporary file of this test's
-own, so nothing already on disk is overwritten:
+reached the Static Web App. The test saves the rule's definition, exactly as
+ARM returns it, to a file before changing anything, and restores from that
+file, so an interruption cannot lose the real threshold. First the rule's URL
+and the two files: the saved original in your home folder, and a temporary
+working copy of this test's own:
 
 ```powershell
 $u = 'https://management.azure.com' + (az monitor metrics alert show -n alert-swa-bandwidth-prod-cus -g rg-web-site-prod-cus -o json | ConvertFrom-Json).id + '?api-version=2018-03-01'
 ```
 
 ```powershell
-$a = az rest --method get --url $u -o json | ConvertFrom-Json
+$bf = Join-Path $HOME 'plat4-swa-test.json'
 ```
 
 ```powershell
 $f = Join-Path ([IO.Path]::GetTempPath()) ('plat4-swa-' + [guid]::NewGuid() + '.json')
 ```
 
+**Stop condition:** this must print `False`. `True` means an earlier run did not
+finish: do its recovery, below, first.
+
 ```powershell
-$orig = $a.properties.criteria.allOf[0].threshold
+Test-Path -LiteralPath $bf
+```
+
+Save the original, then lower the threshold in the working copy and apply it:
+
+```powershell
+az rest --method get --url $u -o json | Set-Content -LiteralPath $bf
+```
+
+```powershell
+$a = Get-Content -LiteralPath $bf -Raw | ConvertFrom-Json
 ```
 
 ```powershell
@@ -700,25 +772,25 @@ az rest --method put --url $u --body "@$f" -o none
 ```
 
 Success is `alert-swa-bandwidth-prod-cus` at the next hourly evaluation, as
-long as the site has served anything in a day. Then restore and confirm:
+long as the site has served anything in a day. Then restore the saved original.
+This is also the recovery after an interruption, in any window (set `$u` and
+`$bf` again first, with the lines above):
 
 ```powershell
-$a.properties.criteria.allOf[0].threshold = $orig
-```
-
-```powershell
-[IO.File]::WriteAllText($f, ($a | ConvertTo-Json -Depth 20))
-```
-
-```powershell
-az rest --method put --url $u --body "@$f" -o none
+az rest --method put --url $u --body "@$bf" -o none
 ```
 
 ```powershell
 (az monitor metrics alert show -n alert-swa-bandwidth-prod-cus -g rg-web-site-prod-cus -o json | ConvertFrom-Json).criteria.allOf[0].threshold
 ```
 
-Success is `2666666666`. Then remove the test's own file, and nothing else:
+Success is `2666666666`. Only then remove the saved original:
+
+```powershell
+Remove-Item -LiteralPath $bf
+```
+
+and the working copy, if this window still has `$f`:
 
 ```powershell
 Remove-Item -LiteralPath $f
@@ -802,38 +874,69 @@ write, within about ten minutes. Activity Log alerts are stateless, so there
 is no Resolved mail.
 
 **`alert-rbac-write-app` and `alert-rbac-write-mgmt`**: grant this
-account Reader on one group in each subscription and take it back, by the id
-of the assignment the test made. The poison queue test above already covers the
-application subscription; this covers both. `$me` is the value from that test;
-set it again in a new window:
+account Reader on one group in each subscription and take it back. Like the
+poison test, each half chooses the assignment's id before creating it, records
+it in a file, deletes by that id, and recovers from the file. The poison queue
+test above already covers the application subscription; this covers both.
+`$me` is the value from that test; set it again in a new window:
 
 ```powershell
 $me = (az ad signed-in-user show -o json | ConvertFrom-Json).id
 ```
 
 ```powershell
+$rf = Join-Path $HOME 'plat4-rbac-test.json'
+```
+
+```powershell
 $mg = (az group show -n rg-mgmt-plat-prod-cus --subscription sub-plat-mgmt-prod-cus -o json | ConvertFrom-Json).id
 ```
 
-**Stop condition:** this must print nothing. A row means you already hold a
-direct assignment at that group; skip this half and note it in the fire record.
+**Stop conditions:** the first must print `False` (`True` means an earlier run
+did not finish: do the recovery below first), and the second must print
+nothing. A row in the second means you already hold a direct assignment at that
+group; skip this half and note it in the fire record.
+
+```powershell
+Test-Path -LiteralPath $rf
+```
 
 ```powershell
 az role assignment list --assignee $me --scope $mg -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
 ```
 
+Choose and record the id, then create and delete by it:
+
 ```powershell
-$rm = (az role assignment create --assignee-object-id $me --assignee-principal-type User --role Reader --scope $mg -o json | ConvertFrom-Json).id
+$rn = [guid]::NewGuid().Guid
 ```
 
 ```powershell
-az role assignment delete --ids $rm
+$rid = "$mg/providers/Microsoft.Authorization/roleAssignments/$rn"
+```
+
+```powershell
+@{ ra = $rid } | ConvertTo-Json | Set-Content -LiteralPath $rf
+```
+
+```powershell
+az role assignment create --name $rn --assignee-object-id $me --assignee-principal-type User --role Reader --scope $mg -o none
+```
+
+```powershell
+az role assignment delete --ids $rid
 ```
 
 Success is two notifications for `alert-rbac-write-mgmt-prod-cus` within about
-ten minutes, and the stop-condition read printing nothing again. For the
-application subscription, the same with `rg-web-site-prod-cus` and no
-`--subscription`:
+ten minutes, and the stop-condition list printing nothing again. Only then
+remove the record:
+
+```powershell
+Remove-Item -LiteralPath $rf
+```
+
+For the application subscription, the same with `rg-web-site-prod-cus`: check
+both stop conditions again, then:
 
 ```powershell
 $rg = (az group show -n rg-web-site-prod-cus -o json | ConvertFrom-Json).id
@@ -844,11 +947,46 @@ az role assignment list --assignee $me --scope $rg -o json | ConvertFrom-Json | 
 ```
 
 ```powershell
-$rw = (az role assignment create --assignee-object-id $me --assignee-principal-type User --role Reader --scope $rg -o json | ConvertFrom-Json).id
+$rn = [guid]::NewGuid().Guid
 ```
 
 ```powershell
-az role assignment delete --ids $rw
+$rid = "$rg/providers/Microsoft.Authorization/roleAssignments/$rn"
+```
+
+```powershell
+@{ ra = $rid } | ConvertTo-Json | Set-Content -LiteralPath $rf
+```
+
+```powershell
+az role assignment create --name $rn --assignee-object-id $me --assignee-principal-type User --role Reader --scope $rg -o none
+```
+
+```powershell
+az role assignment delete --ids $rid
+```
+
+```powershell
+Remove-Item -LiteralPath $rf
+```
+
+**If either half was interrupted**, recover from the record in any window. A
+delete that answers that the assignment does not exist means the run stopped
+before creating it:
+
+```powershell
+$r = Get-Content -LiteralPath (Join-Path $HOME 'plat4-rbac-test.json') -Raw | ConvertFrom-Json
+```
+
+```powershell
+az role assignment delete --ids $r.ra
+```
+
+Then repeat that half's stop-condition list, which should print nothing, and
+only then remove the record:
+
+```powershell
+Remove-Item -LiteralPath (Join-Path $HOME 'plat4-rbac-test.json')
 ```
 
 ### Fire record
