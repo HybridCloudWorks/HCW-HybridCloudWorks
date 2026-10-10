@@ -230,20 +230,6 @@
   loop_control:
     label: "hcw-addon-{{ item.id }} on {{ addons_publish_address }}:{{ item.port }}"
 
-- name: Wait for each deployed add-on to answer its health read on the loopback
-  ansible.builtin.uri:
-    url: "http://{{ addons_publish_address }}:{{ item.port }}/api/health"
-    follow_redirects: none
-    status_code: 200
-  register: addons_health
-  until: addons_health.status == 200
-  retries: "{{ addons_wait_retries }}"
-  delay: "{{ addons_wait_delay }}"
-  loop: "{{ addons_deployed }}"
-  loop_control:
-    label: "hcw-addon-{{ item.id }}"
-  when: not ansible_check_mode
-
 # Every row that is not deployed this run: disabled, or enabled with its
 # digest cleared. The second case matters: a container left from an earlier
 # digest would otherwise keep serving while the run says nothing is deployed
@@ -272,6 +258,23 @@
     state: absent
   when: addons_running | length == 0
   notify: Reload caddy for the addons route
+
+# Only now the health wait: withdrawn containers are already gone and the
+# route already says who is deployed, so one tool that fails to come up
+# cannot leave another tool's retirement or route change undone.
+- name: Wait for each deployed add-on to answer its health read on the loopback
+  ansible.builtin.uri:
+    url: "http://{{ addons_publish_address }}:{{ item.port }}/api/health"
+    follow_redirects: none
+    status_code: 200
+  register: addons_health
+  until: addons_health.status == 200
+  retries: "{{ addons_wait_retries }}"
+  delay: "{{ addons_wait_delay }}"
+  loop: "{{ addons_deployed }}"
+  loop_control:
+    label: "hcw-addon-{{ item.id }}"
+  when: not ansible_check_mode
 
 - name: Say what runs
   ansible.builtin.debug:

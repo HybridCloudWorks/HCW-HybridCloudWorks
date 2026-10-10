@@ -22,6 +22,7 @@ import { createAddonStatusHandlers } from '../lib/addons/status.js';
 const store = { readDoc, upsertDoc };
 
 let handlers = null;
+/** The handlers, built on first use so module load touches no store. */
 const addons = () => (handlers ??= createAddonStatusHandlers({ store }));
 
 httpRoute('publicGetAddonStatus', {

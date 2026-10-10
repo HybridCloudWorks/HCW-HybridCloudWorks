@@ -46,7 +46,6 @@
  * so a pane does not open on a stale healthy document through an outage.
  */
 
-import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
 import { readSetting } from '../http/read-setting.js';
 import { createMinuteCache, jsonResponse, MINUTE_CACHE_SECONDS } from '../labs/minute-cache.js';
 import { addonEntry, isKnownAddon } from './registry.js';
@@ -139,19 +138,45 @@ export function projectHealth(body) {
  * One GET of the AddOn's health. Throws on anything but 200, a redirect
  * included: the proxy never follows one to another origin.
  */
+/** The most a health body may be; the envelope is a few hundred bytes, so this is generous and still a bound. */
+export const ADDON_HEALTH_MAX_BYTES = 16 * 1024;
+
+/**
+ * Read and project the AddOn's health. One deadline (ADDON_TIMEOUT_MS) covers
+ * the whole exchange, body included; the body is refused past
+ * ADDON_HEALTH_MAX_BYTES before it is parsed, by Content-Length when the AddOn
+ * sends one and by its length once read.
+ */
 async function readHealth(fetchImpl, config) {
-  const response = await fetchWithTimeout(fetchImpl, `${config.base}${config.healthPath}`, {
-    method: 'GET',
-    headers: { Accept: 'application/json' },
-    redirect: 'error',
-    timeoutMs: ADDON_TIMEOUT_MS,
-  });
-  if (response.status !== 200) {
-    throw Object.assign(new Error(`the health read answered ${response.status}`), {
-      status: response.status,
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ADDON_TIMEOUT_MS);
+  try {
+    const response = await fetchImpl(`${config.base}${config.healthPath}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      redirect: 'error',
+      signal: controller.signal,
     });
+    if (response.status !== 200) {
+      throw Object.assign(new Error(`the health read answered ${response.status}`), {
+        status: response.status,
+      });
+    }
+    const declared = Number(response.headers?.get?.('content-length'));
+    if (Number.isFinite(declared) && declared > ADDON_HEALTH_MAX_BYTES) {
+      throw new Error('the health body was too large');
+    }
+    const text = await response.text();
+    if (text.length > ADDON_HEALTH_MAX_BYTES) throw new Error('the health body was too large');
+    return projectHealth(JSON.parse(text));
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw Object.assign(new Error(`timeout after ${ADDON_TIMEOUT_MS} ms`), { code: 'FETCH_TIMEOUT' });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
   }
-  return projectHealth(await response.json());
 }
 
 /** Why the read failed, in words that carry no URL. */
@@ -192,6 +217,7 @@ export function createAddonStatusHandlers({
   // The bound is per Function App instance; a second instance may read once more in the same minute,
   // and the cache document then settles both.
   const inflight = new Map();
+  /** The minute cache for one id, created on first use. */
   const cacheFor = (id) => {
     if (!caches.has(id)) {
       caches.set(

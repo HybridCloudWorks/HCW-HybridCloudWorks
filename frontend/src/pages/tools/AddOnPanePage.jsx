@@ -168,13 +168,18 @@ const BUTTON =
   'inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary';
 const SECONDARY = `${BUTTON} border border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800`;
 
+/** useSyncExternalStore subscription to the document's full-screen changes. */
 const subscribeFullscreen = (onChange) => {
   document.addEventListener('fullscreenchange', onChange);
   return () => document.removeEventListener('fullscreenchange', onChange);
 };
+/** Whether something is full screen right now. */
 const readFullscreen = () => Boolean(document.fullscreenElement);
+/** Whether this document may go full screen at all. */
 const readFullscreenEnabled = () => document.fullscreenEnabled === true;
+/** The server snapshot for both: nothing is full screen in pre-rendered HTML. */
 const serverFalse = () => false;
+/** A subscription for a value that never changes (fullscreenEnabled). */
 const noSubscription = () => () => {};
 
 export default function AddOnPanePage({ addonId }) {
@@ -184,6 +189,7 @@ export default function AddOnPanePage({ addonId }) {
   return <AddOnPane key={addon.id} addon={addon} />;
 }
 
+/** Title, description and canonical for one row's page. */
 function PageHead({ addon }) {
   return (
     <Helmet>
@@ -194,6 +200,7 @@ function PageHead({ addon }) {
   );
 }
 
+/** The breadcrumb, heading, status chip (children) and summary. */
 function PageHeader({ addon, children }) {
   return (
     <header className="flex flex-col gap-3">
@@ -241,6 +248,7 @@ function ComingAddOn({ addon }) {
   );
 }
 
+/** An `available` row: the status read, then opening, unavailable or the pane. */
 function AddOnPane({ addon }) {
   const status = usePublicData(() => fetchAddonStatus(addon.id), addonStatusKey(addon.id));
   const service = addonService(status);
@@ -278,6 +286,7 @@ function PaneBody({ service, addon }) {
   return <Pane addon={addon} />;
 }
 
+/** The one unavailable section, with the sentence and a way home. */
 function Unavailable() {
   return (
     <section
@@ -342,6 +351,7 @@ function Pane({ addon }) {
 
   // Full screen is the pane, this page's own element: never the AddOn's page
   // on its own, which the lab host would redirect.
+  /** Enter or leave full screen on the pane element. */
   const toggleFullscreen = () => {
     if (document.fullscreenElement) {
       document.exitFullscreen?.().catch(() => {});

@@ -27,7 +27,14 @@ const makeStore = (over = {}) => ({
   ...over,
 });
 
-const okJson = (data, status = 200) => ({ ok: status < 300, status, json: async () => data });
+/** A fetch Response stand-in: status, the body as text, and no Content-Length unless given. */
+const okJson = (data, status = 200, headers = {}) => ({
+  ok: status < 300,
+  status,
+  headers: { get: (name) => headers[name.toLowerCase()] ?? null },
+  text: async () => JSON.stringify(data),
+  json: async () => data,
+});
 
 /** The AddOn's health body as the migration edition answers it, extras included. */
 const HEALTH = {
@@ -309,7 +316,9 @@ describe('getAddonStatus', () => {
         throw new TypeError('fetch failed: https://migration.lab.example/api/health');
       },
     ],
-    ['answers no JSON', () => ({ ok: true, status: 200, json: async () => JSON.parse('<html>') })],
+    ['answers no JSON', () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '<html>' })],
+    ['declares a body over the budget', () => okJson(HEALTH, 200, { 'content-length': '100000' })],
+    ['sends a body over the budget', () => okJson({ ...HEALTH, padding: 'x'.repeat(20_000) })],
     ['answers ok: false', () => okJson({ ...HEALTH, ok: false })],
     ['answers without a version', () => okJson({ ok: true, id: 'migration' })],
   ])('reports unreachable, caches the failure and names no URL when the AddOn %s', async (_label, answer) => {
