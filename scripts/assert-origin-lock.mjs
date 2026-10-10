@@ -33,14 +33,15 @@
  *   3. A `cloudflare-*` rule lists an address that is not one of the declared
  *      Cloudflare ranges. The name is not what makes a rule Cloudflare's; the
  *      addresses are.
- *   4. A `ci-*` rule lists anything wider than one address. A per-run window
- *      admits one runner, as a /32.
+ *   4. A `ci-*` rule lists more than one address, or anything wider than one
+ *      host. A per-run window admits one runner, as a /32.
  *   5. An Allow rule is named neither `cloudflare-*` (Terraform's) nor `ci-*`
  *      (a workflow's per-run window). It was added outside Terraform.
  *   6. Unmatched requests are refused and a declared Cloudflare range has no
- *      Allow rule. Cloudflare's edges in that range are refused at the origin;
- *      with none at all the API is unreachable through Cloudflare, which is
- *      not a lock that works.
+ *      Allow rule that takes effect: none at all, or one that a Deny rule with
+ *      a smaller priority number (evaluated first) overrides. Cloudflare's
+ *      edges in that range are refused at the origin; with none admitted the
+ *      API is unreachable through Cloudflare, which is not a lock that works.
  *   7. `--window-closed <rule>` was given and that rule is still present: the
  *      caller's own window did not close.
  *
@@ -94,12 +95,59 @@ export const addressesOf = (rule) =>
 /** Whether a rule admits rather than refuses. */
 const isAllow = (rule) => String(rule?.action ?? '').toLowerCase() === 'allow';
 
+/** Whether a rule refuses rather than admits. */
+const isDeny = (rule) => String(rule?.action ?? '').toLowerCase() === 'deny';
+
 /** Whether an address is one host: a bare IP, an IPv4 /32 or an IPv6 /128. */
 export function isSingleAddress(address) {
   const [ip, prefix] = String(address).split('/');
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(ip)) return prefix === undefined || prefix === '32';
   if (/^[0-9a-f:]+$/i.test(ip) && ip.includes(':')) return prefix === undefined || prefix === '128';
   return false;
+}
+
+/**
+ * An IPv4 address or CIDR as the first and last address it covers, as
+ * integers; null for anything that is not IPv4.
+ */
+export function ipv4Interval(cidr) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/.exec(String(cidr).trim());
+  if (!m) return null;
+  const octets = m.slice(1, 5).map(Number);
+  const prefix = m[5] === undefined ? 32 : Number(m[5]);
+  if (octets.some((octet) => octet > 255) || prefix > 32) return null;
+  const base = octets.reduce((value, octet) => value * 256 + octet, 0);
+  const size = 2 ** (32 - prefix);
+  const start = Math.floor(base / size) * size;
+  return [start, start + size - 1];
+}
+
+/**
+ * Whether a rule address covers any part of an IPv4 range. `Any` covers
+ * everything; an IPv6 address covers no IPv4 range.
+ */
+export function overlaps(address, range) {
+  if (String(address).trim().toLowerCase() === 'any') return true;
+  const a = ipv4Interval(address);
+  const b = ipv4Interval(range);
+  if (!a || !b) return false;
+  return a[0] <= b[1] && b[0] <= a[1];
+}
+
+/**
+ * The first Deny rule App Service evaluates before `allow` that refuses any
+ * part of `range`, or undefined. Rules are evaluated in ascending priority,
+ * so a Deny with a smaller number wins over the Allow, whatever the Allow
+ * says.
+ */
+function shadowingDeny(rules, allow, range) {
+  const at = Number(allow?.priority);
+  if (!Number.isFinite(at)) return undefined;
+  return rules
+    .filter(isDeny)
+    .filter((deny) => Number(deny?.priority) < at)
+    .sort((x, y) => Number(x.priority) - Number(y.priority))
+    .find((deny) => addressesOf(deny).some((address) => overlaps(address, range)));
 }
 
 /**
@@ -177,17 +225,22 @@ function allowRuleProblems(rule, declared) {
     };
   }
   if (name.startsWith('ci-')) {
+    // One address, and one host: two /32s in one rule admit a second caller
+    // as surely as a /24 does.
     const wide = addresses.filter((address) => !isSingleAddress(address));
-    return {
-      problems:
-        wide.length === 0
-          ? []
-          : [
-              `The Allow rule ${label} admits \`${wide.join(', ')}\`. A per-run window admits one runner, as a /32; ` +
-                'anything wider is not a window.',
-            ],
-      admitted,
-    };
+    const problems = [];
+    if (addresses.length !== 1) {
+      problems.push(
+        `The Allow rule ${label} lists ${addresses.length} addresses (\`${addresses.join(', ')}\`). ` +
+          'A per-run window admits exactly one runner.'
+      );
+    } else if (wide.length > 0) {
+      problems.push(
+        `The Allow rule ${label} admits \`${wide.join(', ')}\`. A per-run window admits one runner, as a /32; ` +
+          'anything wider is not a window.'
+      );
+    }
+    return { problems, admitted };
   }
   return {
     problems: [
@@ -221,16 +274,34 @@ export function lockProblems(doc, { declaredRanges, windowRule } = {}) {
     );
   }
 
+  // A declared range counts as admitted only when its Allow rule takes
+  // effect: a Deny that App Service evaluates first refuses the range
+  // whatever the Allow says.
   const covered = new Set();
+  const shadowed = new Map();
   for (const rule of rules.filter(isAllow)) {
     const result = allowRuleProblems(rule, declared);
     problems.push(...result.problems);
-    for (const range of result.admitted) covered.add(range);
+    for (const range of result.admitted) {
+      const deny = shadowingDeny(rules, rule, range);
+      if (deny) shadowed.set(range, { deny, allow: rule });
+      else covered.add(range);
+    }
   }
+  for (const range of covered) shadowed.delete(range);
 
   // Only while unmatched requests are refused: with Allow, every range gets
   // in anyway, and the first problem above already says the lock is off.
-  const uncovered = [...declared].filter((range) => !covered.has(range));
+  if (denies) {
+    for (const [range, { deny, allow }] of shadowed) {
+      problems.push(
+        `The Deny rule \`${deny?.name || '(unnamed)'}\` (priority ${deny?.priority}) is evaluated before ` +
+          `\`${allow?.name}\` (priority ${allow?.priority}) and refuses \`${range}\`, so Cloudflare's edges ` +
+          'there are refused at the origin.'
+      );
+    }
+  }
+  const uncovered = [...declared].filter((range) => !covered.has(range) && !shadowed.has(range));
   if (denies && uncovered.length > 0) {
     problems.push(
       `No Allow rule admits ${uncovered.length} of the ${declared.size} Cloudflare ranges ` +
@@ -238,6 +309,8 @@ export function lockProblems(doc, { declaredRanges, windowRule } = {}) {
         "Cloudflare's edges there are refused at the origin" +
         (covered.size === 0 ? ', and with none admitted the API is unreachable through Cloudflare.' : '.')
     );
+  } else if (denies && covered.size === 0 && declared.size > 0) {
+    problems.push('No declared Cloudflare range is admitted, so the API is unreachable through Cloudflare.');
   }
 
   if (windowRule && rules.some((rule) => rule?.name === windowRule)) {
@@ -251,12 +324,12 @@ export function report(doc, options = {}) {
   const problems = lockProblems(doc, options);
   const declared = new Set(options.declaredRanges ?? []);
   const allows = doc.ipSecurityRestrictions.filter(isAllow);
-  const admitted = new Set(
-    allows
-      .filter((rule) => String(rule?.name ?? '').startsWith('cloudflare-'))
-      .flatMap(addressesOf)
-      .filter((address) => declared.has(address))
-  );
+  const admitted = new Set();
+  for (const rule of allows.filter((r) => String(r?.name ?? '').startsWith('cloudflare-'))) {
+    for (const address of addressesOf(rule)) {
+      if (declared.has(address) && !shadowingDeny(doc.ipSecurityRestrictions, rule, address)) admitted.add(address);
+    }
+  }
   const windows = allows
     .map((rule) => String(rule?.name ?? ''))
     .filter((name) => name.startsWith('ci-'));

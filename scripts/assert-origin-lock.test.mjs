@@ -12,10 +12,12 @@ import { describe, expect, it } from 'vitest';
 import {
   addressesOf,
   declaredCloudflareRanges,
+  ipv4Interval,
   isSingleAddress,
   LOCK_VARIABLE,
   lockProblems,
   MIN_DECLARED_RANGES,
+  overlaps,
   parseRestrictions,
   report,
   run,
@@ -82,6 +84,27 @@ describe('declaredCloudflareRanges', () => {
 
   it('finds nothing in a module without the variable, rather than guessing', () => {
     expect(declaredCloudflareRanges('variable "other" {\n  default = ["1.2.3.0/24"]\n}\n')).toEqual([]);
+  });
+});
+
+describe('ipv4Interval and overlaps', () => {
+  it('reads a CIDR as its first and last address', () => {
+    expect(ipv4Interval('10.0.0.0/8')).toEqual([167772160, 184549375]);
+    expect(ipv4Interval('198.51.100.4')).toEqual([3325256708, 3325256708]);
+    expect(ipv4Interval('0.0.0.0/0')).toEqual([0, 4294967295]);
+    expect(ipv4Interval('2001:db8::/32')).toBeNull();
+    expect(ipv4Interval('300.1.1.1/8')).toBeNull();
+  });
+
+  it.each([
+    ['Any', '173.245.48.0/20', true],
+    ['0.0.0.0/0', '173.245.48.0/20', true],
+    ['173.245.48.0/24', '173.245.48.0/20', true],
+    ['173.245.0.0/16', '173.245.48.0/20', true],
+    ['173.245.64.0/24', '173.245.48.0/20', false],
+    ['::/0', '173.245.48.0/20', false],
+  ])('%s overlaps %s: %s', (address, range, expected) => {
+    expect(overlaps(address, range)).toBe(expected);
   });
 });
 
@@ -153,6 +176,31 @@ describe('lockProblems', () => {
     const problems = problemsOf(locked([rule('ci-smoke-9', '198.51.100.0/24', 'Allow', 300)]));
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain('/32');
+  });
+
+  it('fails a ci-* rule listing two hosts, each of which would pass alone', () => {
+    const problems = problemsOf(locked([rule('ci-smoke-9', '198.51.100.4/32,203.0.113.9/32', 'Allow', 300)]));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('lists 2 addresses');
+  });
+
+  it('fails when a Deny evaluated first refuses every Cloudflare range, naming the Deny', () => {
+    // Review's case: `Deny Any` at priority 50 sits before Terraform's
+    // Cloudflare Allow rules at 100 and up, so every edge is refused.
+    const problems = problemsOf(locked([rule('block-everything', 'Any', 'Deny', 50)]));
+    expect(problems).toHaveLength(RANGES.length + 1);
+    expect(problems[0]).toContain('`block-everything` (priority 50)');
+    expect(problems.at(-1)).toContain('unreachable through Cloudflare');
+  });
+
+  it('fails when a Deny evaluated first refuses part of one range', () => {
+    const problems = problemsOf(locked([rule('block-a-slice', '173.245.48.0/24', 'Deny', 50)]));
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toContain('`173.245.48.0/20`');
+  });
+
+  it('ignores a Deny evaluated after the Cloudflare rules, as Terraform writes its own deny-all', () => {
+    expect(problemsOf(locked([rule('late-deny', '173.245.48.0/24', 'Deny', 70000)]))).toEqual([]);
   });
 
   it('fails an Allow rule added outside Terraform, naming it', () => {

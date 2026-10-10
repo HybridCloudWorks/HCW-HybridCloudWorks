@@ -35,14 +35,14 @@
  * owner deploys, and comparing against `main` would page "missing" for every
  * function merged and not yet shipped. `--deployed` reads the inventory at the
  * commit whose package is live: the newest successful `Deploy to Azure
- * Functions` step among the newest run of `deploy-functions.yml` that
- * succeeded outright and its last ten runs of any outcome. The STEP, not the
+ * Functions` step among the last fifty runs of `deploy-functions.yml`, of any
+ * outcome, and its newest run that succeeded outright. The STEP, not the
  * run: a run that uploads and then fails a later check has still replaced the
  * package, so its commit is the one running. Re-run attempts are included
  * (`filter=all`), and "newest" is the step's completion time, so an old run
- * re-run later counts as the later upload it was. The outright success is
- * asked for on its own, so later dispatches that never reached the upload
- * cannot push it out of view.
+ * re-run later counts as the later upload it was. Later dispatches that never
+ * reached the upload therefore cannot hide it, and jobs are read only for
+ * runs active after the newest upload found (findDeployedCommit says how).
  *
  * When no such run is found, or the deployed commit predates the inventory
  * file, there is no expected set to compare with. That is reported as "not
@@ -109,8 +109,14 @@ export const DEPLOY_WORKFLOW = 'deploy-functions.yml';
  */
 export const DEPLOY_STEP = 'Deploy to Azure Functions';
 
-/** How many recent deploy runs are searched for the live package's commit. */
+/** How many deploy runs are listed per page while looking for the live package's commit. */
 export const MAX_RUNS = 10;
+
+/**
+ * How many pages of runs are listed: fifty runs back. Listing is cheap; jobs
+ * are read only for runs active after the newest upload found so far.
+ */
+export const MAX_PAGES = 5;
 
 const DEFAULT_INVENTORY = join(fileURLToPath(new URL('..', import.meta.url)), INVENTORY_PATH);
 
@@ -305,36 +311,61 @@ function runsOf(body) {
   return runs;
 }
 
+/** When a run last changed: no step in it can have completed later. NaN when unknown. */
+const lastActivity = (run) => Date.parse(run?.updated_at ?? run?.run_started_at ?? run?.created_at ?? '');
+
 /**
  * The commit whose package is live: the newest successful `DEPLOY_STEP`
- * among the newest run that succeeded outright and the last `MAX_RUNS` runs
- * of any outcome, every attempt of each.
+ * among the runs of `DEPLOY_WORKFLOW`, every attempt of each, whatever the
+ * run's own conclusion.
  *
- * The run that succeeded is asked for separately (`status=success`) so that
- * a string of later dispatches that never reached the upload (refused on the
- * ref, on a busy workspace, or never approved) cannot push it out of the
- * window and leave the monitor unarmed. The recent runs of any outcome are
- * there for the case a successful run cannot show: one that uploaded and
- * then failed a later check, or is still running, and so is the package
- * that is live.
+ * Up to `MAX_PAGES` pages of `MAX_RUNS` runs are listed, the newest run that
+ * succeeded outright is asked for separately (`status=success`), and their
+ * jobs are read in order of each run's last activity. A run whose last
+ * activity is older than the upload already found is skipped, because no step
+ * in it can have completed later. So a deploy that uploaded
+ * and then failed a later check is found behind a string of later dispatches
+ * that never reached the upload (refused on the ref, on a busy workspace, or
+ * never approved), and the usual case, the newest run having uploaded, costs
+ * one jobs call.
  *
  * @returns {Promise<{ sha: string, runNumber: number|null, completedAt: string } | null>}
- *   null when no run has ever uploaded a package that this can find.
+ *   null when no run this can see has uploaded a package.
  */
 export async function findDeployedCommit({ token, owner, repo, fetchImpl = fetch }) {
   const base = `${API}/repos/${owner}/${repo}/actions`;
-  const succeeded = runsOf(
-    await ghJson(fetchImpl, `${base}/workflows/${DEPLOY_WORKFLOW}/runs?status=success&per_page=1`, token)
-  );
-  const recent = runsOf(await ghJson(fetchImpl, `${base}/workflows/${DEPLOY_WORKFLOW}/runs?per_page=${MAX_RUNS}`, token));
-  const candidates = new Map();
-  for (const run of [...recent.slice(0, MAX_RUNS), ...succeeded.slice(0, 1)]) candidates.set(run?.id, run);
+  const runsUrl = `${base}/workflows/${DEPLOY_WORKFLOW}/runs`;
+  const succeeded = runsOf(await ghJson(fetchImpl, `${runsUrl}?status=success&per_page=1`, token));
+  const listed = [];
+  for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const batch = runsOf(await ghJson(fetchImpl, `${runsUrl}?per_page=${MAX_RUNS}&page=${page}`, token));
+    listed.push(...batch.slice(0, MAX_RUNS));
+    if (batch.length < MAX_RUNS) break;
+  }
 
-  let best = null;
-  for (const run of candidates.values()) {
+  const candidates = new Map();
+  for (const run of [...listed, ...succeeded.slice(0, 1)]) {
     if (typeof run?.id !== 'number' || typeof run.head_sha !== 'string' || !run.head_sha) {
       throw new Error('A deploy run came back without an id or a head_sha, so nothing can be compared.');
     }
+    candidates.set(run.id, run);
+  }
+  // Most recent activity first. A run with no readable time goes last and is
+  // always read, since nothing bounds when its steps completed.
+  const ordered = [...candidates.values()].sort((a, b) => {
+    const x = lastActivity(a);
+    const y = lastActivity(b);
+    if (!Number.isFinite(x)) return Number.isFinite(y) ? 1 : 0;
+    if (!Number.isFinite(y)) return -1;
+    return y - x;
+  });
+
+  let best = null;
+  for (const run of ordered) {
+    // Nothing in a run last active before the upload already found can have
+    // completed after it, so its jobs are not read.
+    const activity = lastActivity(run);
+    if (best && Number.isFinite(activity) && activity < best.at) continue;
     const jobsBody = await ghJson(fetchImpl, `${base}/runs/${run.id}/jobs?filter=all&per_page=100`, token);
     if (!Array.isArray(jobsBody?.jobs)) {
       throw new Error(`GitHub returned a jobs payload without a \`jobs\` array for run ${run.id}.`);
@@ -405,7 +436,7 @@ export async function run({ args = [], input = '', env = {}, fetchImpl = fetch, 
   if (!deployed) {
     return formatNotArmed(
       new Set(live.map((name) => name.toLowerCase())).size,
-      `No run of \`${DEPLOY_WORKFLOW}\` has succeeded, and none of its last ${MAX_RUNS} completed its ` +
+      `No run of \`${DEPLOY_WORKFLOW}\` has succeeded, and none of its last ${MAX_RUNS * MAX_PAGES} completed its ` +
         `\`${DEPLOY_STEP}\` step, so which commit is live is not known.`
     );
   }

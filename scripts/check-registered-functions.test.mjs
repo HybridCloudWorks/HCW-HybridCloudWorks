@@ -17,6 +17,7 @@ import {
   findDeployedCommit,
   formatNamed,
   INVENTORY_PATH,
+  MAX_PAGES,
   MAX_RUNS,
   MIN_EXPECTED,
   parseInventory,
@@ -231,8 +232,9 @@ function github({ runs = [], jobs = {}, inventories = {}, failAt = null } = {}) 
       // As the API answers: newest first, `status=success` meaning the run's
       // conclusion, and no more than per_page.
       const perPage = Number(/per_page=(\d+)/.exec(url)?.[1] ?? 30);
+      const page = Number(/[?&]page=(\d+)/.exec(url)?.[1] ?? 1);
       const pool = url.includes('status=success') ? runs.filter((r) => r.conclusion === 'success') : runs;
-      return respond(200, { workflow_runs: pool.slice(0, perPage) });
+      return respond(200, { workflow_runs: pool.slice((page - 1) * perPage, page * perPage) });
     }
     const jobsMatch = /\/runs\/(\d+)\/jobs\?filter=all/.exec(url);
     if (jobsMatch) return respond(200, { jobs: jobs[jobsMatch[1]] ?? [] });
@@ -303,8 +305,59 @@ describe('findDeployedCommit: the commit whose package is live', () => {
     const { fetchImpl, calls } = github({ runs: [{ id: 1, run_number: 1, head_sha: SHA_OLD }], jobs: {} });
     await findDeployedCommit({ token: 't0ken', owner: 'o', repo: 'r', fetchImpl });
     expect(calls.some((url) => url.includes('status=success&per_page=1'))).toBe(true);
-    expect(calls.some((url) => url.endsWith(`/runs?per_page=${MAX_RUNS}`))).toBe(true);
+    expect(calls.some((url) => url.endsWith(`/runs?per_page=${MAX_RUNS}&page=1`))).toBe(true);
     expect(calls.filter((url) => url.includes('/jobs?')).every((url) => url.includes('filter=all'))).toBe(true);
+  });
+
+  it('lists no more than MAX_PAGES pages of runs', async () => {
+    const runs = Array.from({ length: MAX_RUNS * (MAX_PAGES + 2) }, (_, i) => ({ id: 1000 + i, run_number: i, head_sha: SHA_NEW }));
+    const { fetchImpl, calls } = github({ runs, jobs: {} });
+    await findDeployedCommit({ token: 't0ken', owner: 'o', repo: 'r', fetchImpl });
+    expect(calls.filter((url) => /\/runs\?per_page=\d+&page=\d+$/.test(url))).toHaveLength(MAX_PAGES);
+  });
+
+  it('finds a run that uploaded and then failed a later check, behind more refused dispatches than a page', async () => {
+    // Review's second case: the live package came from a run that failed
+    // after its upload, and is neither in the first page nor an outright
+    // success. The older outright success is NOT the live commit.
+    const refused = Array.from({ length: MAX_RUNS + 2 }, (_, i) => ({
+      id: 100 + i,
+      run_number: 300 - i,
+      head_sha: SHA_NEW,
+      conclusion: 'failure',
+      updated_at: `2026-10-09T12:${String(59 - i).padStart(2, '0')}:00Z`,
+    }));
+    const jobs = Object.fromEntries(refused.map((run) => [run.id, [job(step('skipped', null))]]));
+    const SHA_MID = 'ccccccc3333333333333333333333333333333cc';
+    jobs[50] = [job(step('success', '2026-10-09T10:05:00Z'), step('failure', '2026-10-09T10:08:00Z', 'Assert every expected function is registered'))];
+    jobs[1] = [job(step('success', '2026-10-01T09:00:00Z'))];
+    const { fetchImpl } = github({
+      runs: [
+        ...refused,
+        { id: 50, run_number: 60, head_sha: SHA_MID, conclusion: 'failure', updated_at: '2026-10-09T10:10:00Z' },
+        { id: 1, run_number: 41, head_sha: SHA_OLD, conclusion: 'success', updated_at: '2026-10-01T09:05:00Z' },
+      ],
+      jobs,
+    });
+    const found = await findDeployedCommit({ token: 't0ken', owner: 'o', repo: 'r', fetchImpl });
+    expect(found).toEqual({ sha: SHA_MID, runNumber: 60, completedAt: '2026-10-09T10:05:00Z' });
+  });
+
+  it('reads jobs only for runs active after the newest upload it has found', async () => {
+    const runs = Array.from({ length: 20 }, (_, i) => ({
+      id: 500 + i,
+      run_number: 500 - i,
+      head_sha: i === 0 ? SHA_NEW : SHA_OLD,
+      conclusion: 'success',
+      updated_at: `2026-10-${String(29 - i).padStart(2, '0')}T10:10:00Z`,
+    }));
+    const jobs = Object.fromEntries(
+      runs.map((run, i) => [run.id, [job(step('success', `2026-10-${String(29 - i).padStart(2, '0')}T10:05:00Z`))]])
+    );
+    const { fetchImpl, calls } = github({ runs, jobs });
+    const found = await findDeployedCommit({ token: 't0ken', owner: 'o', repo: 'r', fetchImpl });
+    expect(found.sha).toBe(SHA_NEW);
+    expect(calls.filter((url) => url.includes('/jobs?'))).toHaveLength(1);
   });
 
   it('finds the last outright success behind more failed dispatches than MAX_RUNS', async () => {
