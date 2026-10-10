@@ -93,7 +93,7 @@ describe('the addons route template', () => {
     expect(body).toContain(`reverse_proxy 127.0.0.1:${addon.port}`);
     // One label below the lab domain, and no wildcard: the site's CSP names
     // exactly this origin.
-    expect(rendered).not.toMatch(new RegExp(`\\*\\.${addon.id.replace(/-/g, '\\-')}\\.`));
+    expect(rendered).not.toContain(`*.${addon.id}.`);
   });
 
   it.each(ADDONS)('sends a top-level visit to $id to the add-on’s own page on the site', (addon) => {
@@ -124,7 +124,7 @@ describe('the addons route template', () => {
 
   it('renders no route for an empty list, apart from the error block', () => {
     const empty = lines(render([]));
-    expect(empty.filter((line) => /^@addon_|reverse_proxy|vars /.test(line))).toEqual([]);
+    expect(empty.filter((line) => /^(@addon_|reverse_proxy|vars )/.test(line))).toEqual([]);
     expect(empty).toEqual(['handle_errors {', '}']);
   });
 });
