@@ -19,7 +19,13 @@ contracts are the [AddOn integration standard](../../standards/addon-integration
 
 Each pair's page records what the App keeps, what the AddOn is, its origin,
 port, image and status on the site, and links the refactoring pull requests
-the program opened in each repository.
+the program opened in each repository. The program's closing documents are
+the [final architecture package](final-package.md) (twenty sections: the
+reference model, the responsibility and dependency maps, the contract,
+security, deployment, Container Apps, versioning, testing and documentation
+standards, the technical-debt backlog, next actions and risks) and the
+[validation report](validation-report.md) (integration, security and
+deployment evidence, the compatibility matrix and the rollback procedures).
 
 ## What lands where
 
