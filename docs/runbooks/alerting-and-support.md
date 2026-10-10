@@ -518,9 +518,10 @@ stop. Public lab submissions are closed while the agent is stopped.
 **`alert-jobs-poison`**: put one short-lived message into the poison
 queue. No human holds a data-plane role on `stsitefuncprodcus01`, and its
 firewall denies everything but the Functions subnet, so the test takes a
-temporary role and a temporary firewall entry for this machine. It must not run
-while `deploy-functions.yml` is running, since that workflow opens and closes
-the same firewall. Three values first:
+temporary role and a temporary firewall entry for this machine. It owns exactly
+those two changes and nothing else: it stops if either already exists, keeps
+the id of the assignment it creates, and deletes that id and that address
+only. Three values first:
 
 ```powershell
 $sa = (az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).id
@@ -534,15 +535,25 @@ $me = (az ad signed-in-user show -o json | ConvertFrom-Json).id
 $ip = Invoke-RestMethod -Uri https://api.ipify.org
 ```
 
-An empty result here means you hold no direct assignment on the account
-already, so the delete at the end removes only what this test adds:
+**Stop conditions.** Both of these must print nothing. If the first lists any
+row, you already hold an assignment on the account, and this test would share
+its scope: skip it and note that in the fire record. If the second lists any
+address, a deploy or another operator has the firewall open: wait until it
+prints nothing, because `deploy-functions.yml` opens and closes the same
+firewall.
 
 ```powershell
 az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
 ```
 
 ```powershell
-az role assignment create --assignee-object-id $me --assignee-principal-type User --role "Storage Queue Data Contributor" --scope $sa -o none
+(az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).networkRuleSet.ipRules
+```
+
+Then the two temporary changes, keeping the assignment's id in `$ra`:
+
+```powershell
+$ra = (az role assignment create --assignee-object-id $me --assignee-principal-type User --role "Storage Queue Data Contributor" --scope $sa -o json | ConvertFrom-Json).id
 ```
 
 ```powershell
@@ -562,22 +573,45 @@ az storage queue create --name platform-jobs-poison --account-name stsitefuncpro
 az storage message put --queue-name platform-jobs-poison --account-name stsitefuncprodcus01 --auth-mode login --content plat4-fire-test --time-to-live 900 -o none
 ```
 
-Then close both, whether or not the put worked:
+Then undo both, whether or not the put worked, by the address and the id this
+test created:
 
 ```powershell
 az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address $ip -o none
 ```
 
 ```powershell
-az role assignment delete --assignee $me --role "Storage Queue Data Contributor" --scope $sa
+az role assignment delete --ids $ra
 ```
 
-Success is `alert-jobs-poison-prod-cus` within about 30 minutes, and this list
-empty again:
+Success is `alert-jobs-poison-prod-cus` within about 30 minutes, and both stop
+condition reads printing nothing again:
+
+```powershell
+az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
+```
 
 ```powershell
 (az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).networkRuleSet.ipRules
 ```
+
+**If the test was interrupted** and the window holding `$ra` and `$ip` is gone,
+the stop conditions guarantee that nothing matching existed before it began,
+so whatever matches now is the test's own. Set `$sa` and `$me` again as above,
+then remove the role it left:
+
+```powershell
+az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Where-Object roleDefinitionName -eq 'Storage Queue Data Contributor' | ForEach-Object { az role assignment delete --ids $_.id }
+```
+
+and the address, if this machine's address is the one listed. Any other
+address belongs to a deploy in progress, which removes its own:
+
+```powershell
+az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address (Invoke-RestMethod -Uri https://api.ipify.org) -o none
+```
+
+Finish with the two verification reads above, which should both print nothing.
 
 The role's create and delete also fire `alert-rbac-write-app-prod-cus`, twice.
 That is that rule's test done as well.
@@ -720,9 +754,10 @@ write, within about ten minutes. Activity Log alerts are stateless, so there
 is no Resolved mail.
 
 **`alert-rbac-write-app` and `alert-rbac-write-mgmt`**: grant this
-account Reader on one group in each subscription and take it back. The poison
-queue test above already covers the application subscription; this covers
-both. `$me` is the value from that test; set it again in a new window:
+account Reader on one group in each subscription and take it back, by the id
+of the assignment the test made. The poison queue test above already covers the
+application subscription; this covers both. `$me` is the value from that test;
+set it again in a new window:
 
 ```powershell
 $me = (az ad signed-in-user show -o json | ConvertFrom-Json).id
@@ -732,24 +767,25 @@ $me = (az ad signed-in-user show -o json | ConvertFrom-Json).id
 $mg = (az group show -n rg-mgmt-plat-prod-cus --subscription sub-plat-mgmt-prod-cus -o json | ConvertFrom-Json).id
 ```
 
-An empty result here means no direct assignment exists at that group already,
-so the delete below removes only what the test added:
+**Stop condition:** this must print nothing. A row means you already hold a
+direct assignment at that group; skip this half and note it in the fire record.
 
 ```powershell
 az role assignment list --assignee $me --scope $mg -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
 ```
 
 ```powershell
-az role assignment create --assignee-object-id $me --assignee-principal-type User --role Reader --scope $mg -o none
+$rm = (az role assignment create --assignee-object-id $me --assignee-principal-type User --role Reader --scope $mg -o json | ConvertFrom-Json).id
 ```
 
 ```powershell
-az role assignment delete --assignee $me --role Reader --scope $mg
+az role assignment delete --ids $rm
 ```
 
 Success is two notifications for `alert-rbac-write-mgmt-prod-cus` within about
-ten minutes. For the application subscription, the same four commands with
-`rg-web-site-prod-cus` and no `--subscription`:
+ten minutes, and the stop-condition read printing nothing again. For the
+application subscription, the same with `rg-web-site-prod-cus` and no
+`--subscription`:
 
 ```powershell
 $rg = (az group show -n rg-web-site-prod-cus -o json | ConvertFrom-Json).id
@@ -760,11 +796,11 @@ az role assignment list --assignee $me --scope $rg -o json | ConvertFrom-Json | 
 ```
 
 ```powershell
-az role assignment create --assignee-object-id $me --assignee-principal-type User --role Reader --scope $rg -o none
+$rw = (az role assignment create --assignee-object-id $me --assignee-principal-type User --role Reader --scope $rg -o json | ConvertFrom-Json).id
 ```
 
 ```powershell
-az role assignment delete --assignee $me --role Reader --scope $rg
+az role assignment delete --ids $rw
 ```
 
 ### Fire record
