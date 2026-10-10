@@ -108,3 +108,36 @@ argument_specs:
         required: false
         default: 10m
         description: The json-file log cap per container.
+      addons_network_name:
+        type: str
+        required: false
+        default: hcw-addons
+        description: The add-ons' own bridge network; inter-container communication is off on it.
+      addons_network_bridge:
+        type: str
+        required: false
+        default: br-hcw-addons
+        description: The host interface name of that network.
+      addons_network_subnet:
+        type: str
+        required: false
+        default: 172.29.0.0/24
+        description: The network's IPv4 subnet, the source the egress rules match.
+      addons_egress_tcp_ports:
+        type: list
+        elements: int
+        required: false
+        default: [443]
+        description: The TCP ports a new flow from the subnet may open, to addons_egress_cidrs only.
+      addons_egress_cidrs:
+        type: list
+        elements: str
+        required: false
+        description:
+          - The destination ranges a new flow from the subnet may reach; the verification endpoint's
+            published ranges (defaults/main.yml carries the list and its retrieval date).
+      addons_ufw_after_rules:
+        type: str
+        required: false
+        default: /etc/ufw/after.rules
+        description: Where the egress rules are written so ufw restores them at boot.

@@ -149,8 +149,15 @@ describe('projectHealth', () => {
     ['ok false', { ...HEALTH, ok: false }],
     ['no version', { ...HEALTH, version: undefined }],
     ['a version that is not semver', { ...HEALTH, version: 'latest' }],
+    ['a semver prefix with a long tail', { ...HEALTH, version: `1.2.3${'x'.repeat(200)}` }],
+    ['a semver prefix with a space', { ...HEALTH, version: '1.2.3 and more' }],
+    ['a version over the length bound', { ...HEALTH, version: `1.2.3-${'a'.repeat(40)}` }],
   ])('refuses a body that is %s', (_label, health) => {
     expect(() => projectHealth(health)).toThrow(/health body/);
+  });
+
+  it.each(['0.3.0', '1.2.3-beta.1', '1.2.3+build.7', '1.2.3-rc.1+sha.abc'])('accepts the whole semver %s', (version) => {
+    expect(projectHealth({ ...HEALTH, version }).version).toBe(version);
   });
 
   it('bounds edition and capabilities', () => {
@@ -244,6 +251,38 @@ describe('getAddonStatus', () => {
     expect(store.upsertDoc).not.toHaveBeenCalled();
   });
 
+  it('shares one live read among concurrent requests that all miss the cache', async () => {
+    const store = makeStore();
+    const fetchImpl = addonFetch({ '/api/health': HEALTH });
+    const h = handlers({ store, fetchImpl });
+    const answers = await Promise.all(
+      Array.from({ length: 5 }, () => h.getAddonStatus(request('migration'), context))
+    );
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(store.upsertDoc).toHaveBeenCalledTimes(1);
+    for (const res of answers) expect(body(res)).toMatchObject({ configured: true, reachable: true });
+    // The next miss after settlement reads again: the shared promise is not kept past its read.
+    store.readDoc.mockResolvedValueOnce(null);
+    await h.getAddonStatus(request('migration'), context);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs a failed read by category and class, never by message', async () => {
+    const store = makeStore();
+    store.readDoc.mockImplementation(async () => {
+      throw Object.assign(new Error('read https://migration.lab.example/boom failed'), { code: 'ECOSMOS' });
+    });
+    store.upsertDoc.mockImplementation(async () => {
+      throw new Error('write https://migration.lab.example/boom failed');
+    });
+    const fetchImpl = vi.fn(async () => {
+      throw new TypeError('fetch failed: https://migration.lab.example/api/health');
+    });
+    const res = await handlers({ store, fetchImpl }).getAddonStatus(request('migration'), context);
+    expect(res.status).toBe(200);
+    expectNoUrl(res.body, ...context.warn.mock.calls.flat(), ...context.error.mock.calls.flat());
+  });
+
   it('reads live past a minute, replacing the stale document', async () => {
     const store = makeStore({
       readDoc: vi.fn(async () => cachedDoc({ configured: true, reachable: false }, 61_000)),
@@ -298,7 +337,8 @@ describe('getAddonStatus', () => {
       CACHE_CONTAINER,
       expect.objectContaining({ value: expect.objectContaining({ reachable: false }) })
     );
-    expect(context.warn).toHaveBeenCalledWith(expect.stringContaining('migration unreachable'));
+    expect(context.warn).toHaveBeenCalledWith(expect.stringContaining('ADDON_MIGRATION_URL unreachable'));
+    expect(context.warn.mock.calls.flat().join(' ')).not.toMatch(/\bmigration\b/);
     expectNoUrl(res.body, ...context.warn.mock.calls.flat());
   });
 

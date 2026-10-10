@@ -36,9 +36,11 @@ const SENTENCE = "This tool isn't available right now.";
 
 /** The rows the template loops over: what the role's vars/main.yml filters `addons` down to. */
 const ADDONS = [
-  { id: 'migration', port: 18081 },
-  { id: 'cloud-assessment', port: 18083 },
+  { id: 'migration', port: 18081, image_digest: `sha256:${'a'.repeat(64)}` },
+  { id: 'cloud-assessment', port: 18083, image_digest: '' },
 ];
+const DEPLOYED = ADDONS.filter((addon) => addon.image_digest);
+const PENDING = ADDONS.filter((addon) => !addon.image_digest);
 
 /**
  * Render the template's one `{% for addon in addons_running %}` loop and
@@ -54,10 +56,14 @@ function render(rows) {
     ansible_managed: 'Ansible managed',
   };
   const loop = /\{% for addon in addons_running %\}\n([\s\S]*?)\{% endfor %\}\n/g;
+  // The one `{% if addon.image_digest | default('') %} … {% else %} … {% endif %}`
+  // inside the loop: a deployed row keeps the first branch, a pending row the second.
+  const branch = /\{% if addon\.image_digest \| default\(''\) %\}\n([\s\S]*?)\{% else %\}\n([\s\S]*?)\{% endif %\}\n/g;
   const expanded = template.replace(loop, (_, body) =>
     rows
       .map((addon) =>
         body
+          .replace(branch, (__, deployed, pending) => (addon.image_digest ? deployed : pending))
           .replace(/\{\{ addon\.id \| replace\('-', '_'\) \}\}/g, addon.id.replace(/-/g, '_'))
           .replace(/\{\{ addon\.id \}\}/g, addon.id)
           .replace(/\{\{ addon\.port \}\}/g, String(addon.port))
@@ -85,7 +91,7 @@ describe('the addons route template', () => {
     expect(rendered).not.toMatch(/\{\{|\{%/);
   });
 
-  it.each(ADDONS)('gives $id one host matcher that is exactly its lab name, and a proxy to its port', (addon) => {
+  it.each(DEPLOYED)('gives deployed $id one host matcher that is exactly its lab name, and a proxy to its port', (addon) => {
     const matcher = `@addon_${addon.id.replace(/-/g, '_')}`;
     expect(body).toContain(`${matcher} host ${addon.id}.${DOMAIN}`);
     expect(body.filter((line) => line.startsWith(`${matcher} host`))).toHaveLength(1);
@@ -107,7 +113,7 @@ describe('the addons route template', () => {
     const matcher = `@addon_${addon.id.replace(/-/g, '_')}_down`;
     expect(body).toContain(`${matcher} host ${addon.id}.${DOMAIN}`);
     expect(body).toContain(`handle ${matcher} {`);
-    expect(body.filter((line) => line === `respond "${SENTENCE}" 503`)).toHaveLength(ADDONS.length);
+    expect(body.filter((line) => line === `respond "${SENTENCE}" 503`)).toHaveLength(ADDONS.length + PENDING.length);
   });
 
   it('lets nothing of an add-on through at the top level', () => {
@@ -119,7 +125,19 @@ describe('the addons route template', () => {
     for (const line of body.filter((l) => l.startsWith('reverse_proxy'))) {
       expect(line).toMatch(/^reverse_proxy 127\.0\.0\.1:\d+$/);
     }
-    expect(body.filter((l) => l.startsWith('reverse_proxy'))).toHaveLength(ADDONS.length);
+    expect(body.filter((l) => l.startsWith('reverse_proxy'))).toHaveLength(DEPLOYED.length);
+  });
+
+  it.each(PENDING)('answers the sentence directly for pending $id, with no proxy to its port', (addon) => {
+    const matcher = `@addon_${addon.id.replace(/-/g, '_')}`;
+    expect(body).toContain(`${matcher} host ${addon.id}.${DOMAIN}`);
+    expect(body).toContain(`handle ${matcher} {`);
+    expect(rendered).not.toContain(`reverse_proxy 127.0.0.1:${addon.port}`);
+    const open = body.indexOf(`handle ${matcher} {`);
+    expect(body[open + 1]).toBe(`respond "${SENTENCE}" 503`);
+    expect(body[open + 2]).toBe('}');
+    // The direct visit still goes to the tool's own page on the site.
+    expect(body).toContain(`vars ${matcher} lab_direct_visit_redirect https://hybridcloudworks.com/tools/${addon.id}`);
   });
 
   it('renders no route for an empty list, apart from the error block', () => {

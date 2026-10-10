@@ -72,3 +72,11 @@ argument_specs:
         description:
           - The add-on rows whose containers are checked; defaults to the enabled rows of addons that
             have a digest, while addons_enabled is true.
+      privilege_checks_addons_network:
+        type: str
+        required: false
+        description: The network each add-on container must be on; defaults to the addons role's addons_network_name.
+      privilege_checks_addons_container_port:
+        type: int
+        required: false
+        description: The container port each add-on must publish, and only that one; defaults to the addons role's addons_container_port.

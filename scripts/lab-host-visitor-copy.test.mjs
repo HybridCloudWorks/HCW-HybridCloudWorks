@@ -19,9 +19,10 @@
  * The bodies are read from the templates Ansible renders, with each
  * `{{ variable }}` taken from the role's defaults/main.yml, so a new
  * `respond` in any of them is scanned too. The tool add-ons (ADR 0035) add
- * the addons role's route, whose 503 while a container is stopped is the
- * site's own sentence for an add-on (ADDON_UNAVAILABLE_SENTENCE in
- * frontend/src/pages/tools/AddOnPanePage.jsx), checked the same way.
+ * the addons role's route, whose two 503s (a row with no digest yet, and a
+ * stopped container) are both the site's own sentence for an add-on
+ * (ADDON_UNAVAILABLE_SENTENCE in frontend/src/pages/tools/AddOnPanePage.jsx),
+ * checked the same way.
  *
  * The lab launcher (lab-host/coder/launcher/) is the page every pane opens
  * on, so everything it can put in front of a visitor is scanned the same
@@ -123,10 +124,11 @@ describe('the scan itself', () => {
     expect(termsIn("Lab workspaces aren't available right now.")).toEqual([]);
   });
 
-  it('finds the four bodies a pane can show: the apex, the unknown name, Coder stopped and an add-on stopped', () => {
+  it('finds the five bodies a pane can show: the apex, the unknown name, Coder stopped, an add-on pending and an add-on stopped', () => {
     expect(paneBodies.map(({ status, file }) => `${status} ${file}`).sort()).toEqual([
       `200 ${APEX_ROUTE}`,
       `404 ${CADDYFILE} (TLS site)`,
+      `503 ${ADDONS_ROUTE}`,
       `503 ${ADDONS_ROUTE}`,
       `503 ${CODER_ROUTE}`,
     ]);
@@ -149,11 +151,15 @@ describe('what a pane can show from the lab host', () => {
     expect(responds(read(CODER_ROUTE))).toEqual([{ body: sentence[1], status: 503 }]);
   });
 
-  it('answers "add-on stopped" with the site’s own sentence for the same state (ADR 0035)', () => {
+  it('answers "add-on pending" and "add-on stopped" with the site’s own sentence for the same state (ADR 0035)', () => {
     const sentence = read(ADDON_PANE_PAGE).match(/export const ADDON_UNAVAILABLE_SENTENCE = "([^"]+)";/);
     expect(sentence, `${ADDON_PANE_PAGE} no longer exports ADDON_UNAVAILABLE_SENTENCE`).not.toBeNull();
     expect(DEFAULTS.addons_unavailable_response).toBe(sentence[1]);
-    expect(responds(read(ADDONS_ROUTE))).toEqual([{ body: sentence[1], status: 503 }]);
+    // Two bodies, one sentence: the direct answer for a row with no digest yet, and the error block for a stopped container.
+    expect(responds(read(ADDONS_ROUTE))).toEqual([
+      { body: sentence[1], status: 503 },
+      { body: sentence[1], status: 503 },
+    ]);
   });
 });
 

@@ -24,3 +24,8 @@ privilege_checks_sandbox_docker_host: unix:///run/hcw-coder-docker/docker.sock
 privilege_checks_addons: >-
   {{ (addons | default([])) | selectattr('enabled') | selectattr('image_digest') | list
      if (addons_enabled | default(false)) | bool else [] }}
+# What the addons role runs each container on and publishes it from: the
+# role's own values (roles/addons/defaults and vars), read here so the check
+# fails when a container was reused from a run with other settings.
+privilege_checks_addons_network: "{{ addons_network_name | default('hcw-addons') }}"
+privilege_checks_addons_container_port: "{{ addons_container_port | default(8080) }}"

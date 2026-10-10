@@ -27,17 +27,33 @@ one; ADR 0035 decision 8 records them as the second permitted workload kind.
    `127.0.0.1:<port>:8080`, `read_only`, `/tmp` on tmpfs, `cap_drop ALL`,
    `no-new-privileges`, the row's `memory` and `pids_limit`, one CPU,
    `restart unless-stopped`, json-file logs capped at `addons_log_max_size`,
-   no volume, no socket, the default bridge, under the daemon's
-   user-namespace remap (no `userns_mode: host`), the image's own
-   `HEALTHCHECK`; the environment is the row's `env` plus each `secret_env`
+   no volume and no mount of any kind (compared strictly, so a container
+   reused with one is recreated), no socket, on the add-ons' own bridge
+   network `hcw-addons` (inter-container communication off, subnet
+   `172.29.0.0/24`), under the daemon's user-namespace remap (no
+   `userns_mode: host`), the image's own `HEALTHCHECK`; the environment is the row's `env` plus each `secret_env`
    key read from the vault variable it names (`no_log`, and `env` compared
    strictly so a removed key is removed). Then waits for
    `http://127.0.0.1:<port>/api/health` to answer 200 (not in check mode).
 3. A row whose `image_digest` is **empty** is not deployed: its release is
-   not published yet. The run says so and continues; the route below is
-   rendered all the same, so the name answers 503 with the site's sentence
-   and the site's status proxy reads the add-on as unreachable, which is
-   the truth until the digest is written in.
+   not published yet. The run says so and continues; any container left
+   from an earlier digest is removed, and the route below is rendered all
+   the same with a direct 503 carrying the site's sentence (never a proxy
+   to a port nothing of ours holds), so the site's status proxy reads the
+   add-on as unreachable, which is the truth until the digest is written in.
+4. Egress. Before anything is pulled, the role creates the network and
+   writes its egress policy into the `DOCKER-USER` chain, the one chain
+   Docker consults before its own accept rules (ufw's come after Docker's
+   and never see container traffic): established flows return; a new flow
+   from the subnet may open TCP 443 to the human-verification endpoint's
+   published ranges (`addons_egress_cidrs`, with the date they were read)
+   and nothing else; everything else from the subnet is rejected. The same
+   rules are written as a block in `/etc/ufw/after.rules`, which ufw
+   restores at boot before Docker starts, so they hold across a reboot
+   without a ufw reload (a reload would flush the rules Docker holds for
+   its running containers). Loopback publishing bounds what reaches an
+   add-on; this bounds where an add-on holding a visitor's upload can send
+   it. Read it on the host with `sudo iptables -L DOCKER-USER -n --line-numbers`.
 4. Renders `/etc/caddy/conf.d/20-addons.caddy` with one route per enabled
    row: `@addon_<id> host <id>.lab…`, `reverse_proxy 127.0.0.1:<port>`, a
    `vars @addon_<id> lab_direct_visit_redirect https://hybridcloudworks.com/tools/<id>`

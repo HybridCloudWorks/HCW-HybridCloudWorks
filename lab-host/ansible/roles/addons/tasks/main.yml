@@ -83,24 +83,93 @@
   loop_control:
     label: "{{ item.id }}"
 
-- name: Pull each deployable add-on image by digest
+# The add-ons' own network (defaults/main.yml): no inter-container
+# communication, a fixed subnet and bridge name, so the egress rules below
+# have one source to match and nothing on it can talk to anything else on
+# the host's Docker networks.
+- name: Create the add-ons' own bridge network
+  community.docker.docker_network:
+    name: "{{ addons_network_name }}"
+    driver: bridge
+    ipam_config:
+      - subnet: "{{ addons_network_subnet }}"
+    driver_options:
+      com.docker.network.bridge.enable_icc: "false"
+      com.docker.network.bridge.name: "{{ addons_network_bridge }}"
+  when: addons_active | length > 0
+
+# Egress from that subnet, in the DOCKER-USER chain, now (so the rules hold
+# from this run) and in ufw's after.rules (so they hold from the next boot).
+# Inserted at the top in reverse order, so the chain reads: established
+# returns, then one accept per range and port, then reject everything else
+# from the subnet. Each insert is idempotent: the module checks for the rule
+# before adding it. Traffic to the containers (the published loopback ports,
+# the answers to their flows) does not match -s and is untouched.
+- name: Reject every other new flow from the add-ons' subnet
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    action: insert
+    source: "{{ addons_network_subnet }}"
+    jump: REJECT
+    reject_with: icmp-port-unreachable
+    comment: hcw-addons egress (roles/addons)
+  when: addons_active | length > 0
+
+- name: Allow a new flow from the add-ons' subnet to the verification endpoint's ranges only
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    action: insert
+    source: "{{ addons_network_subnet }}"
+    destination: "{{ item.0 }}"
+    protocol: tcp
+    destination_port: "{{ item.1 }}"
+    ctstate: NEW
+    jump: RETURN
+    comment: hcw-addons egress (roles/addons)
+  loop: "{{ addons_egress_cidrs | product(addons_egress_tcp_ports) | list }}"
+  loop_control:
+    label: "{{ item.0 }}:{{ item.1 }}"
+  when: addons_active | length > 0
+
+- name: Let established flows from the add-ons' subnet return
+  ansible.builtin.iptables:
+    chain: DOCKER-USER
+    action: insert
+    source: "{{ addons_network_subnet }}"
+    ctstate: ESTABLISHED,RELATED
+    jump: RETURN
+    comment: hcw-addons egress (roles/addons)
+  when: addons_active | length > 0
+
+- name: Write the same egress rules where ufw restores them at boot
+  ansible.builtin.blockinfile:
+    path: "{{ addons_ufw_after_rules }}"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK: hcw-addons egress (roles/addons)"
+    block: "{{ lookup('ansible.builtin.template', 'ufw-after-rules.j2') }}"
+    create: false
+    mode: "0640"
+  when: addons_active | length > 0
+
+- name: Pull each deployed add-on image by digest
   community.docker.docker_image_pull:
     name: "{{ item.image }}@{{ item.image_digest }}"
     platform: linux/amd64
-  loop: "{{ addons_running | selectattr('image_digest') | list }}"
+  loop: "{{ addons_deployed }}"
   loop_control:
     label: "{{ item.id }}: {{ item.image }}@{{ item.image_digest }}"
 
 # One hardened container per row (ADR 0035 decision 6; the standard's
 # section 16): read-only root with /tmp on tmpfs, every capability dropped,
-# no new privileges, memory, pids and one CPU bounded, no volume, no socket,
-# the default bridge only, under the daemon's user-namespace remap (no
+# no new privileges, memory, pids and one CPU bounded, no volume and no
+# mount of any kind (compared strictly, so a container reused from an
+# earlier run with a volume is recreated without it), no socket, on the
+# add-ons' own network only, under the daemon's user-namespace remap (no
 # userns_mode: host), the image's own HEALTHCHECK, json-file logs capped.
 # The environment is the row's env plus each secret_env key read from its
 # vault variable, so no_log: the secret would otherwise be in the diff.
 # comparisons env strict: a key removed from the row is removed from the
 # container on the next run rather than kept.
-- name: Run each deployable add-on, published on the host's loopback only
+- name: Run each deployed add-on, published on the host's loopback only
   community.docker.docker_container:
     name: "hcw-addon-{{ item.id }}"
     image: "{{ item.image }}@{{ item.image_digest }}"
@@ -109,6 +178,9 @@
     restart_policy: unless-stopped
     published_ports:
       - "{{ addons_publish_address }}:{{ item.port }}:{{ addons_container_port }}"
+    network_mode: "{{ addons_network_name }}"
+    volumes: []
+    mounts: []
     read_only: true
     tmpfs:
       - /tmp
@@ -127,13 +199,16 @@
     comparisons:
       env: strict
       published_ports: strict
+      volumes: strict
+      mounts: strict
+      network_mode: strict
   vars:
     addon_secret_values: >-
       {{ dict(item.secret_env | default({}) | dict2items | map(attribute='key')
               | zip(item.secret_env | default({}) | dict2items | map(attribute='value')
                     | map('extract', vars))) }}
   no_log: true
-  loop: "{{ addons_running | selectattr('image_digest') | list }}"
+  loop: "{{ addons_deployed }}"
   loop_control:
     label: "hcw-addon-{{ item.id }} on {{ addons_publish_address }}:{{ item.port }}"
 
@@ -146,16 +221,20 @@
   until: addons_health.status == 200
   retries: "{{ addons_wait_retries }}"
   delay: "{{ addons_wait_delay }}"
-  loop: "{{ addons_running | selectattr('image_digest') | list }}"
+  loop: "{{ addons_deployed }}"
   loop_control:
     label: "hcw-addon-{{ item.id }}"
   when: not ansible_check_mode
 
-- name: Stop and remove each add-on container that is disabled
+# Every row that is not deployed this run: disabled, or enabled with its
+# digest cleared. The second case matters: a container left from an earlier
+# digest would otherwise keep serving while the run says nothing is deployed
+# and the privilege checks no longer look at it.
+- name: Stop and remove each add-on container that is disabled or has no digest
   community.docker.docker_container:
     name: "hcw-addon-{{ item.id }}"
     state: absent
-  loop: "{{ addons | rejectattr('id', 'in', addons_running | map(attribute='id') | list) | list }}"
+  loop: "{{ addons | rejectattr('id', 'in', addons_deployed | map(attribute='id') | list) | list }}"
   loop_control:
     label: "hcw-addon-{{ item.id }}"
 
@@ -179,8 +258,8 @@
 - name: Say what runs
   ansible.builtin.debug:
     msg: >-
-      {% if addons_running | selectattr('image_digest') | list | length > 0 %}
-      Tool add-ons running: {{ addons_running | selectattr('image_digest') | map(attribute='id')
+      {% if addons_deployed | length > 0 %}
+      Tool add-ons running: {{ addons_deployed | map(attribute='id')
       | map('regex_replace', '^', 'hcw-addon-') | join(', ') }}, each on the loopback behind Caddy
       at <id>.{{ lab_host_domain }}. Health over SSH: curl -s http://127.0.0.1:<port>/api/health
       (lab-host/README.md, "Tool add-ons").

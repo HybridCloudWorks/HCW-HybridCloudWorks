@@ -69,7 +69,9 @@ export const ADDON_STATUS_FIELDS = Object.freeze([
   'asOf',
 ]);
 
-const SEMVER = /^\d+\.\d+\.\d+/;
+// The whole string, not a prefix: a semver core with an optional pre-release and build, and never longer than
+// SHORT_STRING_MAX, so nothing past the version can ride into the cache and out to every status caller.
+const SEMVER = /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:-[0-9A-Za-z.-]{1,20})?(?:\+[0-9A-Za-z.-]{1,20})?$/;
 const SHORT_STRING_MAX = 40;
 const CAPABILITIES_MAX = 20;
 
@@ -117,7 +119,10 @@ export function projectHealth(body) {
   if (!body || typeof body !== 'object' || body.ok !== true) {
     throw new Error('the health body did not say ok');
   }
-  const version = typeof body.version === 'string' && SEMVER.test(body.version) ? body.version : null;
+  const version =
+    typeof body.version === 'string' && body.version.length <= SHORT_STRING_MAX && SEMVER.test(body.version)
+      ? body.version
+      : null;
   if (!version) throw new Error('the health body carried no semver version');
   const capabilities = Array.isArray(body.capabilities)
     ? body.capabilities.filter((c) => typeof c === 'string' && c.length <= SHORT_STRING_MAX).slice(0, CAPABILITIES_MAX)
@@ -182,6 +187,11 @@ export function createAddonStatusHandlers({
   now = () => Date.now(),
 }) {
   const caches = new Map();
+  // One live health read per id at a time on this instance: a burst of anonymous requests that all
+  // see a missing or stale cache entry shares the same promise instead of each dialling the AddOn.
+  // The bound is per Function App instance; a second instance may read once more in the same minute,
+  // and the cache document then settles both.
+  const inflight = new Map();
   const cacheFor = (id) => {
     if (!caches.has(id)) {
       caches.set(
@@ -209,7 +219,7 @@ export function createAddonStatusHandlers({
     if (!config) {
       if (hasAddonUrl(env, id)) {
         context?.warn?.(
-          `addons-status: ${addonEntry(id).setting} is not an https URL; reporting ${id} unconfigured`
+          `addons-status: ${addonEntry(id).setting} is not an https URL; reporting its add-on unconfigured`
         );
       }
       return { configured: false };
@@ -219,13 +229,24 @@ export function createAddonStatusHandlers({
     const cached = await cache.read(context);
     if (cached) return cached;
 
+    if (!inflight.has(id)) {
+      inflight.set(
+        id,
+        refresh(id, config, cache, context).finally(() => inflight.delete(id))
+      );
+    }
+    return inflight.get(id);
+  }
+
+  async function refresh(id, config, cache, context) {
     const asOf = new Date(now()).toISOString();
     let body;
     try {
       const health = await readHealth(fetchImpl, config);
       body = { configured: true, reachable: true, ...health, asOf: health.asOf ?? asOf };
     } catch (error) {
-      context?.warn?.(`addons-status: ${id} unreachable: ${failureReason(error)}`);
+      // The setting name says which AddOn; the id came from the URL and is not logged (content-free telemetry).
+      context?.warn?.(`addons-status: ${addonEntry(id).setting} unreachable: ${failureReason(error)}`);
       body = unreachable(asOf);
     }
 
@@ -244,7 +265,8 @@ export function createAddonStatusHandlers({
         const body = await readStatus(id, context);
         return jsonResponse(200, body, body.configured ? ADDON_STATUS_CACHE_SECONDS : 0);
       } catch (error) {
-        context.error('publicGetAddonStatus failed:', error);
+        // A category and the error's class, never its message: a thrown read can carry a URL.
+        context.error(`publicGetAddonStatus failed: ${error?.name ?? 'Error'} (${error?.code ?? 'no code'})`);
         return jsonResponse(500, { error: 'Failed to read the add-on status' });
       }
     },

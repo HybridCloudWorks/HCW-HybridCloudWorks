@@ -113,7 +113,7 @@ Complete example row:
   providers: ['azure'],
   technology: ['azure-resource-mover', 'terraform'],
   status: 'available',
-  capabilities: ['navigate', 'downloads'],
+  capabilities: ['navigate'], // 'downloads' once ADR 0035 decision 9 is confirmed
   docsUrl: 'https://github.com/saulpatinojr/HCW-AzMigrateOrchestrator_Addon#readme',
   articleSlugs: [],
 }
@@ -364,20 +364,27 @@ never by value.
   `published_ports: ["127.0.0.1:<port>:8080"]`, `read_only: true`,
   `tmpfs: ['/tmp']`, `cap_drop: ['ALL']`, `security_opts: ['no-new-privileges:true']`,
   `memory`, `pids_limit`, `restart_policy: unless-stopped`, the image's own
-  `HEALTHCHECK`, `log_options` with a max size, no volumes, no socket, the default
-  bridge only (egress only to the verification endpoint), under the daemon's
-  user-namespace remap (no `userns_mode: host`).
+  `HEALTHCHECK`, `log_options` with a max size, no volumes and no mounts (compared
+  strictly), no socket, on the add-ons' own bridge network (`hcw-addons`:
+  inter-container communication off; egress from its subnet limited in the
+  `DOCKER-USER` chain to established flows and TCP 443 to the verification
+  endpoint's published ranges, everything else rejected, the rules also written
+  to ufw's `after.rules` for the next boot), under the daemon's user-namespace
+  remap (no `userns_mode: host`).
 - The role waits for `http://127.0.0.1:<port>/api/health` to answer 200 (not in
-  check mode) and removes the container when `enabled: false`.
+  check mode) and removes the container when the row is not deployed this run
+  (`enabled: false`, or an enabled row whose `image_digest` is empty).
 - Caddy route file `20-addons.caddy` per enabled AddOn:
   `@addon_<id> host <id>.lab.hybridcloudworks.com`,
-  `handle @addon_<id> { reverse_proxy 127.0.0.1:<port> }`, `handle_errors` with
-  the unavailable sentence at 503. `lab_panes_only` already applies to every lab
+  `handle @addon_<id> { reverse_proxy 127.0.0.1:<port> }` for a deployed row and
+  `handle @addon_<id> { respond "<sentence>" 503 }` for a pending one (no proxy to
+  a port nothing of ours holds), `handle_errors` with the unavailable sentence at 503. `lab_panes_only` already applies to every lab
   name: site-only `frame-ancestors` and a top-level redirect. AddOns never set
   `lab_top_level_allowed`.
 - Resource ceiling recorded next to the Coder capacity assertion; the end-of-run
   privilege checks cover each AddOn container (read-only root, all capabilities
-  dropped, not privileged, no binds, loopback bindings, remapped namespace).
+  dropped, not privileged, no binds and no mounts, on the add-ons' network, exactly
+  one published port on 127.0.0.1 at the row's port, remapped namespace).
 - No DNS or certificate change: the `*.lab` record and the wildcard certificate
   already cover one-label names.
 

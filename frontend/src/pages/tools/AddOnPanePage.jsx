@@ -23,7 +23,8 @@
  * on the site would block an in-frame link to the site, and a sandboxed
  * frame may never navigate the top window. A message means the frame
  * loaded, so it stops the load watchdog; the state is shown on the toolbar
- * in words; `unavailable` shows the page's own unavailable section.
+ * in words; `unavailable` shows the page's own unavailable section. When
+ * the frame loads, focus moves into it.
  *
  * THE SANDBOX is `allow-scripts allow-same-origin allow-forms`, plus
  * `allow-downloads` for a row with `downloads` (the report bundle and the
@@ -385,7 +386,12 @@ function Pane({ addon }) {
             title={addon.title}
             sandbox={sandboxFor(addon)}
             allow={allowFor(addon)}
-            onLoad={() => setLoaded(true)}
+            onLoad={() => {
+              setLoaded(true);
+              // Focus moves into the tool on open (the standard's section 7): keyboard and
+              // screen-reader users continue in the pane, not at the toolbar behind it.
+              frameRef.current?.focus();
+            }}
             className="block w-full flex-1 border-0"
           />
         ) : null}

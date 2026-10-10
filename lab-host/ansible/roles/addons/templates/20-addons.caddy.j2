@@ -18,11 +18,17 @@
 @addon_{{ addon.id | replace('-', '_') }} host {{ addon.id }}.{{ lab_host_domain }}
 vars @addon_{{ addon.id | replace('-', '_') }} lab_direct_visit_redirect https://hybridcloudworks.com/tools/{{ addon.id }}
 handle @addon_{{ addon.id | replace('-', '_') }} {
+{% if addon.image_digest | default('') %}
   reverse_proxy {{ addons_publish_address }}:{{ addon.port }}
+{% else %}
+  respond "{{ addons_unavailable_response }}" 503
+{% endif %}
 }
 {% endfor %}
 
-# When a container is stopped (enabled: false, or a failed start), the proxy
+# A row without a digest yet is not deployed, so its name answers the
+# sentence directly rather than proxying to a port nothing of ours holds.
+# When a deployed container is stopped (a failed start), the proxy
 # cannot dial and Caddy would answer 502. Answer 503 with the site's own
 # sentence instead, so the pane says the same thing whichever side notices.
 handle_errors {

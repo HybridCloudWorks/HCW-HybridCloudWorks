@@ -112,10 +112,15 @@ change on the site. The decision has nine parts.
 6. **A generic Ansible role.** `lab-host/ansible/roles/addons` runs one hardened
    single container per row (`hcw-addon-<id>`, loopback port, read-only root,
    all capabilities dropped, no new privileges, memory and pids limits, no
-   volumes, no socket, under the daemon's user-namespace remap), waits for its
-   health, renders a Caddy route with the unavailable sentence at 503, and
-   refuses to start a container whose vault key (`vault_addon_<id>_<name>`) is
-   unset. The end-of-run privilege checks cover each container.
+   volumes or mounts, no socket, on the add-ons' own bridge network with
+   inter-container communication off and egress limited in the `DOCKER-USER`
+   chain to the verification endpoint's published ranges on 443, under the
+   daemon's user-namespace remap), waits for its health, renders a Caddy route
+   with the unavailable sentence at 503 (a direct 503 for a row with no digest
+   yet), removes the container of any row not deployed this run, and refuses
+   to start a container whose vault key (`vault_addon_<id>_<name>`) is unset.
+   The end-of-run privilege checks cover each container, its network and its
+   one port binding.
 7. **Docker Hub digests.** Images are `docker.io/hybridcloudworks/<image>`,
    pinned by digest in `group_vars/all.yml`. A release is a website PR that moves
    one digest and the owner's `bootstrap.sh` run; rollback is the previous
@@ -131,8 +136,10 @@ change on the site. The decision has nine parts.
    `allow-downloads` on its sandbox, so the AddOn's report bundle and sample
    file can be saved from the pane. Every AddOn pane also offers "Copy report",
    so it works without the flag. [REVIEW REQUIRED]: the owner confirms the
-   sandbox widening; until then the migration row may ship without `downloads`
-   and rely on "Copy report".
+   sandbox widening; until then the migration row ships without `downloads`
+   (its catalogue row grants `navigate` only) and relies on "Copy report". The
+   capability machinery is in place and tested, so confirming is a one-word
+   change to the row.
 
 The [AddOn integration standard](../standards/addon-integration-standard.md)
 carries the contracts in full, with each requirement marked Mandatory or

@@ -46,11 +46,17 @@ describe('createMinuteCache', () => {
     }
   });
 
-  it('treats a failed read as a miss and says so at warn', async () => {
+  it('treats a failed read as a miss and says so at warn, by class and code rather than message', async () => {
     const warn = vi.fn();
-    const store = makeStore({ readDoc: vi.fn(async () => { throw new Error('cosmos down'); }) });
+    const store = makeStore({
+      readDoc: vi.fn(async () => {
+        throw Object.assign(new Error('cosmos down at https://cosmos.example/dbs/x'), { code: 'ECONNRESET' });
+      }),
+    });
     expect(await cacheFor(store).read({ warn })).toBeNull();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cosmos down'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cache read failed'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('Error (ECONNRESET)'));
+    expect(warn.mock.calls.flat().join(' ')).not.toMatch(/cosmos down|https?:\/\//);
   });
 
   it('writes id, kind, value, the stamp and a one-minute ttl', async () => {
@@ -65,10 +71,11 @@ describe('createMinuteCache', () => {
     });
   });
 
-  it('never throws from a failed write', async () => {
+  it('never throws from a failed write, and logs the failure without its message', async () => {
     const warn = vi.fn();
     const store = makeStore({ upsertDoc: vi.fn(async () => { throw new Error('write refused'); }) });
     await expect(cacheFor(store).write({ b: 2 }, { warn })).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('write refused'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cache write failed'));
+    expect(warn.mock.calls.flat().join(' ')).not.toContain('write refused');
   });
 });

@@ -47,7 +47,18 @@ This project has not cut a tagged release; entries are grouped under
   digest and the widget's site key marked `[VERIFY]` for the owner. The
   AddOn integration standard lands in `docs/standards/`, the program
   package in `docs/architecture/app-to-addon/`, and ADR 0035 records the
-  model with two items for the owner's review.
+  model with two items for the owner's review. Review round 1 (Copilot):
+  the add-on containers run on their own bridge network with
+  inter-container communication off and egress limited in `DOCKER-USER` to
+  the verification endpoint's published ranges on 443 (also written to
+  ufw's `after.rules` for the next boot); no volume or mount, compared
+  strictly; a row with no digest answers 503 directly and any container
+  left from an earlier digest is removed; the privilege checks assert the
+  network, the one loopback binding and no mounts, null-safe; the status
+  proxy validates the whole version string, shares one in-flight read per
+  id, and logs by setting name, class and code only (the minute cache's
+  warnings too); the pane focuses its frame on load; the migration row
+  ships without `downloads` until ADR 0035 decision 9 is confirmed.
 - **Credentials: one register of every credential, with its age and expiry,
   on Admin → Integrations → Credentials, and a Telegram reminder for each
   one only the owner can renew (#1026).** `functions/src/lib/credentials/`

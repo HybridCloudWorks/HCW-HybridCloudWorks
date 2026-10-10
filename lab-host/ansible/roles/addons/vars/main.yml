@@ -14,3 +14,7 @@ addons_container_port: 8080
 # none otherwise (then every row is removed).
 addons_active: "{{ addons if addons_enabled | bool else [] }}"
 addons_running: "{{ addons_active | selectattr('enabled', 'defined') | selectattr('enabled') | list }}"
+# The rows that actually run: enabled, with a digest. A row that is enabled
+# but has no digest yet is pending: nothing is pulled or run for it, its name
+# answers 503, and any container left from an earlier digest is removed.
+addons_deployed: "{{ addons_running | selectattr('image_digest') | list }}"
