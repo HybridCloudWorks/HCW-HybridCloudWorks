@@ -122,17 +122,18 @@ describe('addonService', () => {
 });
 
 describe('sandboxFor and allowFor', () => {
-  it('grants the migration row the base flags only, until the owner confirms the downloads widening', () => {
+  it('grants the migration row the base flags plus allow-downloads (ADR 0035 decision 9, confirmed 2026-10-10)', () => {
     expect(sandboxFor(MIGRATION).split(/\s+/).sort()).toEqual([
+      'allow-downloads',
       'allow-forms',
       'allow-same-origin',
       'allow-scripts',
     ]);
     expect(
-      sandboxFor({ ...MIGRATION, capabilities: ['navigate', 'downloads'] })
+      sandboxFor({ ...MIGRATION, capabilities: ['navigate'] })
         .split(/\s+/)
         .sort()
-    ).toEqual(['allow-downloads', 'allow-forms', 'allow-same-origin', 'allow-scripts']);
+    ).toEqual(['allow-forms', 'allow-same-origin', 'allow-scripts']);
     expect(allowFor(MIGRATION)).toBe('');
   });
 
@@ -222,11 +223,16 @@ describe('AddOnPanePage, the pane', () => {
     }
   );
 
-  it('sandboxes the frame to scripts, its own origin and forms, and nothing more', async () => {
+  it('sandboxes the frame to scripts, its own origin, forms and downloads, and nothing more', async () => {
     renderPane();
     await screen.findByTestId('addon-pane');
     const sandbox = document.querySelector('iframe').getAttribute('sandbox').split(/\s+/);
-    expect([...sandbox].sort()).toEqual(['allow-forms', 'allow-same-origin', 'allow-scripts']);
+    expect([...sandbox].sort()).toEqual([
+      'allow-downloads',
+      'allow-forms',
+      'allow-same-origin',
+      'allow-scripts',
+    ]);
   });
 
   it('moves focus into the frame when it loads', async () => {

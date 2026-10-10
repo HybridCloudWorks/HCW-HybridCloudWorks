@@ -10,7 +10,7 @@ site frames today.
 | AddOn origin | `https://migration.lab.hybridcloudworks.com` (`panePath` `/`, `healthPath` `/api/health`) |
 | Image | `docker.io/hybridcloudworks/hcw-addon-migration`, tag `0.3.0`, pinned by digest in `lab-host/ansible/group_vars/all.yml` [VERIFY]: the digest is written in from the `v0.3.0` publish |
 | Lab host port | `127.0.0.1:18081` → container `8080`, container `hcw-addon-migration` |
-| Row status | `available`; capabilities granted to the pane `navigate` (`downloads` once the owner confirms ADR 0035 decision 9 [REVIEW REQUIRED]) |
+| Row status | `available`; capabilities granted to the pane `navigate` and `downloads` (ADR 0035 decision 9, confirmed by the owner on 2026-10-10) |
 | Status proxy | `GET /api/public/addons/migration/status`, reading `ADDON_MIGRATION_URL` |
 | Health `edition` | `demo` (an upstream constant; the site treats it as opaque) |
 | Vault key | `vault_addon_migration_turnstile_secret` (the AddOn's own human-verification widget, separate from the site's) [REVIEW REQUIRED]: the owner creates the widget |

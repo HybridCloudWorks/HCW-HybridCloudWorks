@@ -1,6 +1,6 @@
 # ADR 0035: The AddOn pane model — independently built tools in sandboxed panes on lab names, a generic site page, a status proxy and a generic host role
 
-**Status:** Proposed 2026-10-09 (drafted from the approved App-to-AddOn program plan; decisions 8 and 9 carry [REVIEW REQUIRED] for the owner, and the Caddy redirect in Consequences carried [VERIFY], answered on 2026-10-10 by `caddy adapt` in CI)
+**Status:** Accepted 2026-10-10 (proposed 2026-10-09 from the approved App-to-AddOn program plan; decisions 8 and 9 confirmed by the owner on 2026-10-10 in [#1044](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/1044); the Caddy redirect in Consequences carried [VERIFY], answered on 2026-10-10 by `caddy adapt` in CI)
 **Decision date:** 2026-10-09
 **Owners:** Workload owner and architecture owner
 
@@ -130,17 +130,16 @@ change on the site. The decision has nine parts.
    containers run directly by the `addons` role are a second permitted workload
    on the host, each loopback-only behind Caddy, each listed in `group_vars`,
    each without Compose. ADR 0032's `docker ps` validation names gain
-   `hcw-addon-<id>` by reference to this record. [REVIEW REQUIRED]: the owner
-   confirms this amendment.
+   `hcw-addon-<id>` by reference to this record. Confirmed by the owner on
+   2026-10-10 (#1044).
 9. **The `downloads` capability.** A row that names `downloads` gets
    `allow-downloads` on its sandbox, so the AddOn's report bundle and sample
    file can be saved from the pane. Every AddOn pane also offers "Copy report",
-   so it works without the flag. [REVIEW REQUIRED]: the owner confirms the
-   sandbox widening; until then the migration row ships without `downloads`
-   (its catalogue row grants `navigate` only) and relies on "Copy report". The
-   capability machinery is in place and tested, so confirming is a one-word
-   change to the row. Tracked with decision 8 in
-   [#1044](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/1044).
+   so it works without the flag. Confirmed by the owner on 2026-10-10 with
+   decision 8 in
+   [#1044](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/1044):
+   the migration row grants `navigate` and `downloads`, and the accepted-risk
+   row in `TODO.md` applies.
 
 The [AddOn integration standard](../standards/addon-integration-standard.md)
 carries the contracts in full, with each requirement marked Mandatory or
@@ -170,7 +169,7 @@ Optional, and the compliance checklist a reviewer ticks before a row becomes
   the frame is always another origin (the sandbox cannot be lifted), the AddOn
   holds no site credential, `frame-src` names each origin exactly, and the labs
   pane already runs this way.
-- Negative: `allow-downloads`, when confirmed, lets a framed AddOn start a file
+- Negative: `allow-downloads` lets a framed AddOn start a file
   download in the visitor's browser. Accepted because the AddOn is the site's
   own image by digest, the download is the visitor's own report, and the row
   grants it per AddOn. Recorded as an accepted risk in `TODO.md`.
@@ -255,7 +254,7 @@ Revisit this record when any of the following happens:
   leave the role's `vars` line dead.
 - The npm packages are published and a case for an in-bundle island returns;
   the four site rules in Alternatives considered must be answered first.
-- `allow-downloads` is refused by the owner: decision 9 is struck, the row
+- `allow-downloads` is withdrawn by the owner: decision 9 is struck, the row
   drops `downloads`, and "Copy report" is the only path.
 
 Superseded by: none. This record amends ADR 0032's host workload line as
