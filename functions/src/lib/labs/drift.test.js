@@ -108,14 +108,21 @@ describe('labDriftVerdict', () => {
     expect(labDriftVerdict({ agents: [agent({ applied: null })], drift: null, nowMs }).status).toBe('critical');
   });
 
-  it('is unknown when main has never been read, naming the last error', () => {
-    const verdict = labDriftVerdict({
+  it('is unknown when main has not been read yet, and says so differently when the read failed', () => {
+    const unread = labDriftVerdict({ agents: [agent()], drift: null, nowMs });
+    expect(unread.status).toBe('unknown');
+    expect(unread.summary).toMatch(/; main has not been read yet\. checkAgentHealth reads it on its first run and then hourly\.$/);
+
+    const failed = labDriftVerdict({
       agents: [agent()],
       drift: { lastError: 'RATE_LIMITED: used up', lastSuccessAt: null },
       nowMs,
     });
-    expect(verdict.status).toBe('unknown');
-    expect(verdict.summary).toContain('main has not been read yet (RATE_LIMITED: used up)');
+    expect(failed.status).toBe('unknown');
+    expect(failed.summary).toMatch(
+      /; main could not be read \(RATE_LIMITED: used up\)\. checkAgentHealth tries again hourly, and this clears only once a read succeeds\.$/
+    );
+    expect(failed.summary).not.toContain('has not been read yet');
   });
 
   it('is unknown when the last read started after the host’s commit, so it cannot see what is between', () => {

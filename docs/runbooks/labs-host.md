@@ -713,11 +713,20 @@ closes the gap, so it follows the run, not the next day.
    <https://hybridcloudworks.com/admin/labs?tab=agents> reads `commit
    <first 8 of the sha the run logged> · converged <now>`, and the line
    under it begins `vps-hostinger-01 converged from` and ends `nothing under
-   lab-host/ or vps-agent/ has merged to main since.` A line that says `main
-   has not been read yet` means `checkAgentHealth` has not run since the
-   Functions deploy that brought the check; it reads `main` on its first run
-   and then hourly, so that line clears within five minutes and is not a
-   failure.
+   lab-host/ or vps-agent/ has merged to main since.` Two other endings are
+   about the site's read of `main`, not the host:
+
+   - `main has not been read yet.` `checkAgentHealth` has not run since the
+     Functions deploy that brought the check. It reads `main` on its first
+     run, so this clears within five minutes.
+   - `main could not be read (<code>: <reason>).` The read was attempted and
+     failed, and the code says why: `RATE_LIMITED` (GitHub's unauthenticated
+     limit for the Function App's outbound address is used up; the reason
+     says when it resets), `TIMEOUT` or `FETCH_FAILED` (GitHub did not
+     answer), `UPSTREAM_STATUS` (GitHub answered with an error). It is tried
+     again every hour and clears only after a read succeeds. If it is still
+     there a day later, the host's lag is unknown and the **Lab host runs
+     main** card says so.
 
 2. Straight after, PowerShell on the workstation. Make the short-lived
    `hcw-setup` token in a pane as step 1 of "The status token for the

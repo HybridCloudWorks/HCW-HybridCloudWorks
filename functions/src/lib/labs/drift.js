@@ -326,10 +326,17 @@ function agentVerdict(agent, drift, nowMs) {
     };
   }
   const where = `${name} converged from ${short(applied.commit)} ${agoText(applied.appliedAt, nowMs)}`;
+  if (!drift?.lastSuccessAt && drift?.lastError) {
+    // Attempted and failed: not the same as not yet asked (CodeRabbit, #1054).
+    return {
+      status: 'unknown',
+      summary: `${where}; main could not be read (${drift.lastError}). checkAgentHealth tries again hourly, and this clears only once a read succeeds.`,
+    };
+  }
   if (!drift?.lastSuccessAt) {
     return {
       status: 'unknown',
-      summary: `${where}; main has not been read yet${drift?.lastError ? ` (${drift.lastError})` : ''}. checkAgentHealth reads it hourly.`,
+      summary: `${where}; main has not been read yet. checkAgentHealth reads it on its first run and then hourly.`,
     };
   }
   if (!covers(drift, applied)) {
