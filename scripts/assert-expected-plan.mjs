@@ -209,13 +209,16 @@ export const DECLARED = [
     reason: 'Telegram refused or failed a send; the owner hears by SMS and mail instead of nobody',
   },
   // #1029: the Perplexity key's reference goes; nothing read it.
+  // #1043 added the migration AddOn's address for its status proxy. A plain
+  // value, not a secret; #1043 did not declare it, so run-tsRi4e3Te4vxe5nX
+  // read UNEXPECTED. (#1029's Perplexity removal applied in
+  // run-uB4PpGgfDgZ9ZiWz and was deleted here, as the header asks.)
   {
     address: 'azurerm_function_app_flex_consumption.hcw',
-    path: 'app_settings.PERPLEXITY_API_KEY',
-    before:
-      '@Microsoft.KeyVault(SecretUri=https://kv-site-prod-cus-01.vault.azure.net/secrets/PERPLEXITY-API-KEY)',
-    after: undefined,
-    reason: '#1029: the Perplexity key is retired; no code read it',
+    path: 'app_settings.ADDON_MIGRATION_URL',
+    before: undefined,
+    after: 'https://migration.lab.hybridcloudworks.com',
+    reason: '#1043: the migration AddOn status proxy reads its address',
   },
   // The docs site's CNAME follows the repository to its owner's account.
   {
