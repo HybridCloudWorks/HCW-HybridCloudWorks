@@ -217,6 +217,14 @@ export const DECLARED = [
     after: undefined,
     reason: '#1029: the Perplexity key is retired; no code read it',
   },
+  // The docs site's CNAME follows the repository to its owner's account.
+  {
+    address: 'cloudflare_dns_record.docs_pages',
+    path: 'content',
+    before: 'hybridcloudworks.github.io',
+    after: 'saulpatinojr.github.io',
+    reason: 'docs CNAME to the repository owner\'s Pages host after the 2026-10-07 move',
+  },
 ];
 
 /** The keys an update must carry for its values to be printed safely. */

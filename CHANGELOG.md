@@ -3391,6 +3391,19 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The former organisation's board links and the docs CNAME now follow the
+  repository to its owner's account (public readiness).** `infra/frontend.tf`
+  points `docs.hybridcloudworks.com` at `saulpatinojr.github.io` instead of
+  `hybridcloudworks.github.io` (both resolve to GitHub's Pages addresses, so
+  visitors see no change, and GitHub's custom-domain check expects the
+  owner's own host); `scripts/assert-expected-plan.mjs` declares the update
+  for the plan check. CONTRIBUTING sends open work to GitHub issues, since
+  the Work Board is a private user project an anonymous visitor cannot
+  open; TODO.md and the code-review skill link that board (user project 6),
+  and TODO.md no longer claims the board adds new issues itself: its
+  built-in workflows add sub-issues only, so whoever opens an issue adds it.
+  The scheduled catalogue warning's comment says the same.
+
 - **README: the repository's front door, for a visitor and a contributor
   (#1033).** The README opened as "HybridCloudWorks Website" and read as a
   migration-era record. It now says what the site is and who it is for, shows

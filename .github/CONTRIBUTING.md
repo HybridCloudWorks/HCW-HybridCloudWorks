@@ -12,7 +12,7 @@ questions and requests rather than changes, see [SUPPORT.md](SUPPORT.md).
 | Content | Home |
 | --- | --- |
 | Narrative documentation (architecture, runbooks, ADRs, analysis) | [docs.hybridcloudworks.com](https://docs.hybridcloudworks.com) — source in `docs/`, built by MkDocs (`mkdocs build --strict` runs on every PR) and deployed to GitHub Pages on merge |
-| Open work (engineering and owner-gated alike) | GitHub issues on [org project 1](https://github.com/orgs/HybridCloudWorks/projects/1), each with a Priority; `TODO.md` at the root keeps only accepted risks and an index |
+| Open work (engineering and owner-gated alike) | [GitHub issues](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues), each carried on the owner's private Work Board with a Priority; `TODO.md` at the root keeps only accepted risks and an index |
 | Completed work | `CHANGELOG.md` at the root |
 | Tooling-adjacent docs (this file, `infra/README.md`, templates) | Next to the tooling, allowlisted in `scripts/validate-repository-structure.ps1` |
 
@@ -24,9 +24,9 @@ not to extend the allowlist.
 
 1. Branch from `main`. No direct pushes to `main`.
 2. Keep the SOP documents true: all new work — engineering and owner-gated
-   alike — is a GitHub issue on the
-   [HCW Work Board](https://github.com/orgs/HybridCloudWorks/projects/1) (org
-   project 1) with its Priority set (owner decision 2026-09-05, #362);
+   alike — is a [GitHub issue](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues), added to the owner's HCW Work
+   Board (a private user project) with its Priority set (owner decision
+   2026-09-05, #362);
    `TODO.md` holds only the accepted risks and an index to the open issues;
    completed work goes to `CHANGELOG.md`; and new required inputs go to
    `docs/standards/required-inputs.md`. A code comment that points at open
