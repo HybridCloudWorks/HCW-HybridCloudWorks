@@ -381,6 +381,644 @@ is the right tool for a *planned* silence — a deploy window, a known-bad
 weekend — because it is time-boxed and visible. It is the wrong tool for a rule
 that is simply mis-tuned, because the suppression outlives the reason for it.
 
+## The PLAT-4 rules
+
+Eleven rules added by PLAT-4 (#964) for conditions the estate assessment of
+2026-10-06 found nothing paging on: timer silence, the poison queue, the
+Static Web App's bandwidth ceiling, the lab agent, and the security signals the
+estate already collected without alerting on them. Every one reads data that
+was already arriving (Application Insights, the Key Vault and storage
+diagnostic settings, the lab host's data collection rule, the Activity Log), so
+none adds ingestion. All route to `ag-plat-prod-cus-01`. They are declared at
+the end of `infra/observability.tf` and `infra/lab-hybrid.tf`, each with its
+reasoning beside it.
+
+| Rule | Sev | Fires when | What it usually means | Look at first |
+| --- | :---: | --- | --- | --- |
+| `alert-timer-overdue` | 2 | A Function App timer that was due at least 45 minutes ago has no successful run since. One alert per timer, named in the alert; more than five overdue at once collapse into one alert named `more than five timers at once`. Every 15 min, stateful. Quiet while no request telemetry arrives at all, which the capacity and reachability rules own | The host is not running that timer, or every run fails | `AppExceptions` for the named function, then the registration check in *[The failure with no alert](#the-failure-with-no-alert)* |
+| `alert-lab-agent-offline` | 2 | `checkAgentHealth` decided to tell the owner a lab agent has been offline five minutes or more (sent, not sent, or failed). Every 15 min, stateful. Needs `CHECK_AGENT_HEALTH` armed | The labs agent stopped or lost its way to the API; public lab jobs wait. The 04:30 reboot does not fire it | `ssh hcw-lab 'systemctl status hcw-labs-agent --no-pager'` |
+| `alert-jobs-poison` | 2 | A message was put into `platform-jobs-poison` on `stsitefuncprodcus01` in the last hour. Management subscription | The host failed to hand a job to `platformJobWorker` five times | `AppExceptions` for `platformJobWorker` around the time of the put |
+| `alert-swa-bandwidth` | 2 | The Static Web App's `BytesSent` over the last 24 hours passes 2,666,666,666 bytes (80% of a thirtieth of the Free plan's 100 GB month). Hourly | Traffic on pace to exhaust the month; on Free, past 100 GB the site stops serving | Static Web App → Metrics → Data Out, summed over the month to date |
+| `alert-kv-errors` | 2 | A request to `kv-site-prod-cus-01` or `kv-labhybrid-prod-cus-01` answered 400 or above, other than the 401 authentication challenge and a `SecretGet` 404 on an unseeded secret. Last hour, every 15 min. Management subscription | An RBAC or firewall refusal, throttling, or a service error | The `AzureDiagnostics` rows, with the query in *[Before the apply](#before-the-apply)* narrowed to the last hour |
+| `alert-kv-data-write` | 1 | An identity other than the Function App's wrote, deleted, purged, restored or backed up a secret or key in either vault through the data plane, or tried to. Management subscription | A human writing by script, or a caller that should not be there | The row's caller object id and address |
+| `alert-kv-config-write` | — | Resource Manager wrote to either vault: its network ACL or properties, a key or secret through ARM, a delete, or a role assignment on it. Succeeded or failed. Activity Log, free | An HCP Terraform apply that changed a vault (expected), or a change made outside one | The vault's Activity Log; the event names the caller |
+| `alert-rbac-write-app` | — | A role assignment or role definition was created, changed or deleted in the application subscription, or an attempt failed. Activity Log, free | An apply that grants or removes a role (expected), or a grant made outside one | Activity Log filtered to `Microsoft.Authorization` |
+| `alert-rbac-write-mgmt` | — | The same, in the Management subscription | As above | As above, in `sub-plat-mgmt-prod-cus` |
+| `alert-lab-vault-unwrap` | 1 | The lab vault's seal key was asked to wrap or unwrap from an address the lab host has not heartbeated from in the last hour. Management subscription | Vault's identity in use off the host, or the host's address changed | The caller address in the row against the host's `Heartbeat` address |
+| `alert-lab-ssh-burst` | 2 | Failed SSH lines on the lab host in 15 minutes number at least 50 and more than four times the day's quarter-hour average. Management subscription | A distributed attempt that fail2ban's per-address ban does not stop, or a broken key | `ssh hcw-lab 'sudo fail2ban-client status sshd'` |
+
+Activity Log alerts carry no severity of their own; their mail shows the
+common schema's default. `alert-kv-config-write` and the two RBAC rules fire on
+every apply that changes a vault or a role assignment. That is intended: it is
+a second witness that the apply did what its plan said, and the only place a
+change made outside an apply shows up.
+
+### Before the apply
+
+Read-only checks, worth running before confirming the run that creates these
+rules, because each tests an assumption a rule rests on. All are PowerShell.
+The first line finds the workspace; the others use it.
+
+```powershell
+$ws = (az monitor log-analytics workspace show -n log-plat-prod-cus-01 -g rg-mgmt-plat-prod-cus --subscription sub-plat-mgmt-prod-cus -o json | ConvertFrom-Json).customerId
+```
+
+**Timer request rows carry the function's name.** `alert-timer-overdue` matches
+each timer by the request row's name.
+
+```powershell
+az monitor log-analytics query -w $ws --analytics-query "AppRequests | where TimeGenerated > ago(2h) | summarize Runs = count(), Succeeded = countif(Success) by Name | order by Name asc" -o json | ConvertFrom-Json | Format-Table Name, Runs, Succeeded
+```
+
+Success is one row per timer that ran in the two hours, named exactly as in
+`functions/function-inventory.json` (`healthPulse`, `checkAgentHealth`,
+`syncSocialCalendarScheduled`, …; a `Functions.` prefix is also handled), with
+`Succeeded` above zero. Names in any other shape mean the rule would see every
+timer as overdue: do not confirm the run, and say so on #964.
+
+**The seal key's caller is the address the host heartbeats from.**
+`alert-lab-vault-unwrap` assumes Vault reaches Key Vault from the same address
+the Azure Monitor Agent reports. The first query reads the lab vault only,
+`kv-labhybrid-prod-cus-01`, by the same `_ResourceId` the rule matches, so a call
+to the site vault cannot fail the comparison.
+
+```powershell
+az monitor log-analytics query -w $ws --analytics-query "AzureDiagnostics | where TimeGenerated > ago(1h) | where ResourceProvider == 'MICROSOFT.KEYVAULT' | where tolower(_ResourceId) endswith '/providers/microsoft.keyvault/vaults/kv-labhybrid-prod-cus-01' | where OperationName in ('KeyWrap', 'KeyUnwrap') | summarize Calls = count() by CallerIPAddress" -o json | ConvertFrom-Json | Format-Table
+```
+
+```powershell
+az monitor log-analytics query -w $ws --analytics-query "Heartbeat | where TimeGenerated > ago(1h) | where tolower(_ResourceId) endswith 'arcs-lab-hybrid-prod-cus-01' | distinct ComputerIP" -o json | ConvertFrom-Json | Format-Table
+```
+
+Success is every `CallerIPAddress` in the first list appearing in the second.
+A caller address the heartbeat does not show (an IPv6 one against an IPv4
+heartbeat, say) means the rule would page on Vault's own ten-minute health
+check, every evaluation.
+
+**What the Key Vault failure rule would have caught last week.**
+
+```powershell
+az monitor log-analytics query -w $ws --analytics-query "AzureDiagnostics | where TimeGenerated > ago(7d) | where ResourceProvider == 'MICROSOFT.KEYVAULT' | where httpStatusCode_d >= 400 | where not(OperationName == 'Authentication' and httpStatusCode_d == 401) | where not(OperationName == 'SecretGet' and httpStatusCode_d == 404) | summarize Rows = count() by Resource, OperationName, httpStatusCode_d" -o json | ConvertFrom-Json | Format-Table
+```
+
+Success is no rows: the rule is quiet in normal running. Each row is a
+condition it would page on; if any is routine, exclude that operation in the
+rule, as the two above are, rather than raising the count.
+
+### Making each one fire once
+
+The acceptance of #964 is that each new rule has been seen to fire once. These
+are the tests, one per rule. Each says what success looks like and how to put
+things back; record the date in the *[Fire record](#fire-record)* below. All are
+PowerShell, from any directory, signed in with `az login` as the owner.
+
+**`alert-timer-overdue`**: stop one harmless timer for an hour.
+`healthPulse` only refreshes the Health Hub, which shows the pulse as stale
+meanwhile. Disabling a function is an app setting, so this restarts the app
+once on the way in and once on the way out. The test records the setting's
+prior state in a file first, and puts back exactly that.
+
+```powershell
+$hf = Join-Path $HOME 'plat4-timer-test.json'
+```
+
+**Stop conditions.** The first must print `False` (`True` means an earlier run
+did not finish: do its recovery, below, first). The second must not show a
+value of `true`: if it does, the timer is already off and the test would
+change nothing.
+
+```powershell
+Test-Path -LiteralPath $hf
+```
+
+```powershell
+$prior = az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'AzureWebJobs.healthPulse.Disabled'
+```
+
+```powershell
+$prior | Select-Object name, value
+```
+
+Record it, then disable the timer:
+
+```powershell
+@{ present = [bool]$prior; value = $prior.value } | ConvertTo-Json | Set-Content -LiteralPath $hf
+```
+
+```powershell
+az functionapp config appsettings set -n func-site-prod-cus-01 -g rg-web-site-prod-cus --settings AzureWebJobs.healthPulse.Disabled=true -o none
+```
+
+Success is a mail and a text for `alert-timer-overdue-prod-cus` naming
+`healthPulse`, within about 75 minutes (45 of grace, then the next 15-minute
+evaluation, then delivery). Then restore from the record: the prior value if
+there was one, and otherwise delete the setting, which also takes it back out
+of Terraform's view. The same two lines are the recovery after an interruption,
+in any window:
+
+```powershell
+$h = Get-Content -LiteralPath (Join-Path $HOME 'plat4-timer-test.json') -Raw | ConvertFrom-Json
+```
+
+```powershell
+if ($h.present) { az functionapp config appsettings set -n func-site-prod-cus-01 -g rg-web-site-prod-cus --settings ('AzureWebJobs.healthPulse.Disabled=' + $h.value) -o none } else { az functionapp config appsettings delete -n func-site-prod-cus-01 -g rg-web-site-prod-cus --setting-names AzureWebJobs.healthPulse.Disabled -o none }
+```
+
+Success is this read matching the record (no row if `present` was `false`):
+
+```powershell
+az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'AzureWebJobs.healthPulse.Disabled' | Select-Object name, value
+```
+
+Only then remove the record:
+
+```powershell
+Remove-Item -LiteralPath (Join-Path $HOME 'plat4-timer-test.json')
+```
+
+Then confirm the writes left the strip intact, with the two reads in
+*[The failure with no alert](#the-failure-with-no-alert)*: one
+`RUNTIME_CONFIG_WRITER` row reading `azapi-strip`, and an `AzureWebJobsStorage`
+count of `0`. The Resolved mail follows the first good run.
+
+**`alert-lab-agent-offline`**: stop the labs agent for a quarter of an
+hour, when the Labs dashboard shows it idle. First, `True` in the value column
+means the health timer that decides is armed:
+
+```powershell
+az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'FEATURE_FLAG_CHECK_AGENT_HEALTH' | Select-Object name, value
+```
+
+**Stop condition:** this must print `active`. Anything else means the agent is
+already down; do not run the test, and find out why instead.
+
+```powershell
+ssh hcw-lab 'systemctl is-active hcw-labs-agent'
+```
+
+```powershell
+ssh hcw-lab 'sudo systemctl stop hcw-labs-agent'
+```
+
+Wait until the Telegram "offline" message arrives (five to ten minutes), then
+start it again. This line is also the recovery if the test is interrupted, from
+any window, and success is its last line reading `active`:
+
+```powershell
+ssh hcw-lab 'sudo systemctl start hcw-labs-agent; systemctl is-active hcw-labs-agent'
+```
+
+Success is Telegram's "offline" and "back online" messages, and the mail and
+text for `alert-lab-agent-offline-prod-cus` within about 30 minutes of the
+stop. Public lab submissions are closed while the agent is stopped.
+
+**`alert-jobs-poison`**: put one short-lived message into the poison
+queue. No human holds a data-plane role on `stsitefuncprodcus01`, and its
+firewall denies everything but the Functions subnet, so the test takes a
+temporary role and a temporary firewall entry for this machine. It owns exactly
+those two changes and nothing else. It runs alone, stops if either change
+already exists, writes down what it is about to change before changing it, and
+undoes exactly what it wrote down.
+
+**Run it alone.** The checks below cannot reserve anything: two runs of this
+test with the same account and address would both pass them, and one run's
+cleanup would undo the other's access. So run it with no other fire test from
+this page in progress, by you or anyone using the same account, and not during
+a `deploy-functions.yml` run, which opens and closes the same firewall. This
+prints nothing when no deploy is running:
+
+```powershell
+gh run list -R saulpatinojr/HCW-HybridCloudWorks -w deploy-functions.yml -s in_progress
+```
+
+Four values next. `$sf` is where the test records what it owns, so a recovery
+in a new window undoes the same things:
+
+```powershell
+$sa = (az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).id
+```
+
+```powershell
+$me = (az ad signed-in-user show -o json | ConvertFrom-Json).id
+```
+
+```powershell
+$ip = Invoke-RestMethod -Uri https://api.ipify.org
+```
+
+```powershell
+$sf = Join-Path $HOME 'plat4-poison-test.json'
+```
+
+**Stop conditions.** The first must print `False`: `True` means an earlier
+run did not finish, so do its recovery (below) first. The other two must print
+nothing. A row in the second means you already hold an assignment on the
+account, which this test would share a scope with: skip the test and note that
+in the fire record. An address in the third means the firewall is already open:
+wait until it prints nothing.
+
+```powershell
+Test-Path -LiteralPath $sf
+```
+
+```powershell
+az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
+```
+
+```powershell
+(az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).networkRuleSet.ipRules
+```
+
+Choose the role assignment's id before it exists, and record it with the
+address, so every change is in the record before it is made:
+
+```powershell
+$ran = [guid]::NewGuid().Guid
+```
+
+```powershell
+$ra = "$sa/providers/Microsoft.Authorization/roleAssignments/$ran"
+```
+
+```powershell
+@{ ip = $ip; ra = $ra } | ConvertTo-Json | Set-Content -LiteralPath $sf
+```
+
+```powershell
+az role assignment create --name $ran --assignee-object-id $me --assignee-principal-type User --role "Storage Queue Data Contributor" --scope $sa -o none
+```
+
+```powershell
+az storage account network-rule add --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address $ip -o none
+```
+
+Wait five minutes for the role and the rule to take effect, then create the
+queue if the host never has (it is a no-op if it exists) and put a message
+that expires on its own after 15 minutes. An `AuthorizationPermissionMismatch`
+or `AuthorizationFailure` here means the wait was too short: wait and repeat.
+
+```powershell
+az storage queue create --name platform-jobs-poison --account-name stsitefuncprodcus01 --auth-mode login -o none
+```
+
+```powershell
+az storage message put --queue-name platform-jobs-poison --account-name stsitefuncprodcus01 --auth-mode login --content plat4-fire-test --time-to-live 900 -o none
+```
+
+Then undo both, whether or not the put worked, by the recorded address and id:
+
+```powershell
+az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address $ip -o none
+```
+
+```powershell
+az role assignment delete --ids $ra
+```
+
+Success is `alert-jobs-poison-prod-cus` within about 30 minutes, and the two
+stop-condition reads printing nothing again:
+
+```powershell
+az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
+```
+
+```powershell
+(az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).networkRuleSet.ipRules
+```
+
+Only once both print nothing, remove the record. Until then it is what a
+recovery works from:
+
+```powershell
+Remove-Item -LiteralPath $sf
+```
+
+**If the test was interrupted**, recover from the record, in any window, still
+alone. It removes the address the test opened, even if this machine's address
+has changed since, and the assignment the test created or was about to create.
+A delete that answers that the assignment does not exist means the run stopped
+before creating it, which is fine:
+
+```powershell
+$s = Get-Content -LiteralPath (Join-Path $HOME 'plat4-poison-test.json') -Raw | ConvertFrom-Json
+```
+
+```powershell
+az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address $s.ip -o none
+```
+
+```powershell
+az role assignment delete --ids $s.ra
+```
+
+Then run the two verification reads above (set `$sa` and `$me` again first in
+a new window). Only once both print nothing, delete the record:
+
+```powershell
+Remove-Item -LiteralPath (Join-Path $HOME 'plat4-poison-test.json')
+```
+
+The role's create and delete also fire `alert-rbac-write-app-prod-cus`, twice.
+That is that rule's test done as well.
+
+**`alert-swa-bandwidth`**: lower the threshold to one byte for an hour and
+put it back. Driving 2.7 GB of real traffic would spend nearly 3% of the
+month's allowance, and Cloudflare's cache would absorb most of it before it
+reached the Static Web App. The test saves the rule's definition, exactly as
+ARM returns it, to a file before changing anything, and restores from that
+file, so an interruption cannot lose the real threshold. First the rule's URL
+and the two files: the saved original in your home folder, and a temporary
+working copy of this test's own:
+
+```powershell
+$u = 'https://management.azure.com' + (az monitor metrics alert show -n alert-swa-bandwidth-prod-cus -g rg-web-site-prod-cus -o json | ConvertFrom-Json).id + '?api-version=2018-03-01'
+```
+
+```powershell
+$bf = Join-Path $HOME 'plat4-swa-test.json'
+```
+
+```powershell
+$f = Join-Path ([IO.Path]::GetTempPath()) ('plat4-swa-' + [guid]::NewGuid() + '.json')
+```
+
+**Stop condition:** this must print `False`. `True` means an earlier run did not
+finish: do its recovery, below, first.
+
+```powershell
+Test-Path -LiteralPath $bf
+```
+
+Save the original, then lower the threshold in the working copy and apply it:
+
+```powershell
+az rest --method get --url $u -o json | Set-Content -LiteralPath $bf
+```
+
+```powershell
+$a = Get-Content -LiteralPath $bf -Raw | ConvertFrom-Json
+```
+
+```powershell
+$a.properties.criteria.allOf[0].threshold = 1
+```
+
+```powershell
+[IO.File]::WriteAllText($f, ($a | ConvertTo-Json -Depth 20))
+```
+
+```powershell
+az rest --method put --url $u --body "@$f" -o none
+```
+
+Success is `alert-swa-bandwidth-prod-cus` at the next hourly evaluation, as
+long as the site has served anything in a day. Then restore the saved original.
+This is also the recovery after an interruption, in any window (set `$u` and
+`$bf` again first, with the lines above):
+
+```powershell
+az rest --method put --url $u --body "@$bf" -o none
+```
+
+```powershell
+(az monitor metrics alert show -n alert-swa-bandwidth-prod-cus -g rg-web-site-prod-cus -o json | ConvertFrom-Json).criteria.allOf[0].threshold
+```
+
+Success is `2666666666`. Only then remove the saved original:
+
+```powershell
+Remove-Item -LiteralPath $bf
+```
+
+and the working copy, if this window still has `$f`:
+
+```powershell
+Remove-Item -LiteralPath $f
+```
+
+An HCP Terraform plan taken while the threshold is lowered shows it as drift;
+the restore ends that.
+
+**`alert-kv-errors` and `alert-kv-data-write`**: one refused write
+fires both. It updates the attributes of a secret that does not exist, named
+with this moment's time so it cannot be an existing secret, so even if it got
+through it would change nothing.
+
+```powershell
+$sn = 'plat4-fire-test-' + (Get-Date -Format 'yyyyMMddHHmmss')
+```
+
+```powershell
+az keyvault secret set-attributes --vault-name kv-site-prod-cus-01 --name $sn --enabled false
+```
+
+The command failing is the expected result: `Forbidden` (the firewall or the
+missing data role) or `SecretNotFound`. Success is
+`alert-kv-errors-prod-cus` and `alert-kv-data-write-prod-cus` within about 30
+minutes. If only the first arrives, the refused row did not carry the
+operation name; the Key Vault query in *[Before the apply](#before-the-apply)*,
+narrowed to the last hour, shows what it did carry.
+
+**`alert-lab-vault-unwrap`**: ask the seal key to wrap a test value from
+this machine. The owner holds no role on the key, so Key Vault refuses it, and
+the refusal is logged with this machine's address. It wraps and never unwraps,
+so nothing about Vault changes either way.
+
+```powershell
+$t = (az account get-access-token --resource https://vault.azure.net -o json | ConvertFrom-Json).accessToken
+```
+
+```powershell
+Invoke-RestMethod -Method Post -Uri 'https://kv-labhybrid-prod-cus-01.vault.azure.net/keys/vault-seal/wrapkey?api-version=7.4' -Headers @{ Authorization = "Bearer $t" } -ContentType 'application/json' -Body '{"alg":"RSA-OAEP-256","value":"cGxhdDQtZmlyZS10ZXN0"}'
+```
+
+A 403 error is the expected result. Success is
+`alert-lab-vault-unwrap-prod-cus` within about 30 minutes, with
+`alert-kv-errors-prod-cus` beside it for the same refusal.
+
+**`alert-lab-ssh-burst`**: write a thousand failed-login lines to the lab
+host's auth log under sshd's name, from a documentation address. They are
+written by `logger`, not by sshd, so fail2ban (which reads the sshd unit's
+journal) bans nothing, and no login is attempted.
+
+```powershell
+ssh hcw-lab 'for i in {1..1000}; do logger -p auth.info -t sshd "Invalid user plat4firetest from 192.0.2.10 port 22"; done'
+```
+
+Success is `alert-lab-ssh-burst-prod-cus` within about 30 minutes. It
+resolves on its own once the burst leaves the 15-minute window.
+
+**`alert-kv-config-write`**: add a tag to the site vault and take it off.
+A tag write is a Resource Manager write on the vault and touches nothing else.
+The key carries this moment's time, so it cannot be a tag the vault already
+has, and the delete removes that key alone.
+
+```powershell
+$kv = (az keyvault show -n kv-site-prod-cus-01 -g rg-sec-site-prod-cus -o json | ConvertFrom-Json).id
+```
+
+```powershell
+$tk = 'plat4FireTest' + (Get-Date -Format 'yyyyMMddHHmmss')
+```
+
+```powershell
+az tag update --resource-id $kv --operation Merge --tags "$tk=1" -o none
+```
+
+```powershell
+az tag update --resource-id $kv --operation Delete --tags "$tk=1" -o none
+```
+
+Success is two notifications for `alert-kv-config-write-prod-cus`, one per
+write, within about ten minutes. Activity Log alerts are stateless, so there
+is no Resolved mail.
+
+**`alert-rbac-write-app` and `alert-rbac-write-mgmt`**: grant this
+account Reader on one group in each subscription and take it back. Like the
+poison test, each half chooses the assignment's id before creating it, records
+it in a file, deletes by that id, and recovers from the file. The poison queue
+test above already covers the application subscription; this covers both.
+`$me` is the value from that test; set it again in a new window:
+
+```powershell
+$me = (az ad signed-in-user show -o json | ConvertFrom-Json).id
+```
+
+```powershell
+$rf = Join-Path $HOME 'plat4-rbac-test.json'
+```
+
+```powershell
+$mg = (az group show -n rg-mgmt-plat-prod-cus --subscription sub-plat-mgmt-prod-cus -o json | ConvertFrom-Json).id
+```
+
+**Stop conditions:** the first must print `False` (`True` means an earlier run
+did not finish: do the recovery below first), and the second must print
+nothing. A row in the second means you already hold a direct assignment at that
+group; skip this half and note it in the fire record.
+
+```powershell
+Test-Path -LiteralPath $rf
+```
+
+```powershell
+az role assignment list --assignee $me --scope $mg -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
+```
+
+Choose and record the id, then create and delete by it:
+
+```powershell
+$rn = [guid]::NewGuid().Guid
+```
+
+```powershell
+$rid = "$mg/providers/Microsoft.Authorization/roleAssignments/$rn"
+```
+
+```powershell
+@{ ra = $rid } | ConvertTo-Json | Set-Content -LiteralPath $rf
+```
+
+```powershell
+az role assignment create --name $rn --assignee-object-id $me --assignee-principal-type User --role Reader --scope $mg -o none
+```
+
+```powershell
+az role assignment delete --ids $rid
+```
+
+Success is two notifications for `alert-rbac-write-mgmt-prod-cus` within about
+ten minutes, and the stop-condition list printing nothing again. Only then
+remove the record:
+
+```powershell
+Remove-Item -LiteralPath $rf
+```
+
+For the application subscription, the same with `rg-web-site-prod-cus`: check
+both stop conditions again, then:
+
+```powershell
+$rg = (az group show -n rg-web-site-prod-cus -o json | ConvertFrom-Json).id
+```
+
+```powershell
+az role assignment list --assignee $me --scope $rg -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
+```
+
+```powershell
+$rn = [guid]::NewGuid().Guid
+```
+
+```powershell
+$rid = "$rg/providers/Microsoft.Authorization/roleAssignments/$rn"
+```
+
+```powershell
+@{ ra = $rid } | ConvertTo-Json | Set-Content -LiteralPath $rf
+```
+
+```powershell
+az role assignment create --name $rn --assignee-object-id $me --assignee-principal-type User --role Reader --scope $rg -o none
+```
+
+```powershell
+az role assignment delete --ids $rid
+```
+
+```powershell
+Remove-Item -LiteralPath $rf
+```
+
+**If either half was interrupted**, recover from the record in any window. A
+delete that answers that the assignment does not exist means the run stopped
+before creating it:
+
+```powershell
+$r = Get-Content -LiteralPath (Join-Path $HOME 'plat4-rbac-test.json') -Raw | ConvertFrom-Json
+```
+
+```powershell
+az role assignment delete --ids $r.ra
+```
+
+Then repeat that half's stop-condition list, which should print nothing, and
+only then remove the record:
+
+```powershell
+Remove-Item -LiteralPath (Join-Path $HOME 'plat4-rbac-test.json')
+```
+
+### Fire record
+
+| Rule | Seen to fire | Notes |
+| --- | --- | --- |
+| `alert-timer-overdue` | not yet | |
+| `alert-lab-agent-offline` | not yet | |
+| `alert-jobs-poison` | not yet | |
+| `alert-swa-bandwidth` | not yet | |
+| `alert-kv-errors` | not yet | |
+| `alert-kv-data-write` | not yet | |
+| `alert-kv-config-write` | not yet | |
+| `alert-rbac-write-app` | not yet | |
+| `alert-rbac-write-mgmt` | not yet | |
+| `alert-lab-vault-unwrap` | not yet | |
+| `alert-lab-ssh-burst` | not yet | |
+
+### What these still do not cover
+
+- **A daily digest of denials.** Denials are written to a Cosmos container,
+  not to Log Analytics, so a digest needs code (a timer that reads the
+  container and mails or posts a summary), not an alert rule. It is a
+  follow-up on #964, not part of this change.
+- **Log alerts sleep while the workspace is capped.** Every rule above that
+  reads a billable table stops seeing new rows at the cap until the 08:00 UTC
+  reset. `alert-logs-capacity` warns at 80%, and the reachability rule fires on
+  the silence; the metric and Activity Log rules here keep evaluating.
+- **Cloudflare's audit log and 90-day retention** for the tables these rules
+  read are the rest of the assessment's security-observability item (PLAT-8),
+  not this change.
+
 ## The failure with no alert
 
 Run this when the site is reported down but Azure looks healthy, and as step 1

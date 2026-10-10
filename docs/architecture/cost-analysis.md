@@ -237,10 +237,27 @@ pricing page:
   for reachability reasons as well ([Alerting and support](../runbooks/alerting-and-support.md));
   it should also be a spend decision.
 
-Exact per-unit prices are deliberately not quoted here. The Azure Monitor
-pricing page renders them dynamically and they could not be read at the time of
-writing; take them from the pricing calculator before arming the web test, the
-same rule this page applies to every other figure.
+The Azure Monitor pricing page renders its prices dynamically, and they could
+not be read from it when this section was written. The Azure Retail Prices API
+returns them. Read 2026-10-10 for Central US, they are:
+
+| Meter | Price |
+| --- | --- |
+| Log search alert rule, per month, by evaluation frequency (`Alerts System Log Monitored at …`) | USD 3.00 at 1 min, 1.50 at 5 min, 1.00 at 10 min, 0.50 at 15 min |
+| Each further time series of a dimension-split log rule (`Alerts Resource Monitored at …`); the first is in the rule's price | USD 0.30, 0.15, 0.10, 0.05 at the same frequencies |
+| Metric alert time series (`Alerts Metric Monitored`) | First 10 a month free, then USD 0.10 each |
+| Activity Log alert rules | Free ("Activity log ... alert rules continue to be available at no charge", pricing page FAQ) |
+| Email notifications | First 1,000 a month free, then USD 0.00002 each |
+| SMS to country code 1 | First 100 a month free, then USD 0.00645 each |
+
+PLAT-4 (#964) added eleven rules at those prices. Seven are log rules at a
+15-minute frequency (USD 3.50); one splits by timer, at most 24 further series
+(USD 1.20). One is a metric alert inside the free ten, and three are Activity
+Log alerts. That comes to about **USD 4.70 a month** at most, USD 2.20 of it in
+the application subscription and USD 2.50 in Management, with no added
+ingestion: every rule reads data that already arrives. Re-count the rules
+before treating any total here as current, and take web-test prices from the
+same API before arming the web test.
 
 ## Budgets and anomaly controls
 

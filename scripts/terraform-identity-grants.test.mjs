@@ -342,6 +342,9 @@ const IN_A_DECLARED_GROUP = new Set([
   'azurerm_key_vault',
   'azurerm_log_analytics_workspace',
   'azurerm_monitor_action_group',
+  // The rule is written in its resource_group_name, a declared group. What
+  // its `scopes` name is only READ: see WATCH_SCOPES below (PLAT-4, #964).
+  'azurerm_monitor_activity_log_alert',
   'azurerm_monitor_data_collection_rule',
   'azurerm_monitor_diagnostic_setting',
   'azurerm_monitor_metric_alert',
@@ -382,6 +385,40 @@ const SCOPE_ATTRIBUTES = [
  * on 2026-10-07, and an entry here is a reviewed decision, not a default.
  */
 const SCOPE_EXPRESSION_ALLOWLIST = {};
+
+/**
+ * Scope attributes that name what a block WATCHES, not where it writes, and
+ * so may name a whole subscription (PLAT-4, #964).
+ *
+ * An Activity Log alert is created in its `resource_group_name`, which is held
+ * below a declared group like every other block's. Its `scopes` are the
+ * prefixes of the Activity Log events it evaluates. Microsoft's prerequisite
+ * for an alert rule's target is read permission ("Read permission on the
+ * target resource of the alert rule"), and every read above a group is RBAC
+ * Administrator's `*\/read` on both sides of step two (ADR 0005). Nothing is
+ * created, changed or assigned at those scopes, so naming the subscription
+ * there widens nothing the run identity does.
+ *
+ * Only the two subscription slots infra/ already targets are accepted, and
+ * only as the whole subscription; any other value in these attributes is
+ * checked like every scope above.
+ */
+const WATCH_SCOPES = {
+  'azurerm_monitor_activity_log_alert.scopes':
+    'Activity Log events the rule evaluates, read through RBAC Administrator */read',
+};
+const SUBSCRIPTION_WATCH = /^"\/subscriptions\/\$\{var\.subscription_(app|mgmt)\}"$/;
+
+/** A watch-scope value with its whole-subscription items removed. */
+function withoutSubscriptionWatch(value) {
+  const items = value
+    .replace(/^\[|\]$/g, '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((item) => !SUBSCRIPTION_WATCH.test(item));
+  return `[${items.join(', ')}]`;
+}
 
 describe('what infra/ does once subscription Contributor is gone (SEC-1 step two)', () => {
   const blocks = allBlocks(source).filter((b) => /^(data\.)?(azurerm|azapi)_/.test(b.key));
@@ -425,6 +462,25 @@ describe('what infra/ does once subscription Contributor is gone (SEC-1 step two
   it('keeps budgets the only delete the custom role carries', () => {
     const deletes = grants.subscriptionRole.Actions.filter((a) => /\/delete$/i.test(a));
     expect(deletes).toEqual(['Microsoft.Consumption/budgets/delete']);
+  });
+
+  it('lets a watch scope name only a whole subscription infra/ already targets', () => {
+    // The exception is exactly as wide as WATCH_SCOPES says, and no wider: a
+    // group, a resource or another subscription in the same list is still
+    // left in for the checks below to judge.
+    expect(withoutSubscriptionWatch('["/subscriptions/${var.subscription_app}"]')).toBe('[]');
+    expect(withoutSubscriptionWatch('["/subscriptions/${var.subscription_mgmt}"]')).toBe('[]');
+    expect(withoutSubscriptionWatch('["/subscriptions/${var.subscription_conn}"]')).toBe(
+      '["/subscriptions/${var.subscription_conn}"]'
+    );
+    expect(withoutSubscriptionWatch('["/subscriptions/${var.subscription_app}/resourceGroups/rg-x"]')).toBe(
+      '["/subscriptions/${var.subscription_app}/resourceGroups/rg-x"]'
+    );
+    expect(withoutSubscriptionWatch('[azurerm_key_vault.hcw.id, "/subscriptions/${var.subscription_app}"]')).toBe(
+      '[azurerm_key_vault.hcw.id]'
+    );
+    const watching = blocks.filter((b) => b.key === 'azurerm_monitor_activity_log_alert');
+    expect(watching.every((b) => /^\s*resource_group_name\s*=\s*azurerm_resource_group\./m.test(b.body))).toBe(true);
   });
 
   /** Why one expression does not resolve below a declared group, or null. */
@@ -474,7 +530,7 @@ describe('what infra/ does once subscription Contributor is gone (SEC-1 step two
       .flatMap(({ key, label, body }) =>
         [...withoutComments(body).matchAll(attribute)].map((m) => ({
           where: `${key}.${label}.${m[1]}`,
-          value: m[2].trim(),
+          value: `${key}.${m[1]}` in WATCH_SCOPES ? withoutSubscriptionWatch(m[2].trim()) : m[2].trim(),
         }))
       );
     // Guards the guard: about 115 such attributes on 2026-10-07, 25 of them
@@ -491,10 +547,17 @@ describe('what infra/ does once subscription Contributor is gone (SEC-1 step two
   });
 
   it('writes no literal Azure id above a declared group, except the subscription budgets', () => {
+    // A watch scope's whole-subscription items are read, not written to
+    // (WATCH_SCOPES), so they are taken out before the scan; anything else on
+    // the same line is still scanned.
+    const watchLines = (key, text) =>
+      text.replace(/^(\s*)(\w+)(\s*=\s*)(.+)$/gm, (line, indent, name, eq, value) =>
+        `${key}.${name}` in WATCH_SCOPES ? `${indent}${name}${eq}${withoutSubscriptionWatch(value.trim())}` : line
+      );
     const above = blocks
       .filter((b) => !(b.key in SUBSCRIPTION_SCOPE))
       .flatMap(({ key, label, body }) =>
-        [...withoutComments(body).matchAll(/\/subscriptions\/[^"\s]*/g)]
+        [...watchLines(key, withoutComments(body)).matchAll(/\/subscriptions\/[^"\s]*/g)]
           .map((m) => m[0])
           .filter((id) => {
             const group = id.match(/\/resourceGroups\/([^/"]+)/i)?.[1];
