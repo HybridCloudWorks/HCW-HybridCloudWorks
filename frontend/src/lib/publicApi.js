@@ -569,6 +569,25 @@ export async function fetchCoderStatus() {
 }
 
 /**
+ * GET public/addons/{id}/status — one AddOn's state through the server-side
+ * proxy (ADR 0035 decision 4): `{ configured: false }` while its
+ * `ADDON_<ID>_URL` setting is unset, otherwise `{ configured: true,
+ * reachable, version, edition, capabilities, asOf }`. The pane at
+ * `/tools/<id>` opens only on `configured` and `reachable` both true.
+ *
+ * Same null-on-404 and throw-otherwise contract as `fetchCoderStatus`; an
+ * id the registry does not name answers 404, so it reads as null.
+ *
+ * @param {string} id
+ * @returns {Promise<object|null>}
+ */
+export async function fetchAddonStatus(id) {
+  const body = await publicGet(`public/addons/${encodeURIComponent(id)}/status`);
+  if (!body) return null;
+  return requireConfiguredFlag(body, 'Add-on status');
+}
+
+/**
  * GET public/labs/submit — whether the lab would take a public job now
  * (#672): `{ configured, open, code, reason, bounds }`. `open` is false while
  * public submission is switched off (`code: 'PUBLIC_SUBMISSION_CLOSED'`),

@@ -620,6 +620,19 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # secret. The code defaults to 5 when this is unset or unparseable.
     "CODER_MAX_WORKSPACES" = "5"
 
+    # Tool add-ons (ADR 0035 decision 4). The address of each AddOn the
+    # status proxy (lib/addons/status.js) reads `/api/health` from, so the
+    # pane at /tools/<id> opens only when the AddOn answers. A plain setting,
+    # not a Key Vault reference: the value is public (it is in the site's
+    # CSP frame-src and is the frame's src), no credential travels with it,
+    # so there is no vault seeding and no unresolved-reference monitor for
+    # it. Unset it to close the pane: the proxy then answers
+    # { configured: false } and the page shows its one sentence. The other
+    # two AddOns (ADDON_NETWORK_ASSESSMENT_URL, ADDON_CLOUD_ASSESSMENT_URL)
+    # are declared in the pull request that makes their catalogue row
+    # available; until then their rows are `coming` and read nothing.
+    "ADDON_MIGRATION_URL" = "https://migration.lab.hybridcloudworks.com"
+
     # Hybrid Lab — the Landing Zone Builder's public "Validate on the lab"
     # (ADR 0032 decision 6, revised 2026-09-28: open, locked to the site's
     # pane by its origin and a Cloudflare Turnstile token). The switch is

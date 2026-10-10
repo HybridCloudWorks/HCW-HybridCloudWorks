@@ -53,6 +53,10 @@ export function jsonResponse(status, body, cacheSeconds = 0) {
  * @param {() => number} [deps.now] - epoch ms
  * @param {number} [deps.seconds] - how long an entry is fresh
  */
+/** What a cache warning says about a failure: its class and code, which name the kind of trouble without its text. */
+const errorLabel = (error) => `${error?.name ?? 'Error'} (${error?.code ?? 'no code'})`;
+
+/** A one-minute cache for one document id in the cache container: `read` returns the fresh value or null, `write` replaces it; neither throws. */
 export function createMinuteCache({ store, id, kind, now = () => Date.now(), seconds = MINUTE_CACHE_SECONDS }) {
   const freshMs = seconds * 1000;
 
@@ -66,7 +70,8 @@ export function createMinuteCache({ store, id, kind, now = () => Date.now(), sec
         if (!Number.isFinite(cachedAt) || now() - cachedAt >= freshMs) return null;
         return doc.value;
       } catch (error) {
-        context?.warn?.(`${id}: cache read failed, reading live: ${error?.message ?? error}`);
+        // The error's class and code, never its message: a store error can carry an address or a query.
+        context?.warn?.(`${id}: cache read failed, reading live: ${errorLabel(error)}`);
         return null;
       }
     },
@@ -82,7 +87,7 @@ export function createMinuteCache({ store, id, kind, now = () => Date.now(), sec
           ttl: seconds,
         });
       } catch (error) {
-        context?.warn?.(`${id}: cache write failed, next request reads live: ${error?.message ?? error}`);
+        context?.warn?.(`${id}: cache write failed, next request reads live: ${errorLabel(error)}`);
       }
     },
   };

@@ -230,6 +230,16 @@ const PUBLIC_ROUTES = new Set([
   // job, a UUID check before any read, and never the payload, the agent or
   // the requester. Behind the same switch — lib/labs/public-submit.js.
   'public/labs/job',
+  // One AddOn's status through a server-side proxy (ADR 0035 decision 4),
+  // so the site's pane at /tools/<id> opens only when the AddOn answers its
+  // health read and the browser never calls the AddOn (connect-src stays
+  // closed). Anonymous because it backs a public page; safe because it is
+  // one cached document per known id, rewritten at most once a minute, the
+  // ids are closed in lib/addons/registry.js (an unknown id answers 404
+  // before any read), and the body is a six-field projection (configured,
+  // reachable, version, edition, capabilities, asOf) that never carries the
+  // AddOn's URL — lib/addons/status.js.
+  'public/addons/{id}/status',
 ]);
 
 const ALLOWED_ORIGIN = 'https://hybridcloudworks.com';

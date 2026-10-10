@@ -10,6 +10,9 @@ argument_specs:
       - While Coder is enabled, also fails unless coder-docker-proxy runs with every policy key the
         installed Compose file sets and mounts the sandbox daemon's socket directory alone, and that
         daemon reports name=rootless.
+      - For every deployed tool add-on (ADR 0035), also fails unless hcw-addon-<id> runs with a
+        read-only root, every capability dropped, not privileged, no bind mount, every published
+        port bound to 127.0.0.1 and no host user namespace.
       - Prints the docker group's other members, each of which is root on the host.
       - Changes nothing but the check script it installs; the check job removes its own container.
     author: HybridCloudWorks
@@ -62,3 +65,18 @@ argument_specs:
         required: false
         default: unix:///run/hcw-coder-docker/docker.sock
         description: The coder_sandbox daemon's socket.
+      privilege_checks_addons:
+        type: list
+        elements: dict
+        required: false
+        description:
+          - The add-on rows whose containers are checked; defaults to the enabled rows of addons that
+            have a digest, while addons_enabled is true.
+      privilege_checks_addons_network:
+        type: str
+        required: false
+        description: The network each add-on container must be on; defaults to the addons role's addons_network_name.
+      privilege_checks_addons_container_port:
+        type: int
+        required: false
+        description: The container port each add-on must publish, and only that one; defaults to the addons role's addons_container_port.

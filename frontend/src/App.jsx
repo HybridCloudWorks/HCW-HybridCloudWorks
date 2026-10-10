@@ -129,6 +129,8 @@ const ProviderCoderCornerPage = lazyPage(
 
 // Cloud Tools
 const ToolsMigrationPage = lazyPage(() => import('@/pages/tools/MigrationPage'));
+const ToolsNetworkAssessmentPage = lazyPage(() => import('@/pages/tools/NetworkAssessmentPage'));
+const ToolsCloudAssessmentPage = lazyPage(() => import('@/pages/tools/CloudAssessmentPage'));
 const ToolsComparisonPage = lazyPage(() => import('@/pages/tools/ComparisonPage'));
 const ToolsResourcesPage = lazyPage(() => import('@/pages/tools/ResourcesPage'));
 const ToolsDecisionsPage = lazyPage(() => import('@/pages/tools/DecisionsPage'));
@@ -405,6 +407,9 @@ function App() {
               <Route path="/tools/resources" element={<ToolsResourcesPage />} />
               <Route path="/tools/decisions" element={<ToolsDecisionsPage />} />
               <Route path="/tools/landing-zone" element={<ToolsLandingZonePage />} />
+              {/* AddOn panes (ADR 0035); one route per catalogue row */}
+              <Route path="/tools/network-assessment" element={<ToolsNetworkAssessmentPage />} />
+              <Route path="/tools/cloud-assessment" element={<ToolsCloudAssessmentPage />} />
               {/* --- Staging preview (T-606): signed-link view of unpublished
                   drafts. Static segment outranks /:provider in route ranking. --- */}
               <Route path="/preview/:id" element={<PreviewPage />} />

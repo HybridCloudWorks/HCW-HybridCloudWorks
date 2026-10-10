@@ -57,11 +57,19 @@
   #    lab_top_level_allowed, and only for a request that must work at the
   #    top level and shows no page there. 10-coder.caddy does this for
   #    GitHub sign-in; nothing else does.
+  #    Where the visit goes is the variable lab_direct_visit_redirect, set
+  #    here for every name and read by the redir below as a placeholder.
+  #    A route may set it again for its own name (20-addons.caddy sends a
+  #    visit to an add-on's name to that add-on's page on the site): Caddy
+  #    orders every vars directive ahead of redir, and a later vars for the
+  #    same key wins (ADR 0035; checked with caddy adapt, roles/caddy/README.md,
+  #    "Panes only").
+  vars lab_direct_visit_redirect {{ caddy_direct_visit_redirect }}
   @lab_direct_visit {
     expression `{http.request.header.Sec-Fetch-Dest} == "document" || ({http.request.header.Sec-Fetch-Dest} == "" && {http.request.header.Sec-Fetch-Mode} == "navigate")`
     not vars lab_top_level_allowed true
   }
-  redir @lab_direct_visit {{ caddy_direct_visit_redirect }} 302
+  redir @lab_direct_visit {vars.lab_direct_visit_redirect} 302
 }
 
 {% if caddy_tls_enabled | bool %}

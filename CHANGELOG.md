@@ -19,6 +19,46 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **AddOn panes: independently built tools in sandboxed panes on their own
+  lab names, starting with the Migration Hub (ADR 0035; the Phase 6
+  website pull request of the App-to-AddOn program).** The site gains a
+  catalogue of tool add-ons (`frontend/src/data/addons/catalogue.js`: the
+  migration row `available`, the network and cloud assessments `coming`
+  since 2026-10-10), a generic pane page at `/tools/<id>`
+  (`pages/tools/AddOnPanePage.jsx`: the status gate, the sandbox and
+  `allow` lists derived from the row's capabilities, the `hcw-addon`
+  message filter with its four states, an allow-listed `navigate`, a
+  30-second watchdog, and one sentence for every way the tool can be
+  missing), routes, pre-render entries and the Tools menu derived from it,
+  and one exact origin per available row in the CSP's `frame-src`.
+  `/tools/migration` goes from a placeholder to the pane. The Function App
+  gains `GET /api/public/addons/{id}/status` (`lib/addons/`): ids closed in
+  a server-side registry, a 5-second https-only read of the add-on's
+  `/api/health`, a one-minute cache per id with failures cached, and a
+  six-field projection that never carries the URL; the address is the
+  plain app setting `ADDON_MIGRATION_URL` in Terraform. Admin gains the
+  Tool add-ons group with the Migration add-on card, probe and directory
+  row, and the Credentials register lists the add-on's vault key. The lab
+  host gains the generic `addons` Ansible role (one hardened container per
+  `group_vars` row by digest on the loopback, a Caddy route per name with
+  the site's sentence at 503, a per-name direct-visit redirect whose
+  directive ordering `caddy adapt` checks in CI, the end-of-run privilege
+  checks extended to each container) and the migration row, with the
+  digest and the widget's site key marked `[VERIFY]` for the owner. The
+  AddOn integration standard lands in `docs/standards/`, the program
+  package in `docs/architecture/app-to-addon/`, and ADR 0035 records the
+  model with two items for the owner's review. Review round 1 (Copilot):
+  the add-on containers run on their own bridge network with
+  inter-container communication off and egress limited in `DOCKER-USER` to
+  the verification endpoint's published ranges on 443 (also written to
+  ufw's `after.rules` for the next boot); no volume or mount, compared
+  strictly; a row with no digest answers 503 directly and any container
+  left from an earlier digest is removed; the privilege checks assert the
+  network, the one loopback binding and no mounts, null-safe; the status
+  proxy validates the whole version string, shares one in-flight read per
+  id, and logs by setting name, class and code only (the minute cache's
+  warnings too); the pane focuses its frame on load; the migration row
+  ships without `downloads` until ADR 0035 decision 9 is confirmed.
 - **Credentials: one register of every credential, with its age and expiry,
   on Admin → Integrations → Credentials, and a Telegram reminder for each
   one only the owner can renew (#1026).** `functions/src/lib/credentials/`

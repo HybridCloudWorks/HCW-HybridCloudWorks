@@ -1,0 +1,41 @@
+# {{ ansible_managed }}
+# Imported inside the wildcard site block of /etc/caddy/Caddyfile, so TLS and
+# the certificate are the site's. One route per enabled tool add-on (ADR
+# 0035): its own one-label lab name, proxied to its container on the
+# loopback. reverse_proxy sets X-Forwarded-For, which the add-on trusts
+# (<PREFIX>_TRUST_PROXY=1) for its rate limit and human verification, since
+# nothing else can reach the loopback port.
+#
+# Panes only (owner decision 2026-09-28). The Caddyfile's lab_panes_only
+# covers these names like every other and runs before the routes below:
+# every response carries the site-only frame-ancestors, and a top-level
+# visit is redirected to the site. The vars line sends it to the add-on's
+# own page on the site rather than the labs page, by overriding the
+# variable lab_panes_only's redir reads (Caddy orders every vars directive
+# ahead of redir, and a later vars for the same key wins). No add-on sets
+# lab_top_level_allowed: nothing of an add-on works at the top level.
+{% for addon in addons_running %}
+@addon_{{ addon.id | replace('-', '_') }} host {{ addon.id }}.{{ lab_host_domain }}
+vars @addon_{{ addon.id | replace('-', '_') }} lab_direct_visit_redirect https://hybridcloudworks.com/tools/{{ addon.id }}
+handle @addon_{{ addon.id | replace('-', '_') }} {
+{% if addon.image_digest | default('') %}
+  reverse_proxy {{ addons_publish_address }}:{{ addon.port }}
+{% else %}
+  respond "{{ addons_unavailable_response }}" 503
+{% endif %}
+}
+{% endfor %}
+
+# A row without a digest yet is not deployed, so its name answers the
+# sentence directly rather than proxying to a port nothing of ours holds.
+# When a deployed container is stopped (a failed start), the proxy
+# cannot dial and Caddy would answer 502. Answer 503 with the site's own
+# sentence instead, so the pane says the same thing whichever side notices.
+handle_errors {
+{% for addon in addons_running %}
+  @addon_{{ addon.id | replace('-', '_') }}_down host {{ addon.id }}.{{ lab_host_domain }}
+  handle @addon_{{ addon.id | replace('-', '_') }}_down {
+    respond "{{ addons_unavailable_response }}" 503
+  }
+{% endfor %}
+}

@@ -85,7 +85,7 @@ const LEGAL = Object.freeze({
   'public/terms-of-service.html': ['edge', 'vendors'],
 });
 
-const ROOTS = ['pages', 'components', 'hooks', 'data/labs'];
+const ROOTS = ['pages', 'components', 'hooks', 'data/labs', 'data/addons'];
 const ADMIN = /^(?:pages|components)\/admin\//;
 const SOURCE = /\.(?:jsx?|tsx?)$/;
 const TEST = /\.(?:test|spec)\.|\.fixture\./;
@@ -258,6 +258,9 @@ describe('public pages, components and hooks', () => {
     expect(files).toContain('components/labs/labSignIn.js');
     // The Coder credit beside the labs intro (2026-09-28).
     expect(files).toContain('components/labs/CoderCredit.jsx');
+    // The AddOn panes and their catalogue (ADR 0035).
+    expect(files).toContain('pages/tools/AddOnPanePage.jsx');
+    expect(files).toContain('data/addons/catalogue.js');
     expect(files.filter((f) => ADMIN.test(f))).toEqual([]);
   });
 

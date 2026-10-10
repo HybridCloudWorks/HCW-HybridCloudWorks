@@ -11,6 +11,8 @@ container runtime is privilege-separated and how to take that back (LAB-5);
 how the owner reaches Portainer and
 initialises and unseals HashiCorp Vault on it (owner decision 2026-09-26),
 and moves that Vault to auto-unseal through the Arc identity (#726);
+how the owner turns on a tool add-on, the first being the migration
+assessment the site frames at `/tools/migration` ("Tool add-ons", ADR 0035);
 how fast a runc, containerd or Docker Engine advisory is fixed on the host,
 and who does what ("Runtime advisories", #949);
 and how the host becomes an Azure Arc-enabled server in
@@ -1488,6 +1490,106 @@ Management workspace as an `AzureDiagnostics` row with the caller's IP
 address, from the vault's AuditEvent diagnostic setting. When the owner has
 seen the host come back unsealed from a reboot, the cold copy can go:
 `sudo rm /root/vault-before-726.tgz`.
+
+## Tool add-ons
+
+**[ADR 0035](../decisions/0035-addon-pane-model.md), 2026-10-09.** The tool
+add-ons are independently built tools the site shows in a pane at
+`/tools/<id>`; the lab host runs each as one hardened container,
+`hcw-addon-<id>`, from a digest-pinned image, on the loopback behind Caddy at
+`<id>.lab.hybridcloudworks.com` (`lab-host/ansible/roles/addons/README.md`).
+The first is `migration`, the Azure migration assessment. Three owner steps
+turn one on, once; a release afterwards is a digest bump ("Bumping a pin" in
+`lab-host/README.md`) and a run.
+
+**1. Create the add-on's human-verification widget** [REVIEW REQUIRED]: one
+widget per add-on, separate from the site's own, because the widget is bound
+to the add-on's hostname and the add-on verifies the token with its own
+secret. The exact page is
+`https://dash.cloudflare.com/?to=/:account/turnstile`, **Add widget**, with
+the widget name `hcw-addon-migration`, the hostname
+`migration.lab.hybridcloudworks.com`, Managed mode and no pre-clearance. The
+widget's **Site Key** is public: put it in `addons[].env.AMO_TURNSTILE_SITE_KEY`
+of the `migration` row in `lab-host/ansible/group_vars/all.yml` in a pull
+request [VERIFY]: the row ships with the provider's documented test key
+`1x00000000000000000000AA` until then, and the `addons` role refuses to
+deploy a row whose environment still carries a test key, because a widget's
+real secret rejects the token a test key produces and no upload would ever
+verify. Then copy
+the **Secret Key** and, with it on the clipboard, set the vault key.
+PowerShell:
+
+```powershell
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_addon_migration_turnstile_secret"
+```
+
+Success looks like: the command prints nothing and exits 0. The value never
+appears on a command line or in output. The `addons` role refuses to start
+the container while this key is unset, naming the key and this line.
+
+**2. Write the digest in.** The add-on's `v0.3.0` release prints
+`docker.io/hybridcloudworks/hcw-addon-migration@sha256:…` in its
+`publish-images` run summary; the same value, read from the registry.
+PowerShell, anywhere with Docker:
+
+```powershell
+docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-addon-migration:0.3.0
+```
+
+The `Digest:` line is the value for `image_digest` of the `migration` row in
+`lab-host/ansible/group_vars/all.yml`. [VERIFY]: the row ships with
+`image_digest: ""`, under which the role deploys nothing for it and says so.
+Merge, then run the playbook as after any merge. PowerShell:
+
+```powershell
+ssh hcw-lab "sudo /opt/hcw-src/lab-host/bootstrap.sh"
+```
+
+Success looks like `failed=0` in the `PLAY RECAP`, the task
+`addons : Say what runs` printing `Tool add-ons running: hcw-addon-migration`,
+and `privilege_checks` passing its add-on container check. Then the health
+read over SSH, PowerShell:
+
+```powershell
+ssh hcw-lab "curl -s http://127.0.0.1:18081/api/health"
+```
+
+Success looks like a JSON body with `"ok":true`, `"id":"migration"` and a
+`"version"` matching the pinned tag (`0.3.0`). From outside, the name answers
+with the site-only `frame-ancestors` and the add-on's own headers. PowerShell:
+
+```powershell
+curl.exe -sI https://migration.lab.hybridcloudworks.com/ | findstr /i "x-addon content-security-policy x-frame-options location"
+```
+
+Success looks like `x-addon-id: migration`, a `content-security-policy` whose
+`frame-ancestors` names `https://hybridcloudworks.com`, and no
+`x-frame-options`; a browser visiting the same address at the top level is
+sent to `https://hybridcloudworks.com/tools/migration`.
+
+**3. Open the pane on the site.** The Function App setting
+`ADDON_MIGRATION_URL` is a plain Terraform value
+(`infra/functionapp.tf`), so the `hcw-azure` apply of the ADR 0035 pull
+request sets it; nothing is seeded. Once applied,
+`https://hybridcloudworks.com/tools/migration` shows the pane, and
+`https://hybridcloudworks.com/admin/integrations?tab=services` (Tool add-ons,
+*Migration add-on*, **Test**) answers `Connected: version 0.3.0, edition demo.`
+Until the host runs the container, the same page and the status read say the
+tool isn't available, which is the truth.
+
+**Kill switches.** `enabled: false` on the row removes that one container
+(the name then answers 503 with the site's sentence); `addons_enabled: false`
+removes every add-on; unsetting `ADDON_MIGRATION_URL` in Terraform closes the
+pane without touching the host. **Rollback** of a release is the previous
+digest in the same row and a run. Logs, content-free by the add-on's design,
+PowerShell:
+
+```powershell
+ssh hcw-lab "sudo docker logs --tail 100 hcw-addon-migration"
+```
+
+Restarting or replacing the container drops every in-memory assessment by
+design.
 
 ## Runtime advisories
 

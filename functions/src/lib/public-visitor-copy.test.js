@@ -138,6 +138,9 @@ const PUBLIC_ROUTE_MODULES = Object.freeze({
     'lib/cloud-tools/explain/kinds/pricing.js',
     'lib/cloud-tools/explain/kinds/landingZone.js',
   ],
+  // The AddOn status proxy (ADR 0035): one cached, projected read per known
+  // id; its only words are the 404 for an unknown id and the 500 sentence.
+  'functions/addons-public-http.js': ['lib/addons/status.js', 'lib/addons/registry.js'],
   'functions/labs-public-http.js': [
     'lib/labs/estate.js',
     'lib/labs/coder-status.js',

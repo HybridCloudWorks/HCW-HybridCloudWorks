@@ -69,3 +69,6 @@ coverage/
 # Per-developer MCP servers for VS Code. .vscode/settings.json and the other
 # workspace files are shared; this one names local tools and local paths.
 .vscode/mcp.json
+
+# ansible-galaxy writes collections it installs for a local run under .ansible/ next to the playbook; never source.
+.ansible/

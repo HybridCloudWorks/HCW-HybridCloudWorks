@@ -87,9 +87,16 @@ and any route added later. A route does not have to repeat it.
   Coder's route removes Coder's default `frame-ancestors 'self'`.
 - **No direct browsing.** The named matcher `@lab_direct_visit` selects a
   top-level visit: `Sec-Fetch-Dest: document`, or no `Sec-Fetch-Dest` with
-  `Sec-Fetch-Mode: navigate`. It answers with `302` to
-  `caddy_direct_visit_redirect`, `https://hybridcloudworks.com/education/labs`.
-  Everything else passes. That covers panes (`iframe`); fetch, XHR and
+  `Sec-Fetch-Mode: navigate`. It answers with `302` to the variable
+  `lab_direct_visit_redirect`, which the snippet sets to
+  `caddy_direct_visit_redirect`, `https://hybridcloudworks.com/education/labs`,
+  for every name, and which a route may set again for its own name: the
+  addons role sends a visit to `<id>.lab` to `https://hybridcloudworks.com/tools/<id>`
+  (ADR 0035). That relies on Caddy ordering every `vars` directive ahead of
+  `redir` and on a later `vars` for the same key winning, which
+  `tests/caddy-adapt.test.sh` checks against the pinned Caddy in CI (the
+  order it settled on 2026-10-10 with v2.11.4: the snippet's `vars`, the
+  route's, then the `redir`). Everything else passes. That covers panes (`iframe`); fetch, XHR and
   WebSockets from a page in a pane (`empty`); subresources; and clients
   that send no fetch metadata, which are Coder's agents and CLI, curl, and
   the site's status proxy. `Vary: Sec-Fetch-Dest, Sec-Fetch-Mode` keeps a
@@ -98,10 +105,11 @@ and any route added later. A route does not have to repeat it.
 - **What a pane shows speaks to visitors.** Because every name can be
   framed by the site, every body Caddy answers on the TLS site can render
   inside a pane: the apex placeholder, the 404 for a name nothing claims,
-  and the coder role's 503 while Coder is stopped. Like the site's own pages
+  the coder role's 503 while Coder is stopped, and the addons role's 503
+  while an add-on's container is stopped. Like the site's own pages
   (`frontend/src/public-copy.test.js`), none names a tool, the host or a
-  setting, and the 503 is the site's own sentence for the same state.
-  `scripts/lab-host-visitor-copy.test.mjs` holds all three. The fail-closed
+  setting, and each 503 is the site's own sentence for the same state.
+  `scripts/lab-host-visitor-copy.test.mjs` holds all four. The fail-closed
   HTTP-only 503 is the exception, and says which vault key is missing: a
   browser will not show an `http://` page inside the site's `https://` pane,
   and a top-level visit is redirected first, so only a command-line client
@@ -128,7 +136,9 @@ accepts, recorded in `lab-host/README.md`.
 Drop a file in `/etc/caddy/conf.d/` named `NN-<owner>.caddy` containing a
 named matcher and a `handle` block, then notify `Reload caddy`. The
 `00-apex.caddy` file is the example to copy. The route is panes-only with
-nothing more to write.
+nothing more to write. A route whose name has its own page on the site may
+add `vars <matcher> lab_direct_visit_redirect <url>` so a direct visit lands
+there instead of the labs page (`roles/addons/templates/20-addons.caddy.j2`).
 
 A request that has to work at the top level can be let through with
 `vars <matcher> lab_top_level_allowed true`. This is only for a request
@@ -147,7 +157,7 @@ for `lab_top_level_allowed` lists every exemption.
 | `caddy_site_domain` | required | Apex; matcher and fail-closed placeholder |
 | `caddy_site_names` | required | Every name the site block serves |
 | `caddy_frame_ancestors` | required | `frame-ancestors` sources on every response: `'self'` and the site's two origins |
-| `caddy_direct_visit_redirect` | required | Where a top-level browser visit is sent with `302`: the site's labs page |
+| `caddy_direct_visit_redirect` | required | Where a top-level browser visit is sent with `302`: the site's labs page, unless a route sets `lab_direct_visit_redirect` for its own name |
 | `caddy_cloudflare_api_token` | `vault_cloudflare_api_token` or empty | DNS-01 credential |
 | `caddy_acme_email` | `vault_caddy_acme_email` or empty | ACME contact, omitted when empty |
 | `caddy_apex_response` | `There's no lab at this address.` | Apex body; visitor wording ("Panes only") |
@@ -159,6 +169,20 @@ Paths and the service user are in `defaults/main.yml`;
 ## Handlers
 
 `Restart caddy` (binary, env file, unit), `Reload caddy` (Caddyfile, conf.d).
+
+## Tests
+
+`tests/caddy-adapt.test.sh` renders the Caddyfile and the three conf.d routes
+(apex, coder, addons) with ansible-core's template module, from this
+directory's `group_vars` and the roles' defaults, cuts the `tls` block (the
+release binary has no Cloudflare module), downloads the Caddy release
+`group_vars` pins (checked against the SHA-512 in the script) and has it
+`adapt` the result. It then reads the order Caddy settled on and fails unless
+the snippet's `vars lab_direct_visit_redirect` comes first, the addons
+route's `vars` for its name after it, the `redir` after both reading the
+placeholder, and nothing handles a request before the `vars`. No root, no
+Docker; `CADDY_BIN=<path>` skips the download. CI runs it in the
+`ansible-lint (lab-host)` job.
 
 ## Check mode
 

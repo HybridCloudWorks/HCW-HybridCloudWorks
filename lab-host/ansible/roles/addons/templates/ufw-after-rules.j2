@@ -1,0 +1,15 @@
+# Written by the addons role (lab-host/ansible/roles/addons); edit group_vars, not this block.
+# Egress from the add-ons' network {{ addons_network_name }} ({{ addons_network_subnet }}), restored by
+# ufw at boot before Docker starts; Docker then adds its FORWARD jump to this chain
+# (roles/addons/defaults/main.yml, addons_egress_cidrs). Never reload ufw to apply
+# this: the role inserts the same rules live with iptables.
+*filter
+:DOCKER-USER - [0:0]
+-A DOCKER-USER -s {{ addons_network_subnet }} -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "hcw-addons egress (roles/addons)" -j RETURN
+{% for cidr in addons_egress_cidrs %}
+{% for port in addons_egress_tcp_ports %}
+-A DOCKER-USER -s {{ addons_network_subnet }} -d {{ cidr }} -p tcp --dport {{ port }} -m conntrack --ctstate NEW -m comment --comment "hcw-addons egress (roles/addons)" -j RETURN
+{% endfor %}
+{% endfor %}
+-A DOCKER-USER -s {{ addons_network_subnet }} -m comment --comment "hcw-addons egress (roles/addons)" -j REJECT --reject-with icmp-port-unreachable
+COMMIT

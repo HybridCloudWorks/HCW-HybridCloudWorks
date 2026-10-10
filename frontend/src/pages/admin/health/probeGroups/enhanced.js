@@ -51,4 +51,10 @@ export const ENHANCED_PROBES = [
     impact: 'The labs page says the lab is not provisioned.',
     action: 'Seed CODER-URL and CODER-STATUS-TOKEN on Keys.',
   }),
+  fromService('migration-addon', {
+    hub: 'enhanced',
+    covers: 'Whether the migration add-on answers its health read.',
+    impact: '/tools/migration says the tool is unavailable.',
+    action: 'Check the add-on container on the lab host (runbook, "Tool add-ons").',
+  }),
 ];

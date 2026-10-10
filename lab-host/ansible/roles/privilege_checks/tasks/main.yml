@@ -245,3 +245,51 @@
   when:
     - privilege_checks_coder_enabled | bool
     - not ansible_check_mode
+
+# 6. Each tool add-on container (ADR 0035) runs as the addons role describes:
+# read-only root, every capability dropped, not privileged, no bind mount
+# and no mount of any kind (named volumes appear in Mounts, not in Binds),
+# on the add-ons' own network (not host networking, which would serve on
+# every interface with no port binding at all), exactly one published port,
+# the container port on 127.0.0.1 at the row's host port, under the daemon's
+# user-namespace remap. Docker reports an absent Binds, Mounts or
+# PortBindings as null, which default() replaces only with its second
+# argument set.
+- name: Read each tool add-on container
+  community.docker.docker_container_info:
+    name: "hcw-addon-{{ item.id }}"
+  register: privilege_checks_addon_containers
+  check_mode: false
+  loop: "{{ privilege_checks_addons }}"
+  loop_control:
+    label: "hcw-addon-{{ item.id }}"
+
+- name: Refuse a tool add-on container that is not running as the addons role describes
+  ansible.builtin.assert:
+    that:
+      - item.exists
+      - item.container.State.Running
+      - item.container.HostConfig.ReadonlyRootfs
+      - item.container.HostConfig.CapDrop == ['ALL']
+      - item.container.HostConfig.Privileged == false
+      - item.container.HostConfig.Binds | default([], true) | length == 0
+      - item.container.Mounts | default([], true) | length == 0
+      - item.container.HostConfig.UsernsMode | default('') != 'host'
+      - item.container.HostConfig.NetworkMode | default('') == privilege_checks_addons_network
+      - item.container.HostConfig.PortBindings | default({}, true) | dict2items | map(attribute='key') | list
+        == [privilege_checks_addons_container_port | string + '/tcp']
+      - item.container.HostConfig.PortBindings | default({}, true) | dict2items | map(attribute='value')
+        | flatten | map(attribute='HostIp') | list == ['127.0.0.1']
+      - item.container.HostConfig.PortBindings | default({}, true) | dict2items | map(attribute='value')
+        | flatten | map(attribute='HostPort') | list == [item.item.port | string]
+    fail_msg: >-
+      hcw-addon-{{ item.item.id }} is not running with a read-only root filesystem, every capability
+      dropped, no bind mount or other mount, on the {{ privilege_checks_addons_network }} network, exactly
+      one published port ({{ privilege_checks_addons_container_port }}/tcp on 127.0.0.1:{{ item.item.port }})
+      and the daemon's user-namespace remap (roles/addons/tasks/main.yml). Remove it with sudo docker rm -f hcw-addon-{{ item.item.id }}
+      and re-run bootstrap.sh, which creates it again.
+    quiet: true
+  loop: "{{ privilege_checks_addon_containers.results | default([]) }}"
+  loop_control:
+    label: "hcw-addon-{{ item.item.id }}"
+  when: not ansible_check_mode

@@ -1,0 +1,149 @@
+---
+argument_specs:
+  main:
+    short_description: Run one hardened, digest-pinned container per tool add-on on 127.0.0.1 behind a Caddy route on its own lab name (ADR 0035)
+    description:
+      - For every row of addons with enabled true, while addons_enabled is true, pulls
+        image@image_digest and runs the container hcw-addon-<id> published as
+        127.0.0.1:<port>:8080 with a read-only root, /tmp on tmpfs, every capability dropped,
+        no-new-privileges, the row's memory and pids limits, one CPU, no volume and no socket,
+        the row's env plus each secret_env key read from the vault variable it names, then
+        waits for http://127.0.0.1:<port>/api/health to answer 200. A row whose image_digest
+        is empty is not deployed and the run says so.
+      - Renders /etc/caddy/conf.d/20-addons.caddy with one route per enabled row, <id>.<lab
+        domain> proxied to the loopback port, a per-name direct-visit redirect to the site's
+        /tools/<id>, and a 503 that answers the site's own sentence while the container is
+        stopped; removes the container of every row that is not enabled, and the route while no
+        row is.
+      - Refuses to publish on any address but 127.0.0.1, a row without an integer port of its
+        own, a digest that is not sha256 plus 64 hex characters, and an enabled row whose
+        secret_env names a vault key that is not set.
+    author: HybridCloudWorks
+    options:
+      addons_enabled:
+        type: bool
+        required: true
+        description: Whether any add-on runs. False removes every add-on container and the route.
+      addons:
+        type: list
+        elements: dict
+        required: true
+        description: One entry per tool add-on; the id doubles as the lab name label, the container suffix and the site route.
+        options:
+          id:
+            type: str
+            required: true
+            description: The catalogue id, lowercase letters, digits and hyphens, for example migration.
+          enabled:
+            type: bool
+            required: true
+            description: Whether this add-on runs. False removes its container (the kill switch for one add-on).
+          image:
+            type: str
+            required: true
+            description: Image repository, for example docker.io/hybridcloudworks/hcw-addon-migration.
+          image_tag:
+            type: str
+            required: true
+            description: The release the digest was read from, for example 0.3.0. Recorded, not pulled.
+          image_digest:
+            type: str
+            required: true
+            description:
+              - Image index digest of the release, sha256 plus 64 hex characters; the container runs
+                image@digest. Empty means not deployed yet.
+          port:
+            type: int
+            required: true
+            description: The port on 127.0.0.1 the container's 8080 is published on; unique per row.
+          memory:
+            type: str
+            required: true
+            description: The container's memory limit, for example 512m.
+          pids_limit:
+            type: int
+            required: true
+            description: The container's pids limit, for example 256.
+          env:
+            type: dict
+            required: true
+            description: Plain environment for the container, string values; never a secret.
+          secret_env:
+            type: dict
+            required: false
+            description:
+              - Environment keys whose values are read from the vault variable each names, for example
+                TURNSTILE_SECRET from vault_addon_migration_turnstile_secret.
+      addons_unavailable_response:
+        type: str
+        required: false
+        default: "This tool isn't available right now."
+        description: The 503 body the route answers while a container is stopped; the site's own sentence.
+      addons_caddy_sites_dir:
+        type: path
+        required: false
+        default: /etc/caddy/conf.d
+        description: Caddy's conf.d, the caddy role's caddy_sites_dir.
+      addons_caddy_group:
+        type: str
+        required: false
+        default: caddy
+        description: The group the route file is readable by, the caddy role's caddy_group.
+      addons_caddy_route_file:
+        type: path
+        required: false
+        description: Where the route is rendered; defaults to addons_caddy_sites_dir/20-addons.caddy.
+      addons_wait_retries:
+        type: int
+        required: false
+        default: 30
+        description: How many times the health read is tried after a start.
+      addons_wait_delay:
+        type: int
+        required: false
+        default: 2
+        description: Seconds between those tries.
+      addons_log_max_size:
+        type: str
+        required: false
+        default: 10m
+        description: The json-file log cap per container.
+      addons_network_name:
+        type: str
+        required: false
+        default: hcw-addons
+        description: The add-ons' own bridge network; inter-container communication is off on it.
+      addons_network_bridge:
+        type: str
+        required: false
+        default: br-hcw-addons
+        description: The host interface name of that network.
+      addons_network_subnet:
+        type: str
+        required: false
+        default: 172.29.0.0/24
+        description: The network's IPv4 subnet, the source the egress rules match.
+      addons_egress_tcp_ports:
+        type: list
+        elements: int
+        required: false
+        default: [443]
+        description: The TCP ports a new flow from the subnet may open, to addons_egress_cidrs only.
+      addons_egress_cidrs:
+        type: list
+        elements: str
+        required: false
+        description:
+          - The destination ranges a new flow from the subnet may reach; the verification endpoint's
+            published ranges (defaults/main.yml carries the list and its retrieval date).
+      addons_ufw_after_rules:
+        type: str
+        required: false
+        default: /etc/ufw/after.rules
+        description: Where the egress rules are written so ufw restores them at boot.
+      addons_test_site_keys:
+        type: list
+        elements: str
+        required: false
+        default: [1x00000000000000000000AA, 2x00000000000000000000AB, 3x00000000000000000000FF]
+        description: The verification provider's test site keys; a deployed row's env may not carry one.

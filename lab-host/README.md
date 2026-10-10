@@ -27,9 +27,10 @@ the host has not run yet is
 | `coder` | Coder Community edition v2.37.3, PostgreSQL 18.6 and a Docker socket proxy (tecnativa/docker-socket-proxy 0.3.0, read-only, holding the `coder_sandbox` daemon's socket and never the host's; LAB-5) under Docker Compose from `../coder/docker-compose.yml`, all by digest; the Caddy route for `coder.lab` and `*.coder.lab`; a nightly `pg_dump` keeping seven days; `hcw-coder-template-push`, which publishes the workspace template from the checkout ("Publishing the template", below); Coder automation, which once the owner seeds a rotation credential renews the site's status token daily and publishes the template on every run that changes it (`docs/runbooks/labs-host.md`, "Automatic renewal"). On since 2026-09-28, for members of the `HybridCloudWorks` GitHub organisation only | `/etc/hcw/coder/` (`docker-compose.yml`, `.env`, `coder.env` and `coder-postgres.env`, the last two root 0600, `automation.json`, and `automation/rotation-token`, root 0600 in a 0700 directory), `/etc/caddy/conf.d/10-coder.caddy`, `/usr/local/sbin/coder-postgres-backup`, `/usr/local/sbin/hcw-coder-template-push` and `/usr/local/sbin/hcw-coder-automation-seed` (root:root, 0750), `/usr/local/libexec/hcw-coder-automation`, `coder-postgres-backup.timer`, `hcw-coder-automation.timer`, `/var/backups/coder/`, `/var/lib/hcw-coder-automation/` |
 | `labs_agent` | `vps-agent` host-native as `hcw-labs-agent.service` under user `hcw-labs-agent`, **in no docker group** (LAB-5): it reaches Docker through `hcw-labs-agent-docker-proxy`, HAProxy 3.4.6 by digest with the allowlist in `roles/labs_agent/templates/docker-proxy.haproxy.cfg.j2` (the calls a job makes, and no create body that asks for privilege, a host namespace, a device, a mount or a bind beyond the job's own directory), on a Unix socket only the agent's group may open. Node.js 26.10.0 from NodeSource, repository checkout at the commit the playbook runs from, certificate generated on the host | `/opt/hcw-labs-agent`, `/etc/hcw/labs-agent.env` (root, 0600), `/etc/hcw/labs-agent.pem` (root:hcw-labs-agent, 0640), `/etc/hcw/labs-agent.crt`, `/etc/hcw/labs-agent-docker-proxy/haproxy.cfg`, socket `/run/hcw-labs-agent-docker/docker.sock` (root:hcw-labs-agent, 0660) |
 | `lab_images` | Every image a lab job runs, pulled by digest before any job needs it: each value of `IMAGES` in `vps-agent/lib/capabilities.js` into the host daemon, and the Coder workspace image from `../coder/templates/hcw-lab/main.tf` into the `coder_sandbox` daemon while `coder_enabled` is true. Read from the checkouts, never copied, so a pin bump needs no edit here; digests no pin names are removed from the lab's own repositories and nothing else is touched (`roles/lab_images/README.md`) | Docker's image store; the plan is `roles/lab_images/files/lab-images.mjs`, run from the playbook's checkout |
+| `addons` | The tool add-ons (ADR 0035): one hardened container per enabled row of `addons` in `group_vars`, `hcw-addon-<id>`, from `docker.io/hybridcloudworks/hcw-addon-<id>` by digest, published on **127.0.0.1:<port> only** (migration 18081), read-only root, every capability dropped, no volume, no socket, under the user-namespace remap, the row's env plus each secret from the vault key it names; a Caddy route per name with a 503 that is the site's own sentence while the container is stopped, and a direct-visit redirect to the add-on's page on the site. A row with an empty digest is not deployed and the run says so ("Tool add-ons", below) | Containers `hcw-addon-<id>`, `/etc/caddy/conf.d/20-addons.caddy` |
 | `portainer` | Portainer Business Edition 2.45.1 (LTS) by digest, one container with the Docker socket (and `--userns=host`, which the socket needs under the remap), HTTPS on **127.0.0.1:9443 only**, plain HTTP off, no Caddy route; reached through an SSH tunnel. Nothing until `portainer_enabled` is true | Container `portainer`, volume `portainer-data` |
 | `vault` | HashiCorp Vault 2.1.1 host-native as `vault.service` under user `vault`, the download checked against HashiCorp's signature on SHA256SUMS; raft storage; API on **127.0.0.1:8200** and cluster port on **127.0.0.1:8201**, TLS from a certificate generated on the host. For lab-host secrets only; never initialised or unsealed by the role. Nothing until `vault_enabled` is true | `/usr/local/bin/vault`, `/opt/vault/` (downloads, signing key), `/etc/vault.d/vault.hcl` (root:vault, 0640), `/etc/vault.d/tls/`, `/var/lib/vault` (vault, 0700), `/etc/profile.d/hcw-vault.sh` |
-| `privilege_checks` (from `post_tasks`) | Nothing but its check script: fails the run unless `hcw-labs-agent` is in no docker group, `docker info` reports `name=userns`, the agent's proxy socket is root:hcw-labs-agent 0660, one shell-echo job run as the agent user through the proxy prints its payload while `docker ps` and a privileged `docker run` are refused, and (with Coder on) `coder-docker-proxy` carries every policy key the installed Compose file sets, mounts the sandbox daemon's socket directory alone, and that daemon reports `name=rootless` | `/usr/local/libexec/hcw-labs-agent-proxy-check.mjs` |
+| `privilege_checks` (from `post_tasks`) | Nothing but its check script: fails the run unless `hcw-labs-agent` is in no docker group, `docker info` reports `name=userns`, the agent's proxy socket is root:hcw-labs-agent 0660, one shell-echo job run as the agent user through the proxy prints its payload while `docker ps` and a privileged `docker run` are refused, (with Coder on) `coder-docker-proxy` carries every policy key the installed Compose file sets, mounts the sandbox daemon's socket directory alone, and that daemon reports `name=rootless`, and every deployed `hcw-addon-<id>` is read-only, has every capability dropped, is not privileged, has no bind mount, publishes on `127.0.0.1` only and is not in the host's user namespace (ADR 0035) | `/usr/local/libexec/hcw-labs-agent-proxy-check.mjs` |
 
 Each role's `README.md` explains its decisions; `meta/argument_specs.yml` is
 its variable contract. Every version, digest and checksum is in
@@ -46,20 +47,24 @@ configuration changes; `coder_sandbox` before `coder`, because Coder's
 proxy mounts that daemon's socket directory; `coder` after `caddy`, because
 its route is a file in Caddy's `conf.d`, and before `labs_agent`;
 `lab_images` straight after `labs_agent`, because its plan runs on the
-Node.js that role installs and reads the agent's checkout; `portainer`
+Node.js that role installs and reads the agent's checkout; `addons` after
+`lab_images`, because it needs docker and caddy and nothing of coder's, and
+stops on an enabled row whose vault key is unset; `portainer`
 and `vault` last, because nothing above needs either, so a failure there
 leaves the lab services configured; and `privilege_checks` from
 `post_tasks`, after every role and the handlers they notified. Docker
-Compose on this host is for Coder and its PostgreSQL only (ADR 0032); Portainer is a single
-container the role runs directly, Caddy, the agent and Vault are host
-services, and Coder's Caddy route is `/etc/caddy/conf.d/10-coder.caddy`,
-the pattern `00-apex.caddy` shows.
+Compose on this host is for Coder and its PostgreSQL only (ADR 0032); Portainer
+and the tool add-ons are single containers their roles run directly (the
+add-ons by ADR 0035 decision 8, which amends ADR 0032's line), Caddy, the agent
+and Vault are host services, and Coder's Caddy route is
+`/etc/caddy/conf.d/10-coder.caddy`, the pattern `00-apex.caddy` shows, with
+the add-ons' at `20-addons.caddy`.
 
 Only sshd (22) and Caddy (80 and 443) listen on a public address.
-node_exporter, Coder, Portainer and Vault listen on `127.0.0.1`, and the
-two that publish through Docker (Coder, Portainer) name `127.0.0.1` in the
-publish itself, because Docker's iptables rules for a published port come
-before ufw's.
+node_exporter, Coder, the tool add-ons, Portainer and Vault listen on
+`127.0.0.1`, and the three that publish through Docker (Coder, the add-ons,
+Portainer) name `127.0.0.1` in the publish itself, because Docker's iptables
+rules for a published port come before ufw's.
 
 ## Container-runtime privilege separation (LAB-5)
 
@@ -332,6 +337,7 @@ The keys:
 | `vault_labs_agent_api_scope` | `labs_agent` | `LABS_AGENT_API_SCOPE`: `api://<API client id>/.default`, matching the app's `ENTRA_API_AUDIENCE`. Written by the same script |
 | `vault_coder_oauth2_github_client_id` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_ID`: the GitHub OAuth app the owner creates in #682 |
 | `vault_coder_oauth2_github_client_secret` | `coder` | `CODER_OAUTH2_GITHUB_CLIENT_SECRET` |
+| `vault_addon_migration_turnstile_secret` | `addons` | `TURNSTILE_SECRET` for `hcw-addon-migration`: the secret key of the migration add-on's own human-verification widget, separate from the site's ("Tool add-ons", below). The role refuses to start the container while it is unset |
 | `vault_coder_postgres_password` | `coder` | The `coder` database user's password. Letters, digits and `. _ ~ -` only (it sits unescaped in a URL); `openssl rand -hex 32` makes one |
 | `vault_arc_service_principal_id` | `arc` | Application (client) id of `sp-arc-onboarding-lab-hybrid-prod-cus`, the Arc onboarding service principal. Written by `scripts/lab/Register-LabArc.ps1` ("Azure Arc", below) |
 | `vault_arc_service_principal_secret` | `arc` | Its client secret, valid for 24 hours. Used once by `azcmagent connect`; written by the same script and deleted, from the vault and from Entra, by its `-Connect` run once the host is Connected |
@@ -1005,6 +1011,72 @@ Success is `DROP DATABASE`, `CREATE DATABASE`, no error from the third
 `psql`, and the `buildinfo` line under "Enabling" answering again within a
 minute.
 
+## Tool add-ons
+
+The `addons` role runs the tool add-ons (ADR 0035; the standard is
+`docs/standards/addon-integration-standard.md`; the role's decisions are
+`ansible/roles/addons/README.md`): independently built tools the site shows
+in a sandboxed pane at `https://hybridcloudworks.com/tools/<id>`, each one
+hardened container on the loopback behind Caddy at
+`<id>.lab.hybridcloudworks.com`. The first row is `migration`, the Azure
+migration assessment, image `docker.io/hybridcloudworks/hcw-addon-migration`,
+on `127.0.0.1:18081`.
+
+### Turning one on
+
+Three things, in the pull request that adds or enables the row, and one on
+the host. In `ansible/group_vars/all.yml`: the row's `enabled: true`, its
+`image_tag` and `image_digest` ("Bumping the digest", below), and the
+widget's public site key in `env.AMO_TURNSTILE_SITE_KEY`. On the host, the
+widget's secret in the vault, the same one line as every other key:
+
+```powershell
+(Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set vault_addon_migration_turnstile_secret"
+```
+
+Then merge and re-run `bootstrap.sh` (above). The role refuses to start a
+container whose vault key is unset, naming the key and that line. Creating
+the widget is the owner's step in `docs/runbooks/labs-host.md`, "Tool
+add-ons", with the exact page and fields; one widget per add-on, separate
+from the site's own, because the widget is bound to the add-on's hostname.
+
+### The verification widget
+
+The add-on gates every upload with a human-verification token it verifies
+server side with the secret above. The site key is public (the add-on
+publishes it in `/api/health` so the pane renders the widget), so it lives
+in `group_vars`; the secret never does. The `migration` row ships with the
+provider's documented test key `1x00000000000000000000AA`, and the role
+refuses to deploy a row whose environment still carries a test key: a real
+widget secret rejects the token a test key produces, so the pair would never
+verify an upload. The owner replaces it with the widget's site key.
+
+### Bumping the digest
+
+An add-on release is a `v*` tag in its repository whose `publish-images`
+workflow pushes `docker.io/hybridcloudworks/hcw-addon-<id>:<version>` and
+prints the image index digest in its run summary. Read the same value from
+the registry; PowerShell or bash, anywhere with Docker:
+
+```powershell
+docker buildx imagetools inspect docker.io/hybridcloudworks/hcw-addon-migration:0.3.0
+```
+
+The `Digest:` line is `image_digest`, and `0.3.0` is `image_tag`, of the
+`migration` row in `ansible/group_vars/all.yml`. Merge and re-run
+`bootstrap.sh`; the role pulls by digest and recreates the container. A row
+with an **empty** digest is not deployed: the run says
+`hcw-addon-migration is enabled but addons[].image_digest for migration is empty`
+and the name answers 503 with the site's sentence until the digest is
+written in. Rollback is the previous digest and a run.
+
+### Kill switches
+
+`enabled: false` on the row removes that container; `addons_enabled: false`
+removes every add-on and the Caddy route; on the site, unsetting the
+`ADDON_<ID>_URL` Function App setting in `infra/functionapp.tf` closes the
+pane without touching the host. Each is one line and a run.
+
 ## Portainer
 
 The `portainer` role runs Portainer Business Edition for the owner
@@ -1418,6 +1490,7 @@ advisories".
 | Job images | `IMAGES` in `vps-agent/lib/capabilities.js` | The comment above `IMAGES` there. Nothing to bump here: the next run pulls the new digest and removes the one it replaced (`roles/lab_images/README.md`) |
 | The agent's Docker proxy (HAProxy) | `labs_agent_docker_proxy_image_tag`, `labs_agent_docker_proxy_image_digest` | The newest release of HAProxy's newest LTS line (https://endoflife.date/api/v1/products/haproxy/), the `-alpine` tag's index digest from the registry's `Docker-Content-Digest` and `docker buildx imagetools inspect`, which must agree. CI parses the proxy's configuration with `haproxy -c` at the new digest. No floor checks it |
 | node_exporter | `node_exporter_version`, `node_exporter_checksum` | `roles/node_exporter/README.md` |
+| AddOn images | `addons[].image_tag`, `addons[].image_digest`, one row per tool add-on | The add-on release's `publish-images` run summary prints the digest; `ansible/roles/addons/README.md`, "Bumping a pin", has the `docker buildx imagetools inspect` line. Hand-moved: `scripts/lab-pins-upstream.mjs` has no publisher newest for these, and no floor checks `image_tag` on a row |
 | Portainer | `portainer_image_tag`, `portainer_image_digest` | `roles/portainer/README.md`, "Bumping the pin"; the newest LTS from Portainer's release list, the index digest from `docker buildx imagetools inspect`. No floor checks it: endoflife.date has no Portainer product |
 | HashiCorp Vault and its signing key | `vault_version`, `vault_checksum`, `vault_pgp_key_checksum` | `roles/vault/README.md`, "Bumping the pin"; the checksum is the `linux_amd64.zip` line of the release's signed SHA256SUMS, and `scripts/version-floors.json` holds the version to the newest line. A changed key is a decision, not a refresh |
 | Node.js | `labs_agent_node_version`; the line is `labs_agent_node_apt_repository_url` in `roles/labs_agent/defaults/main.yml` | NodeSource `node_26.x` package index |

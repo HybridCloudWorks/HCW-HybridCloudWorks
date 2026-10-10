@@ -58,6 +58,7 @@ export const HEALTH_PROBES = Object.freeze({
   'labs-noop': probe('session', 'editor'),
   'labs-unauth': probe('session', 'viewer'),
   'hybrid-lab': probe('live', 'viewer'),
+  'migration-addon': probe('live', 'viewer'),
   // Spotlight
   sessionize: probe('live', 'viewer'),
   // Platform

@@ -18,7 +18,11 @@
  *
  * The bodies are read from the templates Ansible renders, with each
  * `{{ variable }}` taken from the role's defaults/main.yml, so a new
- * `respond` in any of them is scanned too.
+ * `respond` in any of them is scanned too. The tool add-ons (ADR 0035) add
+ * the addons role's route, whose two 503s (a row with no digest yet, and a
+ * stopped container) are both the site's own sentence for an add-on
+ * (ADDON_UNAVAILABLE_SENTENCE in frontend/src/pages/tools/AddOnPanePage.jsx),
+ * checked the same way.
  *
  * The lab launcher (lab-host/coder/launcher/) is the page every pane opens
  * on, so everything it can put in front of a visitor is scanned the same
@@ -38,13 +42,16 @@ import { fileURLToPath } from 'node:url';
 import { ME_PATH, MESSAGES as LAUNCHER_MESSAGES, runLauncher } from '../lab-host/coder/launcher/launcher.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** A repository file as text. */
 const read = (relative) => readFileSync(path.join(repoRoot, relative), 'utf8');
 
 const ROLES = 'lab-host/ansible/roles';
 const CADDYFILE = `${ROLES}/caddy/templates/Caddyfile.j2`;
 const APEX_ROUTE = `${ROLES}/caddy/templates/00-apex.caddy.j2`;
 const CODER_ROUTE = `${ROLES}/coder/templates/10-coder.caddy.j2`;
+const ADDONS_ROUTE = `${ROLES}/addons/templates/20-addons.caddy.j2`;
 const PANE_PAGE = 'frontend/src/pages/shared/LabPanePage.jsx';
+const ADDON_PANE_PAGE = 'frontend/src/pages/tools/AddOnPanePage.jsx';
 
 /**
  * What a visitor must not read from the lab host: the tools behind it, the
@@ -68,12 +75,12 @@ function roleDefaults(role) {
   return values;
 }
 
-const DEFAULTS = { ...roleDefaults('caddy'), ...roleDefaults('coder') };
+const DEFAULTS = { ...roleDefaults('caddy'), ...roleDefaults('coder'), ...roleDefaults('addons') };
 
 /** `{{ name }}` replaced from the role defaults; an unknown name fails the test. */
 function render(body) {
   return body.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (_, name) => {
-    if (!(name in DEFAULTS)) throw new Error(`no default for ${name} in the caddy or coder role`);
+    if (!(name in DEFAULTS)) throw new Error(`no default for ${name} in the caddy, coder or addons role`);
     return DEFAULTS[name];
   });
 }
@@ -101,6 +108,7 @@ const paneBodies = [
   ...responds(tlsSite).map((r) => ({ ...r, file: `${CADDYFILE} (TLS site)` })),
   ...responds(read(APEX_ROUTE)).map((r) => ({ ...r, file: APEX_ROUTE })),
   ...responds(read(CODER_ROUTE)).map((r) => ({ ...r, file: CODER_ROUTE })),
+  ...responds(read(ADDONS_ROUTE)).map((r) => ({ ...r, file: ADDONS_ROUTE })),
 ];
 
 describe('the scan itself', () => {
@@ -117,10 +125,12 @@ describe('the scan itself', () => {
     expect(termsIn("Lab workspaces aren't available right now.")).toEqual([]);
   });
 
-  it('finds the three bodies a pane can show: the apex, the unknown name and Coder stopped', () => {
+  it('finds the five bodies a pane can show: the apex, the unknown name, Coder stopped, an add-on pending and an add-on stopped', () => {
     expect(paneBodies.map(({ status, file }) => `${status} ${file}`).sort()).toEqual([
       `200 ${APEX_ROUTE}`,
       `404 ${CADDYFILE} (TLS site)`,
+      `503 ${ADDONS_ROUTE}`,
+      `503 ${ADDONS_ROUTE}`,
       `503 ${CODER_ROUTE}`,
     ]);
   });
@@ -140,6 +150,17 @@ describe('what a pane can show from the lab host', () => {
     expect(sentence, `${PANE_PAGE} no longer exports UNAVAILABLE_SENTENCE`).not.toBeNull();
     expect(DEFAULTS.coder_unavailable_response).toBe(sentence[1]);
     expect(responds(read(CODER_ROUTE))).toEqual([{ body: sentence[1], status: 503 }]);
+  });
+
+  it('answers "add-on pending" and "add-on stopped" with the site’s own sentence for the same state (ADR 0035)', () => {
+    const sentence = read(ADDON_PANE_PAGE).match(/export const ADDON_UNAVAILABLE_SENTENCE = "([^"]+)";/);
+    expect(sentence, `${ADDON_PANE_PAGE} no longer exports ADDON_UNAVAILABLE_SENTENCE`).not.toBeNull();
+    expect(DEFAULTS.addons_unavailable_response).toBe(sentence[1]);
+    // Two bodies, one sentence: the direct answer for a row with no digest yet, and the error block for a stopped container.
+    expect(responds(read(ADDONS_ROUTE))).toEqual([
+      { body: sentence[1], status: 503 },
+      { body: sentence[1], status: 503 },
+    ]);
   });
 });
 

@@ -73,7 +73,7 @@
  */
 
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
-import { isUnresolvedReference } from '../secrets-health.js';
+import { readSetting } from '../http/read-setting.js';
 import { createMinuteCache, jsonResponse, MINUTE_CACHE_SECONDS } from './minute-cache.js';
 
 export const CODER_STATUS_CACHE_ID = 'labs:coder-status';
@@ -111,16 +111,11 @@ export const SCOPE_REFUSAL_STATUSES = Object.freeze([403, 404]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * An app setting that is actually set: non-empty, and not the literal an
- * unseeded Key Vault reference resolves to. Same normalisation as the AI
- * router's `readKey`, without importing the router into a public read.
+ * An app setting that is actually set. Lives in lib/http/read-setting.js
+ * since ADR 0035, so the AddOn status proxy reads settings the same way
+ * without importing this module; re-exported here for its callers.
  */
-export function readSetting(env, name) {
-  const raw = env?.[name];
-  if (typeof raw !== 'string') return '';
-  const value = raw.replace(/^﻿/, '').trim();
-  return isUnresolvedReference(value) ? '' : value;
-}
+export { readSetting };
 
 /** CODER_MAX_WORKSPACES as a positive integer, or the Community cap. */
 export function readMaxWorkspaces(env) {

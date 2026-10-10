@@ -20,7 +20,7 @@ describe('the registry', () => {
     }
   });
 
-  it('knows every service on the Integrations page except the two composites, which are named', () => {
+  it('knows every service on the Integrations page except the composites, which are named', () => {
     // Every service card asks for a badge by its id; a vendor with no entry
     // would get none silently. Only a service that is not one vendor may
     // have none, and COMPOSITE_SERVICES is that list.

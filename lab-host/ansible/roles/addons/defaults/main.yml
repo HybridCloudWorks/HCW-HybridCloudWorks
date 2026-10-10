@@ -1,0 +1,78 @@
+---
+# addons_enabled and the addons list (one entry per tool add-on: id, image,
+# tag, digest, port, memory, pids, env, secret_env) live in
+# group_vars/all.yml; meta/argument_specs.yml marks them required.
+#
+# The one body a pane can show from an add-on's name while its container is
+# stopped: the 503 the Caddy route answers. It is exactly the site's own
+# sentence for the same state (ADDON_UNAVAILABLE_SENTENCE in
+# frontend/src/pages/tools/AddOnPanePage.jsx), so a visitor reads one
+# message whichever side notices first; scripts/lab-host-visitor-copy.test.mjs
+# holds the two to each other and to naming no tool, host or setting.
+addons_unavailable_response: "This tool isn't available right now."
+# The Caddy route file for every enabled add-on. caddy_sites_dir and
+# caddy_group are the caddy role's defaults; the file is rendered after that
+# role has run and Caddy reloads on a change.
+addons_caddy_sites_dir: /etc/caddy/conf.d
+addons_caddy_group: caddy
+addons_caddy_route_file: "{{ addons_caddy_sites_dir }}/20-addons.caddy"
+# How long the role waits for a started container to answer its health read
+# on the loopback: retries x delay seconds.
+addons_wait_retries: 30
+addons_wait_delay: 2
+# The json-file log cap per container, so an add-on that logs every request
+# cannot fill the disk.
+addons_log_max_size: 10m
+# The add-ons' own bridge network (ADR 0035, review 2026-10-10). Not the
+# default bridge: inter-container communication is off on it, so an add-on
+# cannot reach another add-on or any other container, and its subnet is the
+# source the egress rules below match. The bridge interface name is fixed so
+# the rules can be read on the host (ip addr show br-hcw-addons).
+addons_network_name: hcw-addons
+addons_network_bridge: br-hcw-addons
+addons_network_subnet: 172.29.0.0/24
+# Egress from that subnet, enforced in the DOCKER-USER chain (the one chain
+# Docker consults before its own ACCEPT rules; ufw's rules come after Docker's
+# and cannot see this traffic). Established flows return; a new flow may go
+# only to these ranges on these ports: the human-verification endpoint the
+# add-on calls on every upload (the integration standard, section 16), which
+# is served from its provider's published anycast ranges. Everything else from
+# the subnet is rejected, so an add-on that has been handed a visitor's upload
+# cannot send it anywhere. DNS is unaffected: on a user-defined network the
+# container asks Docker's embedded resolver, which forwards from the host.
+# The ranges are https://www.cloudflare.com/ips-v4 as published on 2026-10-10
+# [VERIFY]: re-read that page when a verification call starts failing with a
+# connection error, and move both this list and this date together. IPv6 is
+# not enabled on the network, so no IPv6 rule is needed.
+addons_egress_tcp_ports:
+  - 443
+addons_egress_cidrs:
+  - 173.245.48.0/20
+  - 103.21.244.0/22
+  - 103.22.200.0/22
+  - 103.31.4.0/22
+  - 141.101.64.0/18
+  - 108.162.192.0/18
+  - 190.93.240.0/20
+  - 188.114.96.0/20
+  - 197.234.240.0/22
+  - 198.41.128.0/17
+  - 162.158.0.0/15
+  - 104.16.0.0/13
+  - 104.24.0.0/14
+  - 172.64.0.0/13
+  - 131.0.72.0/22
+# Where the same rules are written so they survive a reboot: ufw restores
+# /etc/ufw/after.rules at boot, before Docker starts, and Docker then adds its
+# jump to the DOCKER-USER chain it finds. The block is written, never
+# reloaded from here: a ufw reload would flush the rules Docker holds for its
+# running containers (the docker role's README, "ufw and Docker").
+addons_ufw_after_rules: /etc/ufw/after.rules
+# The human-verification provider's documented test site keys (always pass,
+# always block, forces a challenge). A row whose environment still carries one
+# is not deployed: the widget's real secret rejects the token a test key
+# produces, so the add-on would refuse every upload while looking configured.
+addons_test_site_keys:
+  - 1x00000000000000000000AA
+  - 2x00000000000000000000AB
+  - 3x00000000000000000000FF
