@@ -33,6 +33,7 @@ import {
   tableCell,
   undeclared,
   unreadableWarnings,
+  verdictLine,
   UNREADABLE,
 } from './verify-alert-state.mjs';
 
@@ -473,6 +474,18 @@ describe('compare', () => {
     expect(compare([r], liveWith([r], []), { gates: {}, pending: new Map() })[0].state).toBe('ABSENT');
   });
 
+  it('gives an ABSENT rule its own verdict, never "every expected rule is live"', () => {
+    // Review of #1051: ABSENT does not fail the run, and is not a pass either.
+    const r = rule({ gate: { variable: 'nobody' } });
+    const verdicts = compare([r], liveWith([r], []), { gates: {}, pending: new Map() });
+    const report = renderReport({ rules: [r], verdicts, extra: [], groups: [], when: 'now', subscriptionsRead: { status: 'ok' } });
+    expect(runFails(verdicts, [], { status: 'ok' })).toBe(false);
+    expect(lastLine(report)).not.toMatch(/Every expected rule is live/);
+    expect(lastLine(report)).toMatch(/1 rule\(s\) are absent behind a `count` gate `GATES` does not record/);
+    expect(verdictLine(0, { rules: 0, groups: 0 }, 0)).toBe('**Every expected rule is live, enabled and wired to its action group.**');
+    expect(verdictLine(2, { rules: 1, groups: 0 }, 1)).toMatch(/^\*\*2 finding\(s\)\.\*\*/);
+  });
+
   it('lists live rules no declaration names, in the groups it read', () => {
     const r = rule();
     const live = liveWith([r], [[r, liveRule()], [r, liveRule({ name: 'hand-made' })]]);
@@ -700,7 +713,7 @@ describe('readLive and the report, end to end on the real inventory', () => {
     expect(groups.map((g) => g.state)).toEqual(['UNREADABLE']);
     expect(runFails(verdicts, groups, live.subscriptionsRead)).toBe(false);
     const report = renderReport({ rules, verdicts, extra: [], groups, when: 'now', subscriptionsRead: live.subscriptionsRead });
-    expect(report).toMatch(/Every rule this identity can read is live, enabled and wired/);
+    expect(report).toMatch(/Every rule this identity can read and judge is live, enabled and wired/);
     expect(report).toMatch(/\*\*unknown\*\*, not healthy/);
     const warnings = unreadableWarnings(verdicts, groups);
     expect(warnings).toHaveLength(1);
@@ -738,7 +751,7 @@ describe('readLive and the report, end to end on the real inventory', () => {
     expect(lastLine(denied)).toMatch(/^\*\*\d+ finding\(s\)\.\*\*/);
     const recorded = compare(rules, live, { pending: new Map() });
     const partial = renderReport({ rules, verdicts: recorded, extra: [], groups: actionGroupProblems(rules, live), when: 'now', subscriptionsRead: live.subscriptionsRead });
-    expect(lastLine(partial)).toMatch(/^\*\*Every rule this identity can read is live, enabled and wired\.\*\*/);
+    expect(lastLine(partial)).toMatch(/^\*\*Every rule this identity can read and judge is live, enabled and wired\.\*\*/);
     const { fetchImpl: allOk } = fakeArm(routes());
     const full = await readLive(rules, { token: 't', fetchImpl: allOk });
     const clean = renderReport({ rules, verdicts: compare(rules, full, { pending: new Map() }), extra: [], groups: actionGroupProblems(rules, full), when: 'now', subscriptionsRead: full.subscriptionsRead });
@@ -753,6 +766,19 @@ describe('readLive and the report, end to end on the real inventory', () => {
     const { fetchImpl: allOk } = fakeArm(routes());
     const full = await readLive(rules, { token: 't', fetchImpl: allOk });
     expect(coverageOf(compare(rules, full, { pending: new Map() }), actionGroupProblems(rules, full))).toBe('complete');
+  });
+
+  it('reports coverage as partial when an unrecorded read is refused or fails too', async () => {
+    // Review of #1051: a failing run that read half the estate must not tell
+    // a consumer of the output that coverage was complete.
+    const mgmt = rules.find((r) => r.subscription.includes('mgmt')).subscription;
+    const { fetchImpl: denied } = fakeArm(routes({ deny: mgmt }));
+    const live = await readLive(rules, { token: 't', fetchImpl: denied });
+    const verdicts = compare(rules, live, { pending: new Map(), unreadable: {} });
+    expect(verdicts.some((v) => v.state === 'NOT AUTHORIZED')).toBe(true);
+    expect(coverageOf(verdicts, actionGroupProblems(rules, live, {}))).toBe('partial');
+    const failed = verdicts.map((v) => (v.state === 'NOT AUTHORIZED' ? { ...v, state: 'READ FAILED' } : v));
+    expect(coverageOf(failed, [])).toBe('partial');
   });
 
   it('reports a subscription it cannot see as invisible, not as an empty group', async () => {

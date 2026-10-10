@@ -328,6 +328,9 @@ export const FAILING = new Set(['MISSING', 'DISABLED', 'NOT WIRED', 'DRIFT', 'NO
 /** Action-group states that fail the run. */
 const FAILING_GROUP = new Set(['BROKEN', 'NOT AUTHORIZED', 'READ FAILED']);
 
+/** States meaning the rule or group was never read, whatever the reason. */
+const NOT_READ = new Set(['UNREADABLE', 'NOT AUTHORIZED', 'READ FAILED']);
+
 /** Read statuses that mean "this identity may not look", as opposed to an error. */
 const REFUSED = new Set(['denied', 'not-visible']);
 
@@ -513,19 +516,32 @@ function summaryLines(verdicts, groups, stale) {
         'so the exception cannot outlive the gap it recorded and quietly excuse a later refusal.'
     );
   }
-  lines.push('');
-  if (failing === 0 && unread.rules + unread.groups === 0) {
-    lines.push('**Every expected rule is live, enabled and wired to its action group.**');
-  } else if (failing === 0) {
-    lines.push(
-      `**Every rule this identity can read is live, enabled and wired.** ${unread.rules} rule(s) and ${unread.groups} ` +
-        'action group(s) are in a subscription it cannot read yet, recorded in `UNREADABLE`: their state is ' +
-        '**unknown**, not healthy.'
-    );
-  } else {
-    lines.push(`**${failing} finding(s).** Each is named in the State column or the paragraphs above.`);
-  }
+  lines.push('', verdictLine(failing, unread, verdicts.filter((v) => v.state === 'ABSENT').length));
   return lines;
+}
+
+/**
+ * The verdict sentence. "Every expected rule" only when nothing is unknown:
+ * an UNREADABLE rule or group, and an ABSENT rule whose gate GATES does not
+ * record, are each named instead (review of #1051), because "not a finding"
+ * and "known to be fine" are different results.
+ */
+export function verdictLine(failing, unread, absent) {
+  if (failing > 0) return `**${failing} finding(s).** Each is named in the State column or the paragraphs above.`;
+  if (unread.rules + unread.groups + absent === 0) {
+    return '**Every expected rule is live, enabled and wired to its action group.**';
+  }
+  const unknown = [];
+  if (unread.rules + unread.groups > 0) {
+    unknown.push(
+      `${unread.rules} rule(s) and ${unread.groups} action group(s) are in a subscription it cannot read yet, ` +
+        'recorded in `UNREADABLE`'
+    );
+  }
+  if (absent > 0) {
+    unknown.push(`${absent} rule(s) are absent behind a \`count\` gate \`GATES\` does not record, so whether they should exist is unknown`);
+  }
+  return `**Every rule this identity can read and judge is live, enabled and wired.** ${unknown.join('; ')}: their state is **unknown**, not healthy.`;
 }
 
 /** The job-summary report: one row per rule, one per action group, then the verdict. */
@@ -576,13 +592,17 @@ export function runFails(verdicts, groups, subscriptionsRead, stale = []) {
 
 /**
  * The `coverage` step output for automated consumers: `complete` when every
- * declared rule and action group was read, `partial` when any is UNREADABLE.
+ * declared rule and action group was read, `partial` when any was not
+ * (UNREADABLE, NOT AUTHORIZED or READ FAILED).
  * A green run with partial coverage is not the same result as a green run
  * with complete coverage, and a reader of the run's outcome alone cannot tell.
  */
 export function coverageOf(verdicts, groups) {
-  const unread = unreadCounts(verdicts, groups);
-  return unread.rules + unread.groups === 0 ? 'complete' : 'partial';
+  // Any rule or group not actually read is partial coverage, recorded or not
+  // (review of #1051): a failing run that read half the estate must not say
+  // `complete` to a consumer that reads only this output.
+  const unread = (state) => NOT_READ.has(state);
+  return verdicts.some((v) => unread(v.state)) || groups.some((g) => unread(g.state)) ? 'partial' : 'complete';
 }
 
 /**
