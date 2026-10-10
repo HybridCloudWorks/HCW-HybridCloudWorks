@@ -620,15 +620,49 @@ function worthWriting(entry, refusedStatus, nowMs) {
   return isPast(entry.lastRefusedAt, nowMs, TOKEN_STATE_REFRESH_MS);
 }
 
+/** Read, merge, write attempts before an answer is given up (the probe-results and credential-register pattern). */
+export const TOKEN_STATE_WRITE_ATTEMPTS = 4;
+
+/** The time of an operation's newest stored answer, epoch ms, or NaN when it has none. */
+function newestAnswerMs(entry) {
+  const answers = [entry?.lastAcceptedAt, entry?.lastRefusedAt]
+    .map((iso) => Date.parse(String(iso ?? '')))
+    .filter(Number.isFinite);
+  return answers.length ? Math.max(...answers) : Number.NaN;
+}
+
+/**
+ * Whether a stored entry already holds this exact answer, observed at or
+ * after this one: the same verdict and, for a refusal, the same status. Only
+ * then may a competing write stand in for this one.
+ */
+function alreadyHolds(entry, refusedStatus, nowMs) {
+  if (refusedStatus === null) {
+    return !isRefusing(entry) && Date.parse(String(entry?.lastAcceptedAt ?? '')) >= nowMs;
+  }
+  return (
+    isRefusing(entry) &&
+    entry.lastRefusedStatus === refusedStatus &&
+    Date.parse(String(entry?.lastRefusedAt ?? '')) >= nowMs
+  );
+}
+
 /**
  * Record Coder's answer to the status token for one operation (`status` or
  * `expiry`, TOKEN_OPERATIONS): `refusedStatus` null when it accepted it, 401
- * or 403 when it refused. Read, decide, write under the ETag
- * (`replaceDocIfMatch`, or `createDoc` for the first answer); a 412 or 409
- * means another worker recorded an answer at the same moment, which is as
- * good. Best effort and never throws: the read it rides on must answer
- * whatever happens here. A store without the conditional writes (a
- * read-only test double) records nothing.
+ * or 403 when it refused. Best effort and never throws: the read it rides on
+ * must answer whatever happens here. A store without the conditional writes
+ * (a read-only test double) records nothing. Resolves true when it wrote.
+ *
+ * Read, merge, write under the ETag (`replaceDocIfMatch`, or `createDoc` for
+ * the first answer), and on a 412 or 409 read and merge again, up to
+ * TOKEN_STATE_WRITE_ATTEMPTS times. Both operations share the one document,
+ * so the write that got in first may be the other operation's, which knows
+ * nothing of this answer; it is merged onto, never taken as having recorded
+ * it (CodeRabbit, #1056). It stands in for this answer only when it holds
+ * the same answer for the same operation, observed no earlier. Observation
+ * order is kept: an answer older than the newest one already stored for its
+ * operation is not written over it.
  */
 export async function recordTokenAnswer({
   store,
@@ -636,26 +670,36 @@ export async function recordTokenAnswer({
   refusedStatus,
   now = () => Date.now(),
   context,
+  attempts = TOKEN_STATE_WRITE_ATTEMPTS,
 }) {
   if (!TOKEN_OPERATIONS.includes(operation)) return false;
   if (!store?.readDoc || !store?.createDoc || !store?.replaceDocIfMatch) return false;
-  try {
-    const nowMs = now();
-    const current = await store.readDoc('admin_config', TOKEN_STATE_DOC_ID, 'admin_config');
-    if (!worthWriting(current?.operations?.[operation], refusedStatus, nowMs)) return false;
-    const next = nextTokenState(current, operation, refusedStatus, new Date(nowMs).toISOString());
-    if (current) {
-      await store.replaceDocIfMatch('admin_config', { ...next, _etag: current._etag }, { partitionKey: 'admin_config' });
-    } else {
-      await store.createDoc('admin_config', next);
-    }
-    return true;
-  } catch (error) {
-    if (error?.code !== 412 && error?.code !== 409) {
+  const nowMs = now();
+  const atIso = new Date(nowMs).toISOString();
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      const current = await store.readDoc('admin_config', TOKEN_STATE_DOC_ID, 'admin_config');
+      const entry = current?.operations?.[operation];
+      if (attempt > 0 && alreadyHolds(entry, refusedStatus, nowMs)) return false;
+      if (newestAnswerMs(entry) > nowMs) return false;
+      if (!worthWriting(entry, refusedStatus, nowMs)) return false;
+      const next = nextTokenState(current, operation, refusedStatus, atIso);
+      if (current) {
+        await store.replaceDocIfMatch('admin_config', { ...next, _etag: current._etag }, { partitionKey: 'admin_config' });
+      } else {
+        await store.createDoc('admin_config', next);
+      }
+      return true;
+    } catch (error) {
+      // 412: replaced since our read. 409: created since our read found
+      // nothing. Either way, read again and merge again.
+      if (error?.code === 412 || error?.code === 409) continue;
       context?.warn?.(`coder-status: Coder's answer to the status token could not be recorded (${error?.code ?? 'error'})`);
+      return false;
     }
-    return false;
   }
+  context?.warn?.("coder-status: Coder's answer to the status token could not be recorded (conflict)");
+  return false;
 }
 
 /**

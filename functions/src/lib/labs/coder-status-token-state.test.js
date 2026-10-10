@@ -53,7 +53,7 @@ const refusedWith = (status) => () => ({ ok: false, status, json: async () => ({
 /** A Cosmos double with ETags for the token record, and the minute cache's document. */
 function store(state = null, { cacheFreshFor = 0 } = {}) {
   let n = 0;
-  const docs = new Map(state ? [[TOKEN_STATE_DOC_ID, { ...state, _etag: `"e${(n += 1)}"` }]] : []);
+  const docs = new Map(state ? [[TOKEN_STATE_DOC_ID, { id: TOKEN_STATE_DOC_ID, ...state, _etag: `"e${(n += 1)}"` }]] : []);
   if (cacheFreshFor) {
     // A warm cache: what anonymous visitors keep refreshed every minute.
     docs.set(CODER_STATUS_CACHE_ID, {
@@ -312,16 +312,77 @@ describe('recordTokenAnswer', () => {
     expect(Object.keys(s.docs.get(TOKEN_STATE_DOC_ID).operations).sort()).toEqual(['expiry', 'status']);
   });
 
-  it('writes under the ETag of its read, and leaves an answer another worker wrote in between', async () => {
+  it('writes under the ETag of its read, and reads and merges again after a lost race', async () => {
     const s = store({ operations: { status: { lastAcceptedAt: ago(2 * TOKEN_STATE_REFRESH_MS) } } });
     s.replaceDocIfMatch.mockRejectedValueOnce(Object.assign(new Error('changed'), { code: 412 }));
     const warn = vi.fn();
     expect(
       await recordTokenAnswer({ store: s, operation: 'status', refusedStatus: null, now: at(0), context: { warn } })
-    ).toBe(false);
+    ).toBe(true);
     expect(s.replaceDocIfMatch.mock.calls[0][1]._etag).toBe('"e1"');
     expect(s.replaceDocIfMatch.mock.calls[0][2]).toEqual({ partitionKey: 'admin_config' });
+    expect(s.readDoc).toHaveBeenCalledTimes(2);
+    expect(recorded(s, 'status').lastAcceptedAt).toBe(new Date(NOW).toISOString());
     expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('still records a refusal when the other operation’s write lands between its read and its write (CodeRabbit, #1056)', async () => {
+    const s = store({ operations: { status: { lastAcceptedAt: ago(30 * 60_000) } } });
+    const realReplace = s.replaceDocIfMatch.getMockImplementation();
+    let raced = false;
+    s.replaceDocIfMatch.mockImplementation(async (container, doc, options) => {
+      if (!raced) {
+        raced = true;
+        // An editor's expiry read records its acceptance first, under the ETag
+        // this write was decided from, which therefore no longer matches.
+        const current = s.docs.get(TOKEN_STATE_DOC_ID);
+        await realReplace(
+          container,
+          { ...current, operations: { ...current.operations, expiry: { lastAcceptedAt: ago(-500) } } },
+          options
+        );
+      }
+      return realReplace(container, doc, options);
+    });
+
+    expect(await recordTokenAnswer({ store: s, operation: 'status', refusedStatus: 401, now: at(1_000) })).toBe(true);
+    expect(recorded(s, 'status')).toMatchObject({ lastRefusedStatus: 401, lastRefusedAt: new Date(NOW + 1_000).toISOString() });
+    expect(recorded(s, 'expiry')).toEqual({ lastAcceptedAt: ago(-500) });
+    expect(coderTokenVerdict(s.docs.get(TOKEN_STATE_DOC_ID), NOW + 2_000).status).toBe('critical');
+  });
+
+  it('lets a competing write stand in only when it holds the same answer for the same operation', async () => {
+    const s = store({ operations: { status: { lastAcceptedAt: ago(30 * 60_000) } } });
+    s.replaceDocIfMatch.mockImplementationOnce(async () => {
+      // Another worker saw the same 401 a moment later and recorded it first.
+      const current = s.docs.get(TOKEN_STATE_DOC_ID);
+      s.docs.set(TOKEN_STATE_DOC_ID, {
+        ...nextTokenState(current, 'status', 401, new Date(NOW + 2_000).toISOString()),
+        _etag: '"other"',
+      });
+      throw Object.assign(new Error('changed'), { code: 412 });
+    });
+    expect(await recordTokenAnswer({ store: s, operation: 'status', refusedStatus: 401, now: at(1_000) })).toBe(false);
+    expect(recorded(s, 'status').lastRefusedAt).toBe(new Date(NOW + 2_000).toISOString());
+    expect(s.replaceDocIfMatch).toHaveBeenCalledTimes(1);
+  });
+
+  it('never writes an older observation over a newer one of the same operation', async () => {
+    const s = store({ operations: { status: { lastAcceptedAt: new Date(NOW + 5_000).toISOString() } } });
+    expect(await recordTokenAnswer({ store: s, operation: 'status', refusedStatus: 401, now: at(0) })).toBe(false);
+    expect(isRefusing(recorded(s, 'status'))).toBe(false);
+    expect(s.replaceDocIfMatch).not.toHaveBeenCalled();
+  });
+
+  it('gives up after its attempts on a record that keeps changing, with a content-free warning', async () => {
+    const s = store({ operations: { status: { lastAcceptedAt: ago(2 * TOKEN_STATE_REFRESH_MS) } } });
+    s.replaceDocIfMatch.mockRejectedValue(Object.assign(new Error(`write ${TOKEN_STATE_DOC_ID} changed`), { code: 412 }));
+    const warn = vi.fn();
+    expect(
+      await recordTokenAnswer({ store: s, operation: 'status', refusedStatus: 401, now: at(0), context: { warn }, attempts: 3 })
+    ).toBe(false);
+    expect(s.replaceDocIfMatch).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenCalledWith("coder-status: Coder's answer to the status token could not be recorded (conflict)");
   });
 
   it('records nothing through a store without conditional writes, or for an operation it does not know', async () => {
