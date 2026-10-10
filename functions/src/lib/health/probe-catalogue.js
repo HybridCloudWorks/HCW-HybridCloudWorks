@@ -59,6 +59,10 @@ export const HEALTH_PROBES = Object.freeze({
   // Labs snapshot in a browser, recorded by the pulse every five minutes.
   'lab-drift': probe('live', 'viewer'),
   'coder-template': probe('live', 'viewer'),
+  // #1009: a real lab job runs end to end (the hourly canary), and Coder
+  // accepts the site's status token. Recorded the same way.
+  'lab-canary': probe('live', 'viewer'),
+  'coder-token': probe('live', 'viewer'),
   'labs-noop': probe('session', 'editor'),
   'labs-unauth': probe('session', 'viewer'),
   'hybrid-lab': probe('live', 'viewer'),

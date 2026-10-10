@@ -22,7 +22,10 @@
  * whether each host runs main (`lab-drift`, from the agents' applied
  * commits and the hourly read of main that checkAgentHealth stores), and
  * whether Coder serves the template of the host's commit (`coder-template`,
- * from the host's daily Coder upkeep report).
+ * from the host's daily Coder upkeep report). And two more: whether the last
+ * real lab job ran end to end (`lab-canary`, the hourly canary's record), and
+ * whether Coder accepts the site's status token (`coder-token`, Coder's last
+ * recorded answers to it).
  *
  * WHAT IT DOES NOT. It calls no third party and spends nothing: the service
  * tests (Publer, Resend, the models) stay on their Test buttons, and the AI
@@ -54,8 +57,12 @@ import { healthProbe } from './probe-catalogue.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import {
   CODER_TEMPLATE_PROBE,
+  CODER_TOKEN_PROBE,
+  LAB_CANARY_PROBE,
   LAB_DRIFT_PROBE,
   readCoderTemplate,
+  readCoderToken,
+  readLabCanary,
   readLabDrift,
 } from '../labs/lab-checks.js';
 
@@ -145,6 +152,8 @@ export function createHealthPulse({
         return verdict;
       }),
       timed(CODER_TEMPLATE_PROBE, () => readCoderTemplate(store, nowMs)),
+      timed(LAB_CANARY_PROBE, () => readLabCanary(store, nowMs)),
+      timed(CODER_TOKEN_PROBE, () => readCoderToken(store, nowMs)),
     ]);
 
   async function record(checkedAt, row) {

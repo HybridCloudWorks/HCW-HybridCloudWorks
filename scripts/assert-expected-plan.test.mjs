@@ -34,6 +34,7 @@ import {
   DECLARED,
   EXPECTED,
   formatPath,
+  overdueQuery,
   redact,
   secretsOf,
 } from './assert-expected-plan.mjs';
@@ -881,6 +882,25 @@ describe('DECLARED', () => {
         expect(infraSource, label).toContain(`resource "${type}" "${name}"`);
       }
     }
+  });
+
+  it('declares alert-timer-overdue’s query for the timer map in the tree, if it declares it at all (#1009)', () => {
+    const declaration = DECLARED.find(
+      (entry) =>
+        entry.address === 'azurerm_monitor_scheduled_query_rules_alert_v2.timer_overdue' &&
+        entry.path === 'criteria[0].query'
+    );
+    if (!declaration) return;
+    const block = /^\s*timer_schedules\s*=\s*\{\n([\s\S]*?)\n\s*\}\n/m.exec(infraSource);
+    expect(block, 'local.timer_schedules not found').not.toBeNull();
+    const rows = [
+      ...block[1].matchAll(/^\s*(\w+)\s*=\s*\{\s*period\s*=\s*"([^"]+)",\s*anchor\s*=\s*"([^"]+)"\s*\}/gm),
+    ].map((m) => [m[1], m[2], m[3]]);
+    expect(rows.length).toBeGreaterThan(20);
+    expect(declaration.after).toBe(overdueQuery(rows));
+    // One row more than before: the declaration describes one timer added.
+    const count = (query) => query.split('\n').filter((line) => /^ {2}"\w+", /.test(line)).length;
+    expect(count(declaration.after) - count(declaration.before)).toBe(1);
   });
 });
 

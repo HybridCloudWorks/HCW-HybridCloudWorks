@@ -144,6 +144,9 @@ const CLOCK_DEPENDENT = {
   monitorPublishingPipeline: { schedule: '0 0 */6 * * *', utc: 'every 6 h from 00:00' },
   fetchBlogListings: { schedule: '0 15 */6 * * *', utc: 'every 6 h from 00:15' },
   refreshPlaudToken: { schedule: '0 0 */12 * * *', utc: 'every 12 h from 00:00' },
+  // #1009: one real lab job an hour, clear of the five-minute timers' marks.
+  // `*/1`, not `*`, so the alert-timer-overdue map can read its period.
+  labCanary: { schedule: '0 20 */1 * * *', utc: 'every 1 h from 00:20' },
 };
 
 /**
@@ -178,7 +181,7 @@ describe('timer schedules are UTC', () => {
     // Guards the guard. An empty read on either side would make every
     // assertion below pass by inspecting nothing.
     expect(terraformSource(INFRA).length).toBeGreaterThan(1000);
-    expect(timerRegistrations.size).toBe(25);
+    expect(timerRegistrations.size).toBe(26);
   });
 
   it('the app clock is UTC — no WEBSITE_TIME_ZONE or TZ app setting exists', () => {

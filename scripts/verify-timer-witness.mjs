@@ -130,6 +130,9 @@ export const WITNESSES = {
   probeAiProviders: { none: 'stamps ai_providers and writes ai_usage, which have no public route' },
   sendReminders: { none: 'says reminders on Telegram and stamps admin_config/reminders, which has no public route' },
   healthPulse: { none: 'records the Health Hub probe results and its heartbeat in admin_config, which has no public route' },
+  labCanary: {
+    none: 'runs one lab job, deletes it, and records the run in admin_config/lab_canary, which has no public route; the labs status read it also makes is refreshed by visitors too, so it witnesses nothing',
+  },
 };
 
 // ── pure helpers (unit-tested) ───────────────────────────────────────────────

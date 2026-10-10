@@ -19,6 +19,50 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **Hybrid Lab: an hourly canary runs one real lab job end to end, and a
+  refused Coder status token is raised (#1009, "PR 2: prevent recurrence",
+  items 2 and 4).** The admin Labs probe enqueues and cancels, so it passed
+  with no agent at all while no lab job ran for days; and Coder refused the
+  status token for about 32 hours with only a card saying "unknown".
+  - `labCanary` (`functions/src/lib/labs/canary.js`), hourly at 20 past,
+    behind `FEATURE_FLAG_LAB_CANARY` (`LAB_CANARY` in `enabled_timers`, off
+    until the owner arms it): one `shell-echo` job with the payload
+    `hcw-canary <job id>`, enqueued as `enqueueLabJob` writes one, waited for
+    up to 150 s, passed only when the agent echoes the payload exactly, then
+    deleted under its ETag. Nothing is enqueued when no active agent
+    registered for `shell-echo` is online. A job still queued at the
+    deadline is cancelled and deleted; one still claimed is left to finish,
+    and the next run deletes it (or withdraws it past the claim lease) and
+    enqueues nothing new meanwhile. Each run is recorded with its claim and
+    run times in `admin_config/lab_canary`, where the job's id is reserved
+    under the record's ETag before the job is created, so a run that dies
+    or cannot write its record never loses a job to the next. The record
+    also names its owning run (`activeRun`), so an overlapping run touches
+    nothing and a run's last write never clears another's reservation.
+  - Every read of Coder with `CODER-STATUS-TOKEN` records Coder's answer in
+    `admin_config/coder_status_token` (`recordTokenAnswer`, ETag-guarded,
+    an unchanged answer at most hourly, one outage keeping its start), kept
+    per operation: the labs status read and the Integrations card's read of
+    the token's own record, so a refusal is cleared only by the same read
+    succeeding. A 401 writes a warning starting `coder-status: Coder
+    refused CODER_STATUS_TOKEN (401)` for a log alert to match; a 403 now
+    says it lacks a read scope rather than "expired or revoked".
+    `checkAgentHealth`, which is armed, runs `checkTokenIfDue` and so asks
+    Coder directly once an hour, never through the anonymous minute cache,
+    whether or not the canary is armed, so warm-cache traffic cannot hide a
+    refusal; visitors' live reads record their answers too.
+  - Two more Health Hub probes, recorded by the pulse and shown by the Labs
+    snapshot: **Lab job canary** (`lab-canary`; offline when nothing ran the
+    job, critical when it ran and failed, unknown once the canary stops) and
+    **Coder status token** (`coder-token`; critical from the first refusal
+    until Coder accepts it again, unknown after a day without a read).
+  - The timer is in `local.timer_catalogue`, the `enabled_timers` validation,
+    `function-inventory.json` and `alert-timer-overdue`'s schedule map; the
+    plan check declares the new flag, its arming, and the rule's query with
+    the extra row (rendered with `terraform console` and checked against the
+    map by a test). No alert rule is added; the alerting runbook lists the
+    two queries a follow-up rule would use.
+
 - **Hybrid Lab: the site raises a host that lags `main`, and a Coder
   template the host did not publish (#1009, "PR 2: prevent recurrence";
   the heartbeat half of LAB-4, #950).** On 2026-10-08 the host was six

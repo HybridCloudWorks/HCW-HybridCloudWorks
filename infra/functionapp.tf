@@ -105,6 +105,12 @@ locals {
     # result document per probe and its own heartbeat. No third-party call.
     # Until it is armed the hub says the pulse has never reported.
     HEALTH_PULSE = "healthPulse — every 5 minutes at 2 past, records the Health Hub's server-side checks and the pulse heartbeat"
+    # #1009: one real lab job an hour, end to end. Writes one lab_jobs
+    # document, waits up to 150 s for the agent to run it, deletes it, and
+    # writes admin_config/lab_canary; also reads the labs status once through
+    # its minute cache. A job on the owner's host every hour, so it stays off
+    # until the owner adds LAB_CANARY.
+    LAB_CANARY = "labCanary — hourly at 20 past, runs one shell-echo lab job end to end for the Health Hub and deletes it"
   }
 
   timer_flags = {

@@ -1018,6 +1018,31 @@ Remove-Item -LiteralPath (Join-Path $HOME 'plat4-rbac-test.json')
 - **Cloudflare's audit log and 90-day retention** for the tables these rules
   read are the rest of the assessment's security-observability item (PLAT-8),
   not this change.
+- **The Coder status token's refusal and the lab canary (#1009).** Both are
+  raised by the health pulse (the Health Hub's **Coder status token** and
+  **Lab job canary** cards) and each writes a content-free warning line, but
+  no rule pages on either yet. A follow-up rule, scoped like
+  `alert-timer-overdue` (the component, classic schema), would read:
+
+  ```kusto
+  traces
+  | where severityLevel == 2
+  | where message startswith "coder-status: Coder refused CODER_STATUS_TOKEN (401)"
+  | summarize refusals = count()
+  ```
+
+  and, for a canary that has stopped passing,
+
+  ```kusto
+  traces
+  | where severityLevel == 2
+  | where message startswith "[labCanary] the end-to-end lab job did not pass"
+  | summarize failures = count()
+  ```
+
+  each firing on a count above zero over a 15-minute window. Traces are
+  sampled under load (`host.json`), so a rule on them is a second channel;
+  the pulse's record is the one that is always written.
 
 ## The failure with no alert
 
