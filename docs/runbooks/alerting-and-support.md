@@ -519,9 +519,23 @@ stop. Public lab submissions are closed while the agent is stopped.
 queue. No human holds a data-plane role on `stsitefuncprodcus01`, and its
 firewall denies everything but the Functions subnet, so the test takes a
 temporary role and a temporary firewall entry for this machine. It owns exactly
-those two changes and nothing else: it stops if either already exists, keeps
-the id of the assignment it creates, and deletes that id and that address
-only. Three values first:
+those two changes and nothing else. It runs alone, stops if either change
+already exists, writes down what it is about to change before changing it, and
+undoes exactly what it wrote down.
+
+**Run it alone.** The checks below cannot reserve anything: two runs of this
+test with the same account and address would both pass them, and one run's
+cleanup would undo the other's access. So run it with no other fire test from
+this page in progress, by you or anyone using the same account, and not during
+a `deploy-functions.yml` run, which opens and closes the same firewall. This
+prints nothing when no deploy is running:
+
+```powershell
+gh run list -R saulpatinojr/HCW-HybridCloudWorks -w deploy-functions.yml -s in_progress
+```
+
+Four values next. `$sf` is where the test records what it owns, so a recovery
+in a new window undoes the same things:
 
 ```powershell
 $sa = (az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).id
@@ -535,12 +549,20 @@ $me = (az ad signed-in-user show -o json | ConvertFrom-Json).id
 $ip = Invoke-RestMethod -Uri https://api.ipify.org
 ```
 
-**Stop conditions.** Both of these must print nothing. If the first lists any
-row, you already hold an assignment on the account, and this test would share
-its scope: skip it and note that in the fire record. If the second lists any
-address, a deploy or another operator has the firewall open: wait until it
-prints nothing, because `deploy-functions.yml` opens and closes the same
-firewall.
+```powershell
+$sf = Join-Path $HOME 'plat4-poison-test.json'
+```
+
+**Stop conditions.** The first must print `False`: `True` means an earlier
+run did not finish, so do its recovery (below) first. The other two must print
+nothing. A row in the second means you already hold an assignment on the
+account, which this test would share a scope with: skip the test and note that
+in the fire record. An address in the third means the firewall is already open:
+wait until it prints nothing.
+
+```powershell
+Test-Path -LiteralPath $sf
+```
 
 ```powershell
 az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
@@ -550,10 +572,19 @@ az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | 
 (az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).networkRuleSet.ipRules
 ```
 
-Then the two temporary changes, keeping the assignment's id in `$ra`:
+Record the address, then take the role and record its id, then open the
+firewall. Each change is recorded before or as it is made:
+
+```powershell
+@{ ip = $ip; ra = '' } | ConvertTo-Json | Set-Content -LiteralPath $sf
+```
 
 ```powershell
 $ra = (az role assignment create --assignee-object-id $me --assignee-principal-type User --role "Storage Queue Data Contributor" --scope $sa -o json | ConvertFrom-Json).id
+```
+
+```powershell
+@{ ip = $ip; ra = $ra } | ConvertTo-Json | Set-Content -LiteralPath $sf
 ```
 
 ```powershell
@@ -573,8 +604,8 @@ az storage queue create --name platform-jobs-poison --account-name stsitefuncpro
 az storage message put --queue-name platform-jobs-poison --account-name stsitefuncprodcus01 --auth-mode login --content plat4-fire-test --time-to-live 900 -o none
 ```
 
-Then undo both, whether or not the put worked, by the address and the id this
-test created:
+Then undo both, whether or not the put worked, by the recorded address and id,
+and remove the record:
 
 ```powershell
 az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address $ip -o none
@@ -584,8 +615,12 @@ az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-
 az role assignment delete --ids $ra
 ```
 
-Success is `alert-jobs-poison-prod-cus` within about 30 minutes, and both stop
-condition reads printing nothing again:
+```powershell
+Remove-Item -LiteralPath $sf
+```
+
+Success is `alert-jobs-poison-prod-cus` within about 30 minutes, and the two
+stop-condition reads printing nothing again:
 
 ```powershell
 az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
@@ -595,23 +630,37 @@ az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | 
 (az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).networkRuleSet.ipRules
 ```
 
-**If the test was interrupted** and the window holding `$ra` and `$ip` is gone,
-the stop conditions guarantee that nothing matching existed before it began,
-so whatever matches now is the test's own. Set `$sa` and `$me` again as above,
-then remove the role it left:
+**If the test was interrupted**, recover from the record, in any window, still
+alone. It removes the address the test opened, even if this machine's address
+has changed since, and the assignment the test created:
 
 ```powershell
-az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Where-Object roleDefinitionName -eq 'Storage Queue Data Contributor' | ForEach-Object { az role assignment delete --ids $_.id }
+$s = Get-Content -LiteralPath (Join-Path $HOME 'plat4-poison-test.json') -Raw | ConvertFrom-Json
 ```
-
-and the address, if this machine's address is the one listed. Any other
-address belongs to a deploy in progress, which removes its own:
 
 ```powershell
-az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address (Invoke-RestMethod -Uri https://api.ipify.org) -o none
+az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address $s.ip -o none
 ```
 
-Finish with the two verification reads above, which should both print nothing.
+```powershell
+az role assignment delete --ids $s.ra
+```
+
+If `$s.ra` is empty, the run stopped between creating the role and recording
+it. Then the role the test made is the only one there, because the stop
+conditions held and the test ran alone, so list it and delete it by its id.
+Set `$sa` and `$me` again first if this is a new window:
+
+```powershell
+az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Where-Object roleDefinitionName -eq 'Storage Queue Data Contributor' | Select-Object id, roleDefinitionName, scope
+```
+
+Then delete the record, and finish with the two verification reads above, which
+should both print nothing:
+
+```powershell
+Remove-Item -LiteralPath (Join-Path $HOME 'plat4-poison-test.json')
+```
 
 The role's create and delete also fire `alert-rbac-write-app-prod-cus`, twice.
 That is that rule's test done as well.
