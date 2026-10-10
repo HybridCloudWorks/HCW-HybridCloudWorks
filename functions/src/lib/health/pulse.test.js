@@ -113,7 +113,10 @@ describe('the pulse run', () => {
       lastSuccessAt: minutesAgo(20),
       consecutiveFailures: 0,
     });
-    store.data.set('coder_status_token', { id: 'coder_status_token', lastAcceptedAt: minutesAgo(30) });
+    store.data.set('coder_status_token', {
+      id: 'coder_status_token',
+      operations: { status: { lastAcceptedAt: minutesAgo(30) } },
+    });
     const summary = await pulse(store).run();
     expect(summary).toMatchObject({ checks: 18, recorded: 18, failures: 0 });
 

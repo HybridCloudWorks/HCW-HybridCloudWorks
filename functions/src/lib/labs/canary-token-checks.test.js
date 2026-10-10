@@ -88,54 +88,74 @@ describe('labCanaryVerdict', () => {
 });
 
 describe('coderTokenVerdict', () => {
-  it('is healthy when Coder accepted the token recently', () => {
-    expect(coderTokenVerdict({ lastAcceptedAt: minutesAgo(30) }, NOW)).toEqual({
+  const status = (entry) => ({ operations: { status: entry } });
+
+  it('is healthy when Coder accepted the token recently, naming the read that showed it', () => {
+    expect(coderTokenVerdict(status({ lastAcceptedAt: minutesAgo(30) }), NOW)).toEqual({
       status: 'healthy',
-      summary: 'Coder accepted CODER_STATUS_TOKEN 30 min ago.',
-      detail: null,
+      summary: 'Coder accepted CODER_STATUS_TOKEN 30 min ago (the labs status read).',
+      detail: `the labs status read: last accepted ${minutesAgo(30)}`,
     });
   });
 
-  it('is critical from the first 401 until Coder accepts it again, naming since when', () => {
+  it('is critical from the first 401 until the same operation accepts it again, naming since when', () => {
     const verdict = coderTokenVerdict(
-      {
+      status({
         lastAcceptedAt: minutesAgo(32 * 60),
         lastRefusedAt: minutesAgo(5),
         lastRefusedStatus: 401,
         refusingSince: minutesAgo(31 * 60),
-      },
+      }),
       NOW
     );
     expect(verdict.status).toBe('critical');
     expect(verdict.summary).toBe(
-      `Coder has refused CODER_STATUS_TOKEN (HTTP 401) since ${minutesAgo(31 * 60)}, 31 h ago: it has expired or been revoked, so the labs card's templates and running count are unknown. The lab host's Coder automation renews it daily; Integrations → Hybrid Lab shows its last report.`
+      `Coder has refused CODER_STATUS_TOKEN on the labs status read (HTTP 401) since ${minutesAgo(31 * 60)}, 31 h ago: it has expired or been revoked, so the labs card's templates and running count are unknown. The lab host's Coder automation renews it daily; Integrations → Hybrid Lab shows its last report.`
     );
-    expect(verdict.detail).toBe(`last accepted ${minutesAgo(32 * 60)}`);
+    expect(verdict.detail).toBe(
+      `the labs status read: last accepted ${minutesAgo(32 * 60)}, last refused (HTTP 401) ${minutesAgo(5)}`
+    );
   });
 
   it('names the scope for a 403', () => {
     expect(
-      coderTokenVerdict({ lastRefusedAt: minutesAgo(5), lastRefusedStatus: 403, refusingSince: minutesAgo(5) }, NOW).summary
+      coderTokenVerdict(status({ lastRefusedAt: minutesAgo(5), lastRefusedStatus: 403, refusingSince: minutesAgo(5) }), NOW)
+        .summary
     ).toContain('it lacks the template:read or workspace:read scope');
   });
 
   it('stays critical on an old refusal, the latest evidence there is', () => {
-    expect(
-      coderTokenVerdict({ lastRefusedAt: minutesAgo(5 * 24 * 60), lastRefusedStatus: 401 }, NOW).status
-    ).toBe('critical');
+    expect(coderTokenVerdict(status({ lastRefusedAt: minutesAgo(5 * 24 * 60), lastRefusedStatus: 401 }), NOW).status).toBe(
+      'critical'
+    );
   });
 
-  it('is healthy again once Coder accepts it after a refusal', () => {
+  it('is healthy again once the same operation accepts it after a refusal', () => {
     expect(
-      coderTokenVerdict({ lastRefusedAt: minutesAgo(60), lastRefusedStatus: 401, lastAcceptedAt: minutesAgo(1) }, NOW)
+      coderTokenVerdict(status({ lastRefusedAt: minutesAgo(60), lastRefusedStatus: 401, lastAcceptedAt: minutesAgo(1) }), NOW)
         .status
     ).toBe('healthy');
   });
 
-  it('is unknown when the last acceptance is a day old, and before any answer is recorded', () => {
+  it('stays critical when only the other operation accepted it since (CodeRabbit, #1056)', () => {
+    const verdict = coderTokenVerdict(
+      {
+        operations: {
+          status: { lastRefusedAt: minutesAgo(10), lastRefusedStatus: 403, refusingSince: minutesAgo(10) },
+          expiry: { lastAcceptedAt: minutesAgo(1) },
+        },
+      },
+      NOW
+    );
+    expect(verdict.status).toBe('critical');
+    expect(verdict.detail).toContain("the Integrations card's read of its own record: last accepted");
+  });
+
+  it('is unknown when the newest acceptance is a day old, and before any answer is recorded', () => {
     const old = new Date(NOW - TOKEN_EVIDENCE_STALE_AFTER_MS - 60_000).toISOString();
-    expect(coderTokenVerdict({ lastAcceptedAt: old }, NOW).status).toBe('unknown');
+    expect(coderTokenVerdict(status({ lastAcceptedAt: old }), NOW).status).toBe('unknown');
     expect(coderTokenVerdict(null, NOW).status).toBe('unknown');
+    expect(coderTokenVerdict({ operations: {} }, NOW).status).toBe('unknown');
   });
 });
 
@@ -147,7 +167,11 @@ describe('the readers', () => {
   });
 
   it('read their admin_config documents', async () => {
-    const store = { readDoc: vi.fn(async (_c, id) => (id === 'lab_canary' ? passed() : { lastAcceptedAt: minutesAgo(1) })) };
+    const store = {
+      readDoc: vi.fn(async (_c, id) =>
+        id === 'lab_canary' ? passed() : { operations: { status: { lastAcceptedAt: minutesAgo(1) } } }
+      ),
+    };
     expect((await readLabCanary(store, NOW)).status).toBe('healthy');
     expect((await readCoderToken(store, NOW)).status).toBe('healthy');
     expect(store.readDoc.mock.calls).toEqual([

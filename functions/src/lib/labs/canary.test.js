@@ -12,6 +12,7 @@ import { describe, it, expect, vi } from 'vitest';
 
 import {
   CANARY_ABANDON_GRACE_MS,
+  CANARY_RUN_HOLD_MS,
   CANARY_JOB_TYPE,
   CANARY_POLL_MS,
   CANARY_WAIT_MS,
@@ -77,25 +78,25 @@ function store({ agents = [ONLINE], canary = null, jobs = [] } = {}) {
 }
 
 /** A clock the sleeps advance, and an agent that acts on the job at given sleeps. */
-function harness({ s, script = [] }) {
-  let nowMs = START;
+function harness({ s, script = [], startMs = START, jobId = JOB_ID }) {
+  let nowMs = startMs;
   let sleeps = 0;
   const sleep = vi.fn(async (ms) => {
     nowMs += ms;
     sleeps += 1;
-    for (const step of script) if (step.at === sleeps) step.act(s);
+    for (const step of script) if (step.at === sleeps) await step.act(s);
   });
   const log = { warn: vi.fn(), log: vi.fn() };
-  const touchCoderStatus = vi.fn(async () => ({ configured: true }));
+  const checkCoderToken = vi.fn(async () => ({ checked: true, refusedStatus: null }));
   const canary = createLabCanary({
     store: s,
     now: () => new Date(nowMs),
     sleep,
-    uuid: () => JOB_ID,
+    uuid: () => jobId,
     log,
-    touchCoderStatus,
+    checkCoderToken,
   });
-  return { canary, log, sleep, touchCoderStatus, advance: (ms) => (nowMs += ms) };
+  return { canary, log, sleep, checkCoderToken, advance: (ms) => (nowMs += ms) };
 }
 
 const at = (ms) => new Date(START + ms).toISOString();
@@ -166,7 +167,7 @@ describe('a run', () => {
     });
     expect(h.sleep).toHaveBeenCalledWith(CANARY_POLL_MS);
     expect(h.log.warn).not.toHaveBeenCalled();
-    expect(h.touchCoderStatus).toHaveBeenCalledTimes(1);
+    expect(h.checkCoderToken).toHaveBeenCalledTimes(1);
   });
 
   it('fails a job that ran and failed, still deleting it, and counts the streak', async () => {
@@ -247,7 +248,7 @@ describe('a run', () => {
     const h = harness({ s });
     expect(await h.canary.run()).toMatchObject({ ok: false, outcome: 'no-agent' });
     expect(s.data.lab_jobs.size).toBe(0);
-    expect(h.touchCoderStatus).toHaveBeenCalledTimes(1);
+    expect(h.checkCoderToken).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -303,7 +304,8 @@ describe('a run that dies after the job exists', () => {
     // before anything new is enqueued.
     s.agentWrites(JOB_ID, { status: 'succeeded', exitCode: 0, output: `hcw-canary ${JOB_ID}`, finishedAt: at(9_000) });
     s.replaceDocIfMatch.mockImplementation(realReplace);
-    const second = harness({ s });
+    // An hour later, the dead run's hold has lapsed.
+    const second = harness({ s, startMs: START + 60 * 60_000 });
     await second.canary.run();
     expect(s.data.lab_jobs.size).toBe(0);
     expect(s.data.admin_config.get(LAB_CANARY_DOC_ID).pendingJobId).toBeNull();
@@ -311,10 +313,18 @@ describe('a run that dies after the job exists', () => {
 
   it('enqueues nothing when the reservation cannot be written', async () => {
     const s = store({ canary: { id: LAB_CANARY_DOC_ID, consecutiveFailures: 0 } });
+    s.replaceDocIfMatch.mockRejectedValueOnce(Object.assign(new Error('Cosmos is down'), { code: 503 }));
+    const h = harness({ s });
+    await expect(h.canary.run()).rejects.toMatchObject({ code: 503 });
+    expect(s.createDoc).not.toHaveBeenCalledWith('lab_jobs', expect.anything());
+  });
+
+  it('reads again after a lost race on the reservation, and reserves once it holds', async () => {
+    const s = store({ canary: { id: LAB_CANARY_DOC_ID, consecutiveFailures: 0 } });
     s.replaceDocIfMatch.mockRejectedValueOnce(Object.assign(new Error('changed'), { code: 412 }));
     const h = harness({ s });
-    await expect(h.canary.run()).rejects.toMatchObject({ code: 412 });
-    expect(s.createDoc).not.toHaveBeenCalledWith('lab_jobs', expect.anything());
+    expect((await h.canary.run()).outcome).toBe('not-claimed');
+    expect(s.createDoc.mock.calls.filter(([container]) => container === 'lab_jobs')).toHaveLength(1);
   });
 
   it('reads a reservation for a job that was never created as gone', async () => {
@@ -322,6 +332,82 @@ describe('a run that dies after the job exists', () => {
     const h = harness({ s });
     expect((await h.canary.run()).outcome).toBe('not-claimed');
     expect(s.data.admin_config.get(LAB_CANARY_DOC_ID).pendingJobId).toBeNull();
+  });
+});
+
+describe('one run holds the record at a time (CodeRabbit, #1056)', () => {
+  const OTHER = '99999999-8888-4777-8666-555555555555';
+
+  it('a second invocation during the first leaves the first’s reservation and job intact, and enqueues nothing', async () => {
+    const s = store();
+    let second;
+    let secondSummary;
+    // At the first run's first poll, its job exists and its hold is live:
+    // a second invocation starts then.
+    const first = harness({
+      s,
+      script: [
+        {
+          at: 1,
+          act: async (st) => {
+            second = harness({ s: st, startMs: START + 5_000, jobId: OTHER });
+            secondSummary = await second.canary.run();
+            expect(st.data.admin_config.get(LAB_CANARY_DOC_ID)).toMatchObject({
+              pendingJobId: JOB_ID,
+              activeRun: { jobId: JOB_ID },
+            });
+          },
+        },
+        { at: 2, act: claim(10_000) },
+        { at: 3, act: finish(13_000, { status: 'succeeded', exitCode: 0, output: `hcw-canary ${JOB_ID}` }) },
+      ],
+    });
+    const summary = await first.canary.run();
+
+    expect(secondSummary).toEqual({ ok: false, outcome: 'overlap', claimSeconds: null, runSeconds: null, jobLeftInFlight: false });
+    expect(second.log.warn).toHaveBeenCalledWith('[labCanary] another canary run holds the record; this run left it alone');
+    expect(s.createDoc.mock.calls.filter(([container]) => container === 'lab_jobs')).toHaveLength(1);
+    expect(second.checkCoderToken).not.toHaveBeenCalled();
+    // The first run was not disturbed, and its own last write released its hold.
+    expect(summary).toMatchObject({ ok: true, outcome: 'succeeded' });
+    expect(s.data.admin_config.get(LAB_CANARY_DOC_ID)).toMatchObject({ pendingJobId: null, activeRun: null });
+  });
+
+  it('a run that writes its record while another holds it keeps that hold and its job', async () => {
+    const s = store({ agents: [] });
+    // While this run decides (no agent registered), another run reserves.
+    s.queryDocs.mockImplementation(async () => {
+      const doc = s.data.admin_config.get(LAB_CANARY_DOC_ID) ?? { id: LAB_CANARY_DOC_ID, _etag: '"x"' };
+      s.data.admin_config.set(LAB_CANARY_DOC_ID, {
+        ...doc,
+        pendingJobId: OTHER,
+        activeRun: { jobId: OTHER, since: at(1_000) },
+        _etag: '"x2"',
+      });
+      return [];
+    });
+    const h = harness({ s });
+    expect((await h.canary.run()).outcome).toBe('no-capability');
+    expect(s.data.admin_config.get(LAB_CANARY_DOC_ID)).toMatchObject({
+      lastResult: { outcome: 'no-capability' },
+      pendingJobId: OTHER,
+      activeRun: { jobId: OTHER },
+    });
+  });
+
+  it('takes over from a run whose hold has lapsed, settling its job', async () => {
+    const s = store({
+      canary: {
+        id: LAB_CANARY_DOC_ID,
+        pendingJobId: OTHER,
+        activeRun: { jobId: OTHER, since: at(-CANARY_RUN_HOLD_MS - 60_000) },
+      },
+      jobs: [{ id: OTHER, type: 'shell-echo', status: 'queued', createdAt: at(-CANARY_RUN_HOLD_MS - 60_000) }],
+    });
+    const h = harness({ s });
+    expect((await h.canary.run()).outcome).toBe('not-claimed');
+    expect(s.data.lab_jobs.has(OTHER)).toBe(false);
+    expect(s.data.admin_config.get(LAB_CANARY_DOC_ID)).toMatchObject({ pendingJobId: null, activeRun: null });
   });
 });
 

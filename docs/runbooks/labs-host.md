@@ -780,17 +780,23 @@ the health pulse records each every five minutes.
   failed, echoed something else, or the agent's registration lacks
   `shell-echo` (re-register it on the Labs **Agents** tab with that job type
   ticked). A job still running at the deadline is left to finish and
-  deleted by the next run, and no second one is enqueued meanwhile.
-- **Coder status token.** Every read of Coder with `CODER-STATUS-TOKEN` (the
-  labs status, through its one-minute cache, and the Integrations card's
-  expiry read) records Coder's answer. Critical from the first 401 or 403
-  until Coder accepts the token again, naming since when; unknown when
-  nothing has read Coder for a day. The canary reads the labs status once an
-  hour, so with it armed the evidence stays fresh. A 401 also writes a
-  warning line starting `coder-status: Coder refused CODER_STATUS_TOKEN
-  (401)` (no alert rule pages on it yet; "What these still do not cover" in
-  `alerting-and-support.md` has the query). The fix is the automatic renewal
-  below, run now with `--rotate-now`.
+  deleted by the next run, and no second one is enqueued meanwhile. One run
+  holds the canary's record at a time: a second run that starts while the
+  first is under way leaves everything alone and ends with `overlap`.
+- **Coder status token.** Every read of Coder with `CODER-STATUS-TOKEN`
+  records Coder's answer, kept apart for the two things the token does: the
+  labs status read (a visitor's read that misses the one-minute cache, and
+  the canary's hourly check, which asks Coder directly and never through
+  that cache) and the Integrations card's read of the token's own record.
+  Critical from the first 401 or 403 on either until that same read
+  succeeds again, naming which read and since when; so opening Integrations
+  never clears a status read's 403. Unknown when nothing has read Coder for
+  a day. With the canary armed, the status read is checked hourly whatever
+  visitors do. A 401 also writes a warning line starting `coder-status:
+  Coder refused CODER_STATUS_TOKEN (401)` (no alert rule pages on it yet;
+  "What these still do not cover" in `alerting-and-support.md` has the
+  query). The fix is the automatic renewal below, run now with
+  `--rotate-now`.
 
 **Arming the canary.** It is a real job on the host every hour, so it is off
 until the owner arms it. In the browser, open
@@ -802,6 +808,31 @@ plan's one change beyond the usual three replacements is
 the plan check reads as `DECLARED`. Confirm it. Within the hour, at 20
 past, the **Lab job canary** card turns healthy; until its first run it
 reads `The lab canary has not run`.
+
+**Disarming it, or rolling it back, and a job in flight.** Remove
+`"LAB_CANARY"` from `enabled_timers` the same way, or revert the change and
+redeploy. Either stops new runs at once; a run already under way finishes
+and cleans up after itself as usual. What can be left is the one job a run
+was still waiting on at its 150-second deadline, which it leaves to the
+agent and names in `admin_config/lab_canary` as `pendingJobId` for the next
+run to settle. With no next run:
+
+- A job the agent claimed finishes as normal and stays in the Labs **Jobs**
+  list, a `shell-echo` job requested by `lab-canary`. Nothing claims it
+  again, and nothing runs on the host because of it.
+- A job still queued is rare: a run cancels and deletes a job nobody
+  claimed by its deadline, so one is left queued only when the run died
+  after creating it. The agent claims and runs it as soon as it is online,
+  and until then it counts as one of the 20 queued jobs the public door
+  allows. The admin console offers no cancel for a job it did not submit,
+  so the way to remove it at once is to re-arm the canary for one run.
+- Either way, the job's document goes when the `lab_jobs` container's
+  30-day time-to-live (`default_ttl` 2592000 in
+  `infra/cosmos-containers.json`) removes it. Re-arming the canary settles it
+  sooner: the first run deletes a finished one, and withdraws one claimed
+  more than twenty minutes earlier, before it enqueues anything.
+
+No job outlives the time-to-live, so nothing else is needed.
 
 ## Automatic renewal
 

@@ -35,6 +35,20 @@
  * the job before it enqueues anything. A reservation for a job that was never
  * created is read as gone, and costs nothing.
  *
+ * ONE RUN HOLDS THE RECORD AT A TIME (CodeRabbit, #1056). The ETag on the
+ * record does not fence runs from each other: each write re-reads first, so
+ * a second invocation that read the first's reservation could replace it
+ * with its own, and its last write could then clear it, losing a job. So the
+ * reservation also names its owner, `activeRun: { jobId, since }`. A run
+ * that finds another run's `activeRun` younger than CANARY_RUN_HOLD_MS
+ * touches nothing (no settling, no reservation, no record) and says so; a
+ * run's last write clears `activeRun` only when it is its own, and keeps
+ * another run's `activeRun` and `pendingJobId` as they are. An `activeRun`
+ * older than the hold is a run that died, and the next run takes over,
+ * settling its job through `pendingJobId` as above. The Functions host runs
+ * a timer as a singleton, so two runs at once are not expected; this holds
+ * if they ever are (a manual run, a second deployment slot).
+ *
  * NOT ENQUEUED INTO A VOID. With no active agent registered for `shell-echo`,
  * or none online, the run records that (a registry or an outage, which the
  * lab-agents probe already reports) and enqueues nothing, so a host that is
@@ -71,6 +85,12 @@ export const CANARY_WAIT_MS = 150_000;
 export const CANARY_POLL_MS = 5_000;
 /** A claimed job older than the claim lease and this is one no agent is finishing. */
 export const CANARY_ABANDON_GRACE_MS = 5 * 60_000;
+/**
+ * How long a run's hold on the record (`activeRun`) counts as live. A run
+ * lasts the 150 s wait plus a few reads and writes; one still holding after
+ * ten minutes has died.
+ */
+export const CANARY_RUN_HOLD_MS = 10 * 60_000;
 const WRITE_ATTEMPTS = 3;
 
 /** Outcomes that mean nothing ran the job, as against a job that ran and failed. */
@@ -150,9 +170,10 @@ export function judgeJob(job, payload) {
  * @param {(ms: number) => Promise<void>} [deps.sleep]
  * @param {() => string} [deps.uuid]
  * @param {object} [deps.log] the invocation context
- * @param {() => Promise<unknown>} [deps.touchCoderStatus] the labs status read
- *   (coder-status.js readStatus), once per run, so the status-token check has
- *   evidence even when no visitor opens the labs page; never fatal
+ * @param {() => Promise<unknown>} [deps.checkCoderToken] the scheduled token
+ *   check (coder-status.js checkToken), once per run: it asks Coder directly,
+ *   never through the anonymous minute cache, so the status-token check has
+ *   evidence whatever visitors do (CodeRabbit, #1056); never fatal
  */
 export function createLabCanary({
   store,
@@ -160,9 +181,17 @@ export function createLabCanary({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   uuid = randomUUID,
   log = {},
-  touchCoderStatus = null,
+  checkCoderToken = null,
 }) {
   const readState = () => store.readDoc('admin_config', LAB_CANARY_DOC_ID, ADMIN_CONFIG_PARTITION);
+
+  /** Another run's live hold on the record, or null. `ownJobId` is this run's reservation, if any. */
+  function heldElsewhere(state, ownJobId) {
+    const hold = state?.activeRun;
+    if (!hold?.jobId || hold.jobId === ownJobId) return null;
+    const since = msOf(hold.since);
+    return since !== null && now().getTime() - since < CANARY_RUN_HOLD_MS ? hold : null;
+  }
 
   /** Delete a job under the ETag it was read with. True when it is gone. */
   async function remove(job) {
@@ -276,30 +305,62 @@ export function createLabCanary({
   }
 
   /**
-   * Write the job's id to the record as `pendingJobId` before the job exists,
-   * under the record's ETag. Throws when it cannot, and then nothing is
-   * enqueued: a job whose id is not recorded is one no later run can find.
+   * Write the job's id to the record as `pendingJobId`, and this run as its
+   * owner (`activeRun`), before the job exists, under the record's ETag. False
+   * when another run holds the record, and then nothing is enqueued. Throws
+   * when it cannot write: a job whose id is not recorded is one no later run
+   * can find.
    */
   async function reserve(jobId) {
-    const current = await readState();
-    const next = {
-      ...(current ?? {
-        id: LAB_CANARY_DOC_ID,
-        configScope: ADMIN_CONFIG_PARTITION,
-        docType: LAB_CANARY_DOC_TYPE,
-        jobType: CANARY_JOB_TYPE,
-      }),
-      pendingJobId: jobId,
-    };
-    if (current) await store.replaceDocIfMatch('admin_config', { ...next, _etag: current._etag }, PK);
-    else await store.createDoc('admin_config', next);
+    for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt += 1) {
+      const current = await readState();
+      if (heldElsewhere(current, jobId)) return false;
+      const next = {
+        ...(current ?? {
+          id: LAB_CANARY_DOC_ID,
+          configScope: ADMIN_CONFIG_PARTITION,
+          docType: LAB_CANARY_DOC_TYPE,
+          jobType: CANARY_JOB_TYPE,
+        }),
+        pendingJobId: jobId,
+        activeRun: { jobId, since: now().toISOString() },
+      };
+      try {
+        if (current) await store.replaceDocIfMatch('admin_config', { ...next, _etag: current._etag }, PK);
+        else await store.createDoc('admin_config', next);
+        return true;
+      } catch (error) {
+        if (error?.code !== 412 && error?.code !== 409) throw error;
+      }
+    }
+    throw Object.assign(new Error('The lab canary record kept changing while it was reserved'), {
+      code: 'CONFLICT',
+    });
   }
 
-  /** Reserve, enqueue, wait, judge, clean up: `{ result, pendingJobId }`. */
+  /** What a run that finds the record held by another reports. Nothing is written. */
+  const overlap = () => ({
+    result: {
+      ok: false,
+      outcome: 'overlap',
+      reason: 'another canary run holds the record; this run left it alone',
+    },
+    pendingJobId: null,
+    ownJobId: null,
+    unrecorded: true,
+  });
+
+  /** Reserve, enqueue, wait, judge, clean up: `{ result, pendingJobId, ownJobId }`. */
   async function runJob(startedMs) {
     const jobId = uuid();
-    await reserve(jobId);
+    if (!(await reserve(jobId))) return overlap();
     await store.createDoc('lab_jobs', canaryJob(jobId, new Date(startedMs).toISOString()));
+    const outcome = await runReserved(jobId, startedMs);
+    return { ...outcome, ownJobId: jobId };
+  }
+
+  /** The job exists: follow it to the end, keeping its id whatever fails. */
+  async function runReserved(jobId, startedMs) {
     // From here the job exists, so whatever fails while it is followed, its id
     // must reach the record: the next run settles it, and enqueues nothing new
     // while it may still be queued or running (CodeRabbit, #1055).
@@ -343,9 +404,14 @@ export function createLabCanary({
     };
   }
 
-  /** The state after this run: the last result, the streak, and any job still in flight. */
-  function nextState(current, result, pendingJobId, atIso) {
+  /**
+   * The state after this run: the last result, the streak, and any job still
+   * in flight. Another run's live hold, and the job it reserved, are kept as
+   * they are; this run's own hold, or a dead one, is cleared.
+   */
+  function nextState(current, result, pendingJobId, atIso, ownJobId) {
     const ok = result.ok === true;
+    const foreign = heldElsewhere(current, ownJobId);
     return {
       id: LAB_CANARY_DOC_ID,
       configScope: ADMIN_CONFIG_PARTITION,
@@ -356,15 +422,16 @@ export function createLabCanary({
       lastSuccessAt: ok ? atIso : (current?.lastSuccessAt ?? null),
       lastFailureAt: ok ? (current?.lastFailureAt ?? null) : atIso,
       consecutiveFailures: ok ? 0 : (Number(current?.consecutiveFailures) || 0) + 1,
-      pendingJobId: pendingJobId ?? null,
+      pendingJobId: foreign ? (current.pendingJobId ?? null) : (pendingJobId ?? null),
+      activeRun: foreign ? current.activeRun : null,
     };
   }
 
   /** Read, merge, write under the ETag; another writer in between means read again. */
-  async function record(result, pendingJobId, atIso) {
+  async function record(result, pendingJobId, atIso, ownJobId) {
     for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt += 1) {
       const current = await readState();
-      const next = nextState(current, result, pendingJobId, atIso);
+      const next = nextState(current, result, pendingJobId, atIso, ownJobId);
       try {
         if (current) await store.replaceDocIfMatch('admin_config', { ...next, _etag: current._etag }, PK);
         else await store.createDoc('admin_config', next);
@@ -378,12 +445,12 @@ export function createLabCanary({
     });
   }
 
-  async function touchCoder() {
-    if (!touchCoderStatus) return;
+  async function checkCoder() {
+    if (!checkCoderToken) return;
     try {
-      await touchCoderStatus();
+      await checkCoderToken();
     } catch (error) {
-      log.warn?.(`[labCanary] the labs status read failed (${error?.code ?? 'error'})`);
+      log.warn?.(`[labCanary] the scheduled token check failed (${error?.code ?? 'error'})`);
     }
   }
 
@@ -392,6 +459,10 @@ export function createLabCanary({
     const startedMs = started.getTime();
     const atIso = started.toISOString();
     const state = await readState();
+    if (heldElsewhere(state, null)) {
+      log.warn?.('[labCanary] another canary run holds the record; this run left it alone');
+      return { ok: false, outcome: 'overlap', claimSeconds: null, runSeconds: null, jobLeftInFlight: false };
+    }
 
     const leftover = await settleLeftover(state?.pendingJobId);
     let outcome;
@@ -409,8 +480,12 @@ export function createLabCanary({
       outcome = refusal ? { result: refusal, pendingJobId: null } : await runJob(startedMs);
     }
 
-    const recorded = await record(outcome.result, outcome.pendingJobId, atIso);
-    await touchCoder();
+    if (outcome.unrecorded) {
+      log.warn?.('[labCanary] another canary run holds the record; this run left it alone');
+      return { ok: false, outcome: 'overlap', claimSeconds: null, runSeconds: null, jobLeftInFlight: false };
+    }
+    const recorded = await record(outcome.result, outcome.pendingJobId, atIso, outcome.ownJobId ?? null);
+    await checkCoder();
 
     const { result } = outcome;
     if (!result.ok) {

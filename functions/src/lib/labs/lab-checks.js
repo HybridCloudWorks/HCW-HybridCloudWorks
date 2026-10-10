@@ -38,7 +38,7 @@
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
 import { CODER_AUTOMATION_DOC_ID } from './coder-automation.js';
 import { LAB_CANARY_DOC_ID, UNREACHED_OUTCOMES } from './canary.js';
-import { TOKEN_STATE_DOC_ID, isRefusing } from './coder-status.js';
+import { TOKEN_OPERATIONS, TOKEN_STATE_DOC_ID, isRefusing } from './coder-status.js';
 import { LAB_DRIFT_DOC_ID, agoText, labDriftVerdict } from './drift.js';
 
 export const LAB_DRIFT_PROBE = 'lab-drift';
@@ -185,38 +185,73 @@ const refusalMeaning = (status) =>
     ? 'it lacks the template:read or workspace:read scope'
     : 'it has expired or been revoked';
 
+/** What each operation is, in words (coder-status.js TOKEN_OPERATIONS). */
+const OPERATION_NAMES = Object.freeze({
+  status: 'the labs status read',
+  expiry: "the Integrations card's read of its own record",
+});
+
+/** One operation's last answers, as one line of the detail. */
+function operationLine(operation, entry) {
+  const answers = [];
+  if (entry.lastAcceptedAt) answers.push(`accepted ${entry.lastAcceptedAt}`);
+  if (entry.lastRefusedAt) answers.push(`refused (HTTP ${entry.lastRefusedStatus}) ${entry.lastRefusedAt}`);
+  return `${OPERATION_NAMES[operation]}: last ${answers.join(', last ')}`;
+}
+
 /**
- * Whether Coder accepts the site's status token, by its last recorded answers.
- * Pure. A refusal newer than the last acceptance is critical however old: it
- * is still the latest evidence. An acceptance older than a day is unknown.
+ * Whether Coder accepts the site's status token, by its last recorded
+ * answers, kept per operation (coder-status.js). Pure.
+ *
+ * Critical while any operation's latest answer is a refusal, however old: it
+ * is still that operation's latest evidence, and only an acceptance of the
+ * same operation clears it, so the expiry read succeeding never clears a
+ * status read's 403. Otherwise healthy on an acceptance within a day, and
+ * unknown on an older one.
  *
  * @param {object|null} state admin_config/coder_status_token
  * @param {number} nowMs
  */
 export function coderTokenVerdict(state, nowMs) {
-  if (!state?.lastAcceptedAt && !state?.lastRefusedAt) {
+  const entries = TOKEN_OPERATIONS.map((operation) => [operation, state?.operations?.[operation]]).filter(
+    ([, entry]) => entry?.lastAcceptedAt || entry?.lastRefusedAt
+  );
+  if (entries.length === 0) {
     return result(
       'unknown',
-      'No read of Coder with CODER_STATUS_TOKEN has been recorded yet; the labs status read records each one.'
+      'No read of Coder with CODER_STATUS_TOKEN has been recorded yet; the labs status read, the hourly canary and the Integrations card record each one.'
     );
   }
-  if (isRefusing(state)) {
-    const status = Number(state.lastRefusedStatus) || 401;
-    const since = state.refusingSince ?? state.lastRefusedAt;
+  const detail = entries.map(([operation, entry]) => operationLine(operation, entry)).join('\n');
+  const refusing = entries.find(([, entry]) => isRefusing(entry));
+  if (refusing) {
+    const [operation, entry] = refusing;
+    const status = Number(entry.lastRefusedStatus) || 401;
+    const since = entry.refusingSince ?? entry.lastRefusedAt;
     return result(
       'critical',
-      `Coder has refused CODER_STATUS_TOKEN (HTTP ${status}) since ${since}, ${agoText(since, nowMs)}: ${refusalMeaning(status)}, so the labs card's templates and running count are unknown. The lab host's Coder automation renews it daily; Integrations → Hybrid Lab shows its last report.`,
-      state.lastAcceptedAt ? `last accepted ${state.lastAcceptedAt}` : 'never accepted since this check began'
+      `Coder has refused CODER_STATUS_TOKEN on ${OPERATION_NAMES[operation]} (HTTP ${status}) since ${since}, ${agoText(since, nowMs)}: ${refusalMeaning(status)}, so the labs card's templates and running count are unknown. The lab host's Coder automation renews it daily; Integrations → Hybrid Lab shows its last report.`,
+      detail
     );
   }
-  const acceptedMs = Date.parse(String(state.lastAcceptedAt));
+  const [newestOperation, newest] = entries.reduce((best, candidate) =>
+    Date.parse(String(candidate[1].lastAcceptedAt ?? '')) > Date.parse(String(best[1].lastAcceptedAt ?? ''))
+      ? candidate
+      : best
+  );
+  const acceptedMs = Date.parse(String(newest.lastAcceptedAt ?? ''));
   if (!Number.isFinite(acceptedMs) || nowMs - acceptedMs > TOKEN_EVIDENCE_STALE_AFTER_MS) {
     return result(
       'unknown',
-      `Coder last accepted CODER_STATUS_TOKEN ${agoText(state.lastAcceptedAt, nowMs)}, and nothing has read Coder with it since, so whether it still does is unknown.`
+      `Coder last accepted CODER_STATUS_TOKEN ${agoText(newest.lastAcceptedAt, nowMs)}, and nothing has read Coder with it since, so whether it still does is unknown.`,
+      detail
     );
   }
-  return result('healthy', `Coder accepted CODER_STATUS_TOKEN ${agoText(state.lastAcceptedAt, nowMs)}.`);
+  return result(
+    'healthy',
+    `Coder accepted CODER_STATUS_TOKEN ${agoText(newest.lastAcceptedAt, nowMs)} (${OPERATION_NAMES[newestOperation]}).`,
+    detail
+  );
 }
 
 /** The drift verdict from the registry rows given, or read here when none are. */

@@ -36,15 +36,20 @@ This project has not cut a tagged release; entries are grouped under
     enqueues nothing new meanwhile. Each run is recorded with its claim and
     run times in `admin_config/lab_canary`, where the job's id is reserved
     under the record's ETag before the job is created, so a run that dies
-    or cannot write its record never loses a job to the next.
+    or cannot write its record never loses a job to the next. The record
+    also names its owning run (`activeRun`), so an overlapping run touches
+    nothing and a run's last write never clears another's reservation.
   - Every read of Coder with `CODER-STATUS-TOKEN` records Coder's answer in
     `admin_config/coder_status_token` (`recordTokenAnswer`, ETag-guarded,
-    an unchanged answer at most hourly, one outage keeping its start). A
-    401 writes a warning starting `coder-status: Coder refused
-    CODER_STATUS_TOKEN (401)` for a log alert to match; a 403 now says it
-    lacks a read scope rather than "expired or revoked". The Integrations
-    card's expiry read records its 401 too. The canary reads the labs status
-    once an hour, so the evidence stays fresh without visitors.
+    an unchanged answer at most hourly, one outage keeping its start), kept
+    per operation: the labs status read and the Integrations card's read of
+    the token's own record, so a refusal is cleared only by the same read
+    succeeding. A 401 writes a warning starting `coder-status: Coder
+    refused CODER_STATUS_TOKEN (401)` for a log alert to match; a 403 now
+    says it lacks a read scope rather than "expired or revoked". The canary
+    runs `checkToken` once an hour, which asks Coder directly and never
+    through the anonymous minute cache, so warm-cache traffic cannot hide a
+    refusal; visitors' live reads record their answers too.
   - Two more Health Hub probes, recorded by the pulse and shown by the Labs
     snapshot: **Lab job canary** (`lab-canary`; offline when nothing ran the
     job, critical when it ran and failed, unknown once the canary stops) and

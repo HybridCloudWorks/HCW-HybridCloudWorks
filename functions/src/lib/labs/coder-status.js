@@ -82,6 +82,21 @@
  * line that starts with TOKEN_REFUSED_401_LOG, content-free (the setting's
  * name and a status, never the token or Coder's address), for a log alert
  * to match. Neither is in the public answer, which says what it always said.
+ *
+ * EVIDENCE IS KEPT PER OPERATION (CodeRabbit, #1056). The token is used for
+ * two different things: the labs status read (`status`: templates and
+ * running workspaces, which need template:read and workspace:read) and the
+ * Integrations card's expiry read (`expiry`: the token's own key record).
+ * Each has its own answer in the record, and a refusal is cleared only by an
+ * acceptance of the same operation, so an editor opening Integrations cannot
+ * clear a status read's 403 by reading a record the token can still read.
+ *
+ * THE SCHEDULED CHECK DOES NOT GO THROUGH THE CACHE (CodeRabbit, #1056).
+ * Anonymous visitors keep the one-minute cache warm, and a read that finds
+ * it warm never asks Coder, so a check riding on that read could go hours
+ * without seeing a refusal. `checkToken` asks Coder directly, with the
+ * status read's two calls, records the answer, and leaves the cache alone;
+ * the hourly lab canary calls it (labs/canary.js).
  */
 
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
@@ -92,6 +107,12 @@ export const CODER_STATUS_CACHE_ID = 'labs:coder-status';
 /** Coder's last answers to the status token (#1009): admin_config, read by the health pulse. */
 export const TOKEN_STATE_DOC_ID = 'coder_status_token';
 export const TOKEN_STATE_DOC_TYPE = 'coder_status_token';
+/**
+ * What the token was used for, each with its own answers: the labs status
+ * read (and the scheduled check, which makes the same two calls), and the
+ * Integrations card's read of the token's own key record.
+ */
+export const TOKEN_OPERATIONS = Object.freeze(['status', 'expiry']);
 /**
  * An unchanged answer is written again at most this often, so the record's
  * age says how fresh the evidence is without a write for every minute's read.
@@ -512,14 +533,8 @@ async function readDetailOrUnknown({ fetchImpl, config, context, onTokenAnswer =
     await onTokenAnswer?.(null);
     return { templates: detail.templates, capacity: { running: detail.running, max: config.max } };
   } catch (error) {
-    if (error?.status === 401) {
-      context?.warn?.(
-        `${TOKEN_REFUSED_401_LOG}: it has expired or been revoked; templates and running workspaces are reported as unknown`
-      );
-    } else if (error?.status === 403) {
-      context?.warn?.(
-        'coder-status: Coder refused CODER_STATUS_TOKEN (403): it lacks the template:read or workspace:read scope; templates and running workspaces are reported as unknown'
-      );
+    if (error?.status === 401 || error?.status === 403) {
+      warnRefusal(context, error.status, 'templates and running workspaces are reported as unknown');
     } else {
       context?.warn?.(
         `coder-status: the templates and workspaces read failed, and both are reported as unknown: ${error?.message ?? error}`
@@ -530,25 +545,38 @@ async function readDetailOrUnknown({ fetchImpl, config, context, onTokenAnswer =
   }
 }
 
+/**
+ * The warning a refused status token writes: a 401 starts with
+ * TOKEN_REFUSED_401_LOG, which a log alert matches; a 403 names the scope
+ * and does not match it. Content-free.
+ */
+function warnRefusal(context, status, consequence) {
+  context?.warn?.(
+    status === 401
+      ? `${TOKEN_REFUSED_401_LOG}: it has expired or been revoked; ${consequence}`
+      : `coder-status: Coder refused CODER_STATUS_TOKEN (403): it lacks the template:read or workspace:read scope; ${consequence}`
+  );
+}
+
 const isPast = (iso, nowMs, ageMs) => {
   const ms = Date.parse(String(iso ?? ''));
   return !Number.isFinite(ms) || nowMs - ms >= ageMs;
 };
 
-/** Whether a stored state says Coder is refusing the token now: a refusal newer than any acceptance. */
-export function isRefusing(state) {
-  const refused = Date.parse(String(state?.lastRefusedAt ?? ''));
+/**
+ * Whether one operation's answers say Coder is refusing the token now: a
+ * refusal newer than that same operation's last acceptance.
+ */
+export function isRefusing(entry) {
+  const refused = Date.parse(String(entry?.lastRefusedAt ?? ''));
   if (!Number.isFinite(refused)) return false;
-  const accepted = Date.parse(String(state?.lastAcceptedAt ?? ''));
+  const accepted = Date.parse(String(entry?.lastAcceptedAt ?? ''));
   return !Number.isFinite(accepted) || refused > accepted;
 }
 
-/** The state after this answer: `refusedStatus` null for an acceptance, or Coder's 401 or 403. Pure. */
-export function nextTokenState(current, refusedStatus, atIso) {
+/** One operation's answers after this one: `refusedStatus` null for an acceptance, or Coder's 401 or 403. */
+function nextEntry(current, refusedStatus, atIso) {
   const base = {
-    id: TOKEN_STATE_DOC_ID,
-    configScope: 'admin_config',
-    docType: TOKEN_STATE_DOC_TYPE,
     lastAcceptedAt: current?.lastAcceptedAt ?? null,
     lastRefusedAt: current?.lastRefusedAt ?? null,
     lastRefusedStatus: current?.lastRefusedStatus ?? null,
@@ -564,32 +592,55 @@ export function nextTokenState(current, refusedStatus, atIso) {
   };
 }
 
-/** Whether this answer is news: a change of verdict or status, or the same answer gone an hour unwritten. */
-function worthWriting(current, refusedStatus, nowMs) {
-  if (!current) return true;
+/**
+ * The record after this answer, for this operation only: the other
+ * operation's answers are kept exactly as read. Pure.
+ */
+export function nextTokenState(current, operation, refusedStatus, atIso) {
+  const operations = { ...(current?.operations ?? {}) };
+  operations[operation] = nextEntry(operations[operation], refusedStatus, atIso);
+  return {
+    id: TOKEN_STATE_DOC_ID,
+    configScope: 'admin_config',
+    docType: TOKEN_STATE_DOC_TYPE,
+    operations,
+  };
+}
+
+/** Whether this answer is news for its operation: a change of verdict or status, or the same answer gone an hour unwritten. */
+function worthWriting(entry, refusedStatus, nowMs) {
+  if (!entry) return true;
   if (refusedStatus === null) {
-    return isRefusing(current) || isPast(current.lastAcceptedAt, nowMs, TOKEN_STATE_REFRESH_MS);
+    return isRefusing(entry) || isPast(entry.lastAcceptedAt, nowMs, TOKEN_STATE_REFRESH_MS);
   }
-  if (!isRefusing(current) || current.lastRefusedStatus !== refusedStatus) return true;
-  return isPast(current.lastRefusedAt, nowMs, TOKEN_STATE_REFRESH_MS);
+  if (!isRefusing(entry) || entry.lastRefusedStatus !== refusedStatus) return true;
+  return isPast(entry.lastRefusedAt, nowMs, TOKEN_STATE_REFRESH_MS);
 }
 
 /**
- * Record Coder's answer to the status token: `refusedStatus` null when it
- * accepted it, 401 or 403 when it refused. Read, decide, write under the
- * ETag (`replaceDocIfMatch`, or `createDoc` for the first answer); a 412 or
- * 409 means another worker recorded an answer at the same moment, which is
- * as good. Best effort and never throws: the status read it rides on must
- * answer whatever happens here. A store without the conditional writes (a
+ * Record Coder's answer to the status token for one operation (`status` or
+ * `expiry`, TOKEN_OPERATIONS): `refusedStatus` null when it accepted it, 401
+ * or 403 when it refused. Read, decide, write under the ETag
+ * (`replaceDocIfMatch`, or `createDoc` for the first answer); a 412 or 409
+ * means another worker recorded an answer at the same moment, which is as
+ * good. Best effort and never throws: the read it rides on must answer
+ * whatever happens here. A store without the conditional writes (a
  * read-only test double) records nothing.
  */
-export async function recordTokenAnswer({ store, refusedStatus, now = () => Date.now(), context }) {
+export async function recordTokenAnswer({
+  store,
+  operation,
+  refusedStatus,
+  now = () => Date.now(),
+  context,
+}) {
+  if (!TOKEN_OPERATIONS.includes(operation)) return false;
   if (!store?.readDoc || !store?.createDoc || !store?.replaceDocIfMatch) return false;
   try {
     const nowMs = now();
     const current = await store.readDoc('admin_config', TOKEN_STATE_DOC_ID, 'admin_config');
-    if (!worthWriting(current, refusedStatus, nowMs)) return false;
-    const next = nextTokenState(current, refusedStatus, new Date(nowMs).toISOString());
+    if (!worthWriting(current?.operations?.[operation], refusedStatus, nowMs)) return false;
+    const next = nextTokenState(current, operation, refusedStatus, new Date(nowMs).toISOString());
     if (current) {
       await store.replaceDocIfMatch('admin_config', { ...next, _etag: current._etag }, { partitionKey: 'admin_config' });
     } else {
@@ -698,9 +749,9 @@ export function createCoderStatusHandlers({
     seconds: CODER_STATUS_CACHE_SECONDS,
   });
 
-  /** Coder's answer to the token, recorded for the health pulse (#1009). Never throws. */
-  const onTokenAnswer = (context) => (refusedStatus) =>
-    recordTokenAnswer({ store, refusedStatus, now, context });
+  /** Coder's answer to the token for one operation, recorded for the health pulse (#1009). Never throws. */
+  const onTokenAnswer = (operation, context) => (refusedStatus) =>
+    recordTokenAnswer({ store, operation, refusedStatus, now, context });
 
   /**
    * The status body — the same object the route returns, for the estate read
@@ -726,7 +777,7 @@ export function createCoderStatusHandlers({
         fetchImpl,
         config,
         context,
-        onTokenAnswer: onTokenAnswer(context),
+        onTokenAnswer: onTokenAnswer('status', context),
       });
       body = { configured: true, reachable: true, ...detail, asOf };
     } catch (error) {
@@ -744,8 +795,41 @@ export function createCoderStatusHandlers({
     return body;
   }
 
+  /**
+   * The scheduled token check: the status read's two calls (templates, and
+   * running workspaces), asked of Coder directly, never through the minute
+   * cache, and recorded as the `status` operation's answer. Writes the same
+   * warning a status read does. Leaves the cache alone, so it neither hides
+   * behind a warm one nor changes what a visitor sees. Resolves
+   * `{ checked, refusedStatus }`; never throws.
+   */
+  async function checkToken(context) {
+    const config = readCoderConfig(env);
+    if (!config?.token) return { checked: false, reason: config ? 'unset' : 'unconfigured' };
+    const running = new URLSearchParams({ q: 'status:running' });
+    try {
+      await Promise.all([
+        coderGet(fetchImpl, config, '/api/v2/templates', config.token),
+        coderGet(fetchImpl, config, `/api/v2/workspaces?${running}`, config.token),
+      ]);
+    } catch (error) {
+      if (error?.status === 401 || error?.status === 403) {
+        warnRefusal(context, error.status, 'the scheduled check found it');
+        await onTokenAnswer('status', context)(error.status);
+        return { checked: true, refusedStatus: error.status };
+      }
+      context?.warn?.(
+        `coder-status: the scheduled token check could not reach a verdict (${Number.isInteger(error?.status) ? `Coder answered ${error.status}` : 'no answer'})`
+      );
+      return { checked: false, reason: 'error' };
+    }
+    await onTokenAnswer('status', context)(null);
+    return { checked: true, refusedStatus: null };
+  }
+
   return {
     readStatus,
+    checkToken,
 
     /**
      * GET /api/cms/labs/coder-token — editor. When the status token expires,
@@ -761,8 +845,8 @@ export function createCoderStatusHandlers({
         const token = await readTokenExpiry({ fetchImpl, config, context, now });
         // Coder's own answer to the token, for the health pulse: a 401 here is
         // as much a refusal as one on the public read (#1009).
-        if (token.reason === 'refused') await onTokenAnswer(context)(401);
-        else if (token.known) await onTokenAnswer(context)(null);
+        if (token.reason === 'refused') await onTokenAnswer('expiry', context)(401);
+        else if (token.known) await onTokenAnswer('expiry', context)(null);
         return privateJson(200, { configured: true, token, warningDays: TOKEN_RENEW_WARNING_DAYS });
       } catch (error) {
         context.error('cmsLabsCoderToken failed:', error);

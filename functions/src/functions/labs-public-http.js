@@ -46,7 +46,13 @@ import { createResourceGraphClient } from '../lib/labs/resource-graph.js';
 const store = { queryDocs, readDoc, upsertDoc };
 
 let arm = null;
-const coder = () => createCoderStatusHandlers({ store });
+// The status handlers also get the two conditional writes, and only those,
+// so a visitor's read that reaches Coder (at most one a minute, through the
+// minute cache) records Coder's answer to the status token for the health
+// pulse (#1009; coder-status.js recordTokenAnswer, which writes one
+// admin_config document at most hourly unless the answer changes).
+const coder = () =>
+  createCoderStatusHandlers({ store: { ...store, createDoc, replaceDocIfMatch } });
 const estate = () =>
   createEstateHandlers({
     store,
