@@ -260,8 +260,10 @@ Two things about that are worth keeping in mind:
 
 - The direct `contact_emails` path is why a budget notification proves nothing
   about the action group. Mail arrives on that path with the action group
-  completely inert. The alert rules have no such fallback — see
-  [Alerting and support](../runbooks/alerting-and-support.md), *Delivery is unproven*.
+  completely inert. The alert rules have no such fallback, which is why the
+  action group's own delivery had to be observed; it was, by email and SMS on
+  2026-08-30 — see
+  [Alerting and support](../runbooks/alerting-and-support.md#delivery-is-proven-on-both-channels).
 - `budget_start_date` is a create-time constraint, not a "when we started"
   field. Azure rejects a monthly budget whose start date is before the current
   month. Until #820 it defaulted to `2026-08-01` and had to be moved by hand

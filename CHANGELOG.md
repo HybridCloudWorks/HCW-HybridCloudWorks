@@ -4232,6 +4232,55 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Fixed
 
+- **The alert verifier checks every declared rule, weekly, and the runbook
+  stops calling proven delivery unproven (PLAT-4, #964).** The estate
+  assessment found `verify-alert-state.yml` dispatch-only, last run
+  2026-08-30, reading three hard-coded rules while `infra/` declared thirteen
+  across two subscriptions.
+  - The rule list is derived, not written down.
+    `scripts/lib/alert-declarations.mjs` reads every `.tf` file as one module,
+    with a small HCL scanner (`scripts/lib/hcl-blocks.mjs`) that respects
+    strings, heredocs and comments, and resolves each alert rule's Azure name,
+    resource group, subscription (from the provider alias through the
+    `(sub-…)` in its variable's description), `count` gate and action group.
+    An alert type it cannot read back, a name it cannot resolve, or a rule
+    whose provider and resource group sit in different subscriptions stops
+    the check instead of dropping out of the inventory.
+  - `scripts/verify-alert-state.mjs` reads the live rules through ARM GETs
+    with one `az account get-access-token`, in every resource group the
+    declarations name, and fails naming each rule `MISSING`, `DISABLED`,
+    `NOT WIRED` to `ag-plat-prod-cus-01`, or in `DRIFT` on `autoMitigate`. It
+    reads the action group too, and fails one that is disabled or has no
+    enabled receiver, printing receiver names and never their addresses. A
+    rule whose create `assert-expected-plan.mjs` declares is reported as
+    waiting for an apply; a group the identity cannot read is
+    `NOT AUTHORIZED`, never `MISSING`. Gated rules are expected per a `GATES`
+    record of the workspace's gate values, which the tests require for every
+    gate a rule uses.
+  - The workflow runs every Monday at 07:53 UTC and on dispatch, still as
+    `github_reader`. **That identity holds no role in the Management
+    subscription**, so the capacity and lab rules and the action group report
+    `UNREADABLE` until the owner grants a read on `rg-mgmt-plat-prod-cus`:
+    listed in every run and raised as a warning, their state called unknown,
+    while the run passes or fails on what it can read. A weekly red run for a
+    gap everyone knows is how `validate-deployed.yml` came to be ignored. A
+    refusal anywhere else still fails, and once the workflow can read a
+    recorded subscription the run fails as `STALE RECORD` until the entry is
+    deleted; the step's `coverage` output reads `partial` meanwhile. The
+    report's verdict is always its last line. This change does not widen the
+    identity. A rule live while its `count` gate is recorded off is `DRIFT`.
+    The workflow and runbook no longer call `github_reader` a pure reader: it
+    also holds the origin-window config write on the Function App.
+  - Delivery was proven on 2026-08-30: a CLI test notification reached
+    `ops-email` and then `ops-sms` (T-709), and the cross-subscription hop
+    had delivered on 2026-08-25 when `alert-app-exceptions-prod-cus` fired.
+    The runbook's *Delivery is unproven* section, ADR 0022's consequence,
+    the cost analysis, the deployment runbook's §4 step 3 and the comments in
+    `infra/observability.tf` now say so, with the CLI commands that re-prove
+    it. The runbook's operator table gains the reachability, export and
+    Telegram rules it omitted, and `verify-alert-state.test.mjs` fails when a
+    declared rule has no row there.
+
 - **A missing function, an origin lock that is off, and a stranded
   AzureWebJobsStorage strip each fail a check now (PLAT-2, #962).** The
   estate assessment found all three passing.

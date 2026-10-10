@@ -43,10 +43,11 @@ resource "azurerm_monitor_action_group" "ops" {
     use_common_alert_schema = true
   }
 
-  # Second channel (T-709). Until this is set, every alert in the estate has
-  # exactly one delivery path, across a subscription boundary that is only
-  # proven to be ACCEPTED by ARM — not proven to arrive. One receiver plus one
-  # unverified hop is a single point of silence for the whole alerting fabric.
+  # Second channel (T-709, closed 2026-08-30). Without it every alert in the
+  # estate had exactly one delivery path, and one receiver is a single point of
+  # silence for the whole alerting fabric. Both receivers have been observed
+  # delivering: a CLI test notification reached ops-email and then ops-sms on
+  # 2026-08-30 (CHANGELOG.md, "Observe an alert actually being delivered").
   #
   # dynamic, not conditional count: an empty ops_sms_receiver produces no block
   # at all, so the action group is byte-identical to what exists today and the
@@ -255,30 +256,31 @@ resource "azurerm_monitor_diagnostic_setting" "functions_blob" {
 # subscription as the resource it scopes. So every one of these references
 # crosses a subscription boundary.
 #
-# PROVEN: azurerm_consumption_budget_subscription.hcw carries the same
-# cross-subscription contact_groups reference and applied successfully, so ARM
-# ACCEPTS the reference. That is the whole of it.
-#
-# NOT PROVEN: that a notification is ever DELIVERED through it. Nobody has
-# observed one arrive. The budget is not evidence either way, because it also
-# carries contact_emails as an independent path and would still mail on that
-# alone with the action group completely inert.
-#
 # The rules here have no second path. azurerm_monitor_metric_alert and
 # azurerm_monitor_scheduled_query_rules_alert_v2 can only route through an
 # action group — there is no per-rule email field to fall back to. So if the
-# reference is accepted and silently inert, this file produces alert rules that
-# exist, make `az monitor metrics alert list` non-empty, and page nobody. That
-# is strictly WORSE than the visible emptiness this file was written against,
-# because it looks fixed.
+# reference were accepted and silently inert, this file would produce alert
+# rules that exist, make `az monitor metrics alert list` non-empty, and page
+# nobody: strictly WORSE than the visible emptiness this file was written
+# against, because it looks fixed. That is why delivery had to be seen, not
+# inferred from an accepted apply.
 #
-# So: fire a test notification at the action group after the apply and confirm
-# it reaches the ops mailbox — the action group blade has a "Test action group"
-# function and the CLI has an equivalent under `az monitor action-group
-# test-notifications`. Until someone has seen one arrive, treat every rule
-# below as unproven plumbing rather than as coverage. If it does not arrive,
-# the fallback is the one the budget comment in main.tf names: a second action
-# group in the application subscription, referenced alongside this one.
+# It has been seen, on both halves of the path:
+#
+#   - The hop. alert-app-exceptions-prod-cus, a rule in the application
+#     subscription, fired at 23:06 UTC on 2026-08-25 and its mail arrived
+#     every five to ten minutes until it was made stateful (CHANGELOG.md,
+#     "The alert rules re-notified every five minutes").
+#   - The receivers. A CLI test notification
+#     (`az monitor action-group test-notifications create`) reached ops-email
+#     and then ops-sms on 2026-08-30 (CHANGELOG.md, "Observe an alert actually
+#     being delivered"). The portal's "Test action group" button reported
+#     Unknown and delivered nothing the same day; use the CLI.
+#
+# The budget was never evidence either way, because it also carries
+# contact_emails as an independent path. Re-prove delivery the same way after
+# any change to this action group: docs/runbooks/alerting-and-support.md,
+# "Delivery is proven, on both channels", has the commands.
 #
 # WHERE THEY LIVE. Every application-subscription rule is in the `web` resource
 # group, next to Application Insights, rather than beside the resource it
