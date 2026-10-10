@@ -52,7 +52,10 @@
 # it CAN read. Failing every week on a gap everyone already knows is how a
 # monitor gets muted (validate-deployed.yml, deleted 2026-09-08 after three
 # weeks red); a refusal anywhere else, or any other read error, still fails.
-# When the read starts succeeding the report says the entry is stale. PLAT-4's
+# When this workflow's read there starts succeeding, the run FAILS, naming the
+# stale entry, until it is deleted, so the exception cannot outlive the gap
+# and excuse a later refusal. The step's `coverage` output (and the job's)
+# reads `partial` while any entry applies, `complete` otherwise. PLAT-4's
 # pull request records the grant rather than making it; widening an identity
 # is the owner's call.
 #
@@ -103,6 +106,10 @@ jobs:
       contents: read # the checkout, nothing more
       id-token: write # exchanged by azure/login for an Azure access token
     runs-on: ubuntu-26.04
+    # For anything that reads this run's outcome rather than its summary: a
+    # green run that could not read a recorded subscription says `partial`.
+    outputs:
+      coverage: ${{ steps.verify.outputs.coverage }}
     steps:
       # The rule list is read out of infra/ at this commit.
       - name: Checkout
@@ -133,4 +140,5 @@ jobs:
       # report. Exit 2: the check could not run, which fails the step the same
       # way and is never reported as health.
       - name: Compare the declared rules with the live ones
+        id: verify
         run: node scripts/verify-alert-state.mjs --summary "$GITHUB_STEP_SUMMARY"

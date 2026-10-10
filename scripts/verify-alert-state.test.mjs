@@ -18,6 +18,7 @@ import {
   ARM,
   GATES,
   actionGroupProblems,
+  coverageOf,
   armGet,
   classifyError,
   compare,
@@ -36,6 +37,9 @@ import {
 } from './verify-alert-state.mjs';
 
 const REPO = join(INFRA, '..');
+
+/** The last non-empty line of a report: where the runbook says the verdict is. */
+const lastLine = (report) => report.trimEnd().split('\n').at(-1);
 
 // ---------------------------------------------------------------------------
 // hcl-blocks
@@ -707,14 +711,48 @@ describe('readLive and the report, end to end on the real inventory', () => {
     expect(runFails(broken, groups, live.subscriptionsRead)).toBe(true);
   });
 
-  it('says when the recorded gap has closed, so the entry is deleted with the grant', async () => {
+  it('fails the run on a stale record, so the exception goes with the grant that closed it', async () => {
+    // Review of #1051: an entry that outlives the gap would let a later
+    // refusal there pass quietly. So a readable recorded subscription fails
+    // the workflow's run until the entry is deleted.
     const { fetchImpl } = fakeArm(routes());
     const live = await readLive(rules, { token: 't', fetchImpl });
     const stale = staleUnreadable(rules, live);
     expect(stale).toEqual(Object.keys(UNREADABLE));
     const verdicts = compare(rules, live, { pending: new Map() });
-    const report = renderReport({ rules, verdicts, extra: [], groups: actionGroupProblems(rules, live), when: 'now', subscriptionsRead: live.subscriptionsRead, stale });
-    expect(report).toMatch(/is readable now\*\*, so its `UNREADABLE` entry/);
+    const groups = actionGroupProblems(rules, live);
+    expect(runFails(verdicts, groups, live.subscriptionsRead, [])).toBe(false);
+    expect(runFails(verdicts, groups, live.subscriptionsRead, stale)).toBe(true);
+    const report = renderReport({ rules, verdicts, extra: [], groups, when: 'now', subscriptionsRead: live.subscriptionsRead, stale });
+    expect(report).toMatch(/STALE RECORD: `sub-plat-mgmt-prod-cus` is readable by this workflow now/);
+    expect(lastLine(report)).toMatch(/^\*\*1 finding\(s\)\.\*\*/);
+  });
+
+  it('ends every report with the verdict, whatever notices come before it', async () => {
+    // Review of #1051: the runbook's success test reads the last line.
+    const mgmt = rules.find((r) => r.subscription.includes('mgmt')).subscription;
+    const { fetchImpl } = fakeArm(routes({ deny: mgmt }));
+    const live = await readLive(rules, { token: 't', fetchImpl });
+    const unrecorded = compare(rules, live, { pending: new Map(), unreadable: {} });
+    const denied = renderReport({ rules, verdicts: unrecorded, extra: [], groups: actionGroupProblems(rules, live, {}), when: 'now', subscriptionsRead: live.subscriptionsRead, stale: [mgmt] });
+    expect(lastLine(denied)).toMatch(/^\*\*\d+ finding\(s\)\.\*\*/);
+    const recorded = compare(rules, live, { pending: new Map() });
+    const partial = renderReport({ rules, verdicts: recorded, extra: [], groups: actionGroupProblems(rules, live), when: 'now', subscriptionsRead: live.subscriptionsRead });
+    expect(lastLine(partial)).toMatch(/^\*\*Every rule this identity can read is live, enabled and wired\.\*\*/);
+    const { fetchImpl: allOk } = fakeArm(routes());
+    const full = await readLive(rules, { token: 't', fetchImpl: allOk });
+    const clean = renderReport({ rules, verdicts: compare(rules, full, { pending: new Map() }), extra: [], groups: actionGroupProblems(rules, full), when: 'now', subscriptionsRead: full.subscriptionsRead });
+    expect(lastLine(clean)).toBe('**Every expected rule is live, enabled and wired to its action group.**');
+  });
+
+  it('reports coverage as partial while a recorded subscription goes unread, and complete otherwise', async () => {
+    const mgmt = rules.find((r) => r.subscription.includes('mgmt')).subscription;
+    const { fetchImpl: denied } = fakeArm(routes({ deny: mgmt }));
+    const partial = await readLive(rules, { token: 't', fetchImpl: denied });
+    expect(coverageOf(compare(rules, partial, { pending: new Map() }), actionGroupProblems(rules, partial))).toBe('partial');
+    const { fetchImpl: allOk } = fakeArm(routes());
+    const full = await readLive(rules, { token: 't', fetchImpl: allOk });
+    expect(coverageOf(compare(rules, full, { pending: new Map() }), actionGroupProblems(rules, full))).toBe('complete');
   });
 
   it('reports a subscription it cannot see as invisible, not as an empty group', async () => {

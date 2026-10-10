@@ -246,7 +246,7 @@ per declared rule to the job summary (legible from a phone) and to the log:
 | `NOT WIRED` | Live, but its actions do not name the ops action group | Re-apply; the rule pages nobody until then |
 | `DRIFT` | `autoMitigate` differs from the declaration, or a `count`-gated rule is live while `GATES` records its gate as off | Re-apply; for a gate, correct `GATES` if the gate was armed on purpose |
 | `NOT AUTHORIZED` | The workflow's identity could not read that resource group. The rules' state is **unknown**, which is not the same finding as `MISSING` | See the identity note below |
-| `UNREADABLE` | The same refusal, in a subscription the script's `UNREADABLE` table records as not yet readable. Shown in every run and as a warning annotation; the state is **unknown**. Does not fail the run | Decide the grant below; once it applies, the report says the entry is stale, and it is deleted |
+| `UNREADABLE` | The same refusal, in a subscription the script's `UNREADABLE` table records as not yet readable. Shown in every run and as a warning annotation; the state is **unknown**. Does not fail the run | Decide the grant below. Once it applies, the workflow's next run fails with `STALE RECORD` until the entry is deleted, so the exception cannot outlive the gap |
 | `READ FAILED` | ARM answered with some other error; the detail carries the status and code, with IDs masked | Re-run; if it repeats, the detail says what ARM refused |
 | `ABSENT` | A `count`-gated rule whose gate `GATES` does not record, and absent. Not a failure, and not a pass either | Record the gate in `GATES`; the test suite already refuses a new gate without an entry |
 | `GATED OFF` | A `count`-gated rule whose gate is recorded as off (`GATES` in the script), and absent | Nothing. Arming the gate is an owner decision; record it in `GATES` in the same change |
@@ -287,6 +287,10 @@ node scripts/verify-alert-state.mjs
 Success is a last line reading **Every expected rule is live, enabled and wired
 to its action group.** and `$LASTEXITCODE` of `0`; `1` means a finding named in
 the table, and `2` means the check could not run (most often: no `az login`).
+The verdict is always the last line. A run from an operator's machine reads the
+Management subscription with the operator's own rights, so its rules get real
+states there; it does not judge the `UNREADABLE` record, which describes the
+workflow's identity and is checked only by the workflow's own runs.
 To print the declared inventory without touching Azure:
 
 ```powershell

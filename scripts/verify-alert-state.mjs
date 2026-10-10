@@ -129,7 +129,10 @@ export const GATES = {
  * called unknown, never healthy. Any other failure to read it still fails the
  * run. When a read there succeeds, the report says the entry has gone stale,
  * so it is deleted with the grant that made it stale rather than lingering
- * to hide a later refusal.
+ * to hide a later refusal: when the workflow's own run can read a recorded
+ * subscription, the run FAILS until the entry is deleted (review of #1051).
+ * The step also writes `coverage=partial` while any entry applies, for
+ * consumers that read outcomes rather than summaries.
  */
 export const UNREADABLE = {
   'sub-plat-mgmt-prod-cus': {
@@ -411,8 +414,10 @@ export function compare(rules, live, { gates = GATES, pending = pendingCreates()
 
 /**
  * UNREADABLE entries a read has contradicted: a subscription recorded as
- * unreadable in which some list came back. Reported, not failed, so the entry
- * is deleted with the grant that made it stale.
+ * unreadable in which some list came back. Only meaningful for the identity
+ * the entry is about, so main() asks only when it runs as the workflow: an
+ * operator's own login can read Management, and would otherwise be told to
+ * delete an entry that is still true for github_reader.
  */
 export function staleUnreadable(rules, live, unreadable = UNREADABLE) {
   const readOk = new Set(
@@ -471,23 +476,27 @@ export function tableCell(text) {
 /** A value shown in code style, or a dash for nothing. */
 const cell = (value) => (value === undefined || value === null || value === '' ? '—' : `\`${tableCell(value)}\``);
 
-/** The closing lines: the verdict in one sentence, and what the states mean. */
+/** How many rules and action groups the run could not read, as recorded. */
+export function unreadCounts(verdicts, groups) {
+  return {
+    rules: verdicts.filter((v) => v.state === 'UNREADABLE').length,
+    groups: groups.filter((g) => g.state === 'UNREADABLE').length,
+  };
+}
+
+/**
+ * The closing lines: what the states mean, then the verdict in one sentence,
+ * always last (review of #1051: the runbook's success test reads the last
+ * line, and a notice printed after the verdict made a healthy run read as
+ * unclear).
+ */
 function summaryLines(verdicts, groups, stale) {
-  const failing = verdicts.filter((v) => FAILING.has(v.state)).length + groups.filter((g) => FAILING_GROUP.has(g.state)).length;
-  const unread = verdicts.filter((v) => v.state === 'UNREADABLE').length;
-  const unreadGroups = groups.filter((g) => g.state === 'UNREADABLE').length;
-  const lines = [''];
-  if (failing === 0 && unread + unreadGroups === 0) {
-    lines.push('**Every expected rule is live, enabled and wired to its action group.**');
-  } else if (failing === 0) {
-    lines.push(
-      `**Every rule this identity can read is live, enabled and wired.** ${unread} rule(s) and ${unreadGroups} ` +
-        'action group(s) are in a subscription it cannot read yet, recorded in `UNREADABLE`: their state is ' +
-        '**unknown**, not healthy.'
-    );
-  } else {
-    lines.push(`**${failing} finding(s).** Each is named in the State column above.`);
-  }
+  const failing =
+    verdicts.filter((v) => FAILING.has(v.state)).length +
+    groups.filter((g) => FAILING_GROUP.has(g.state)).length +
+    stale.length;
+  const unread = unreadCounts(verdicts, groups);
+  const lines = [];
   if (verdicts.some((v) => v.state === 'NOT AUTHORIZED') || groups.some((g) => g.state === 'NOT AUTHORIZED')) {
     lines.push(
       '',
@@ -499,9 +508,22 @@ function summaryLines(verdicts, groups, stale) {
   for (const subscription of stale) {
     lines.push(
       '',
-      `**\`${subscription}\` is readable now**, so its \`UNREADABLE\` entry in \`scripts/verify-alert-state.mjs\` ` +
-        'is stale. Delete it, so a later refusal there fails the run again.'
+      `**STALE RECORD: \`${subscription}\` is readable by this workflow now**, so its \`UNREADABLE\` entry in ` +
+        '`scripts/verify-alert-state.mjs` no longer describes it. This fails the run until the entry is deleted, ' +
+        'so the exception cannot outlive the gap it recorded and quietly excuse a later refusal.'
     );
+  }
+  lines.push('');
+  if (failing === 0 && unread.rules + unread.groups === 0) {
+    lines.push('**Every expected rule is live, enabled and wired to its action group.**');
+  } else if (failing === 0) {
+    lines.push(
+      `**Every rule this identity can read is live, enabled and wired.** ${unread.rules} rule(s) and ${unread.groups} ` +
+        'action group(s) are in a subscription it cannot read yet, recorded in `UNREADABLE`: their state is ' +
+        '**unknown**, not healthy.'
+    );
+  } else {
+    lines.push(`**${failing} finding(s).** Each is named in the State column or the paragraphs above.`);
   }
   return lines;
 }
@@ -542,10 +564,25 @@ export function renderReport({ rules, verdicts, extra, groups, when, subscriptio
   return `${lines.join('\n')}\n`;
 }
 
-/** Whether a run with these verdicts fails. UNREADABLE and gated-off rules do not. */
-export function runFails(verdicts, groups, subscriptionsRead) {
+/**
+ * Whether a run with these verdicts fails. UNREADABLE and gated-off rules do
+ * not; a stale UNREADABLE entry does, so it is deleted with the grant.
+ */
+export function runFails(verdicts, groups, subscriptionsRead, stale = []) {
   if (subscriptionsRead?.status !== 'ok') return true;
+  if (stale.length > 0) return true;
   return verdicts.some((v) => FAILING.has(v.state)) || groups.some((g) => FAILING_GROUP.has(g.state));
+}
+
+/**
+ * The `coverage` step output for automated consumers: `complete` when every
+ * declared rule and action group was read, `partial` when any is UNREADABLE.
+ * A green run with partial coverage is not the same result as a green run
+ * with complete coverage, and a reader of the run's outcome alone cannot tell.
+ */
+export function coverageOf(verdicts, groups) {
+  const unread = unreadCounts(verdicts, groups);
+  return unread.rules + unread.groups === 0 ? 'complete' : 'partial';
 }
 
 /**
@@ -635,7 +672,10 @@ async function main(argv) {
   const verdicts = compare(rules, live);
   const groups = actionGroupProblems(rules, live);
   const extra = undeclared(rules, live);
-  const stale = staleUnreadable(rules, live);
+  // The UNREADABLE records describe the workflow's identity, so only its own
+  // run can find one stale (review of #1051).
+  const asWorkflow = process.env.GITHUB_ACTIONS === 'true';
+  const stale = asWorkflow ? staleUnreadable(rules, live) : [];
   const when = new Date().toISOString().replace(/:\d\d\.\d+Z$/, ' UTC').replace('T', ' ');
   const report = renderReport({ rules, verdicts, extra, groups, when, subscriptionsRead: live.subscriptionsRead, stale });
 
@@ -643,11 +683,12 @@ async function main(argv) {
   // for the logs API, which does not expose the summary.
   process.stdout.write(report);
   if (args.options.summary) appendFileSync(args.options.summary, report);
-  if (process.env.GITHUB_ACTIONS === 'true') {
+  if (asWorkflow) {
     for (const line of unreadableWarnings(verdicts, groups)) console.log(line);
   }
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `coverage=${coverageOf(verdicts, groups)}\n`);
 
-  return runFails(verdicts, groups, live.subscriptionsRead) ? 1 : 0;
+  return runFails(verdicts, groups, live.subscriptionsRead, stale) ? 1 : 0;
 }
 
 // pathToFileURL, not a `file://` template: see entrypoint-guards.test.mjs.

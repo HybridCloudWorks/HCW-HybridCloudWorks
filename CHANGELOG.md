@@ -4264,8 +4264,10 @@ This project has not cut a tagged release; entries are grouped under
     listed in every run and raised as a warning, their state called unknown,
     while the run passes or fails on what it can read. A weekly red run for a
     gap everyone knows is how `validate-deployed.yml` came to be ignored. A
-    refusal anywhere else still fails, and the report says when the
-    `UNREADABLE` entry has gone stale. This change does not widen the
+    refusal anywhere else still fails, and once the workflow can read a
+    recorded subscription the run fails as `STALE RECORD` until the entry is
+    deleted; the step's `coverage` output reads `partial` meanwhile. The
+    report's verdict is always its last line. This change does not widen the
     identity. A rule live while its `count` gate is recorded off is `DRIFT`.
     The workflow and runbook no longer call `github_reader` a pure reader: it
     also holds the origin-window config write on the Function App.
