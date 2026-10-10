@@ -419,7 +419,7 @@ resource "azurerm_monitor_diagnostic_setting" "lab_hybrid_key_vault" {
 #
 # verify-alert-state.yml derives its list from these declarations since PLAT-4
 # (#964), so these three are in it. Its identity, github_reader, holds no role
-# in the Management subscription yet, so it reports them NOT AUTHORIZED until
+# in the Management subscription yet, so it reports them UNREADABLE until
 # a read grant on this resource group is applied; `az monitor scheduled-query
 # list -g rg-mgmt-plat-prod-cus --subscription sub-plat-mgmt-prod-cus` shows
 # them meanwhile.

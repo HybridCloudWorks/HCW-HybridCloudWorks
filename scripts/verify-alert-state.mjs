@@ -30,17 +30,21 @@
  *                   repair.
  *   DISABLED        live with `enabled: false`.
  *   NOT WIRED       live, but its actions do not name the declared group.
- *   DRIFT           `autoMitigate` differs from the declaration. The one
+ *   DRIFT           `autoMitigate` differs from the declaration (the one
  *                   attribute that decides whether a firing rule mails once
- *                   or every evaluation (ADR 0022 decision 6), and the reason
- *                   this workflow was first written.
+ *                   or every evaluation, ADR 0022 decision 6, and the reason
+ *                   this workflow was first written), or the rule is live
+ *                   while GATES records its gate as off.
  *   NOT AUTHORIZED  the identity may not read the group. Never collapsed
  *                   into MISSING: one means the alert fabric is gone, the
  *                   other that this check's own grant is.
+ *   UNREADABLE      the same refusal, in a subscription UNREADABLE records
+ *                   as not yet readable. Reported every run, and as a
+ *                   workflow warning; its state is unknown. Not a failure.
  *   GATED OFF       a `count`-gated rule whose gate GATES records as off,
  *                   and absent. Not a failure.
  *
- * Every one of those but OK and GATED OFF fails the run. A live rule that no
+ * Every one of those but OK, UNREADABLE and GATED OFF fails the run. A live rule that no
  * declaration names is listed and does not fail it: it pages, so it is worth
  * seeing, and deleting it is a decision rather than a repair.
  *
@@ -86,9 +90,9 @@ export const API_VERSIONS = {
  *
  * The workspace variables are not readable from here, and github_reader holds
  * no HCP Terraform token, so a gated rule's expected state is recorded rather
- * than read. That record can go stale, and the check says so when it does: a
- * rule present while its gate is recorded off is listed against this table,
- * and one absent while recorded on fails as MISSING. Every gate a declared
+ * than read. That record can go stale, and the check fails when it does: a
+ * rule present while its gate is recorded off is DRIFT, and one absent while
+ * recorded on is MISSING. Every gate a declared
  * rule uses must have an entry, which the test suite enforces; an
  * unrecorded gate reports its rule as unknown rather than guessing.
  */
@@ -104,6 +108,33 @@ export const GATES = {
   availability_test_enabled: {
     armed: false,
     record: 'off: Bot Fight Mode answers Azure availability agents with a 403; the edge probe is the armed path (ADR 0024)',
+  },
+};
+
+/**
+ * Subscriptions this workflow's identity is known not to be able to read yet,
+ * and the record that says so (review of #1051).
+ *
+ * `github_reader` holds Reader on `rg-web-site-prod-cus` and nothing in the
+ * Management subscription, where the capacity and lab rules and the action
+ * group live. Until the owner decides that grant (#964), every scheduled run
+ * would fail on those reads, and a monitor that is red every week for a
+ * reason everyone already knows gets muted: `validate-deployed.yml` was
+ * deleted on 2026-09-08 after three weeks of exactly that.
+ *
+ * THIS IS NOT A MUTE, by the same rules as EXPECTED_UNRESOLVED in
+ * check-unresolved-secrets.mjs. A rule in a subscription listed here, whose
+ * read is refused (403 or the subscription not visible), is reported as
+ * UNREADABLE in every run's table and as a workflow warning, and its state is
+ * called unknown, never healthy. Any other failure to read it still fails the
+ * run. When a read there succeeds, the report says the entry has gone stale,
+ * so it is deleted with the grant that made it stale rather than lingering
+ * to hide a later refusal.
+ */
+export const UNREADABLE = {
+  'sub-plat-mgmt-prod-cus': {
+    record:
+      'github_reader holds no role in the Management subscription; the read grant is the owner\'s decision on #964',
   },
 };
 
@@ -264,8 +295,10 @@ export async function readLive(rules, { token, fetchImpl = fetch }) {
   return { subscriptionsRead: subs, ids, lists, actionGroups };
 }
 
+/** The key one (subscription, resource group, rule type) list is held under; groups compare case-insensitively. */
 const listKey = (subscription, group, armType) => `${subscription}|${group.toLowerCase()}|${armType}`;
 
+/** Every action group the rules name, once each. */
 function uniqueActionGroups(rules) {
   const byAddress = new Map();
   for (const rule of rules) for (const g of rule.actionGroups) byAddress.set(g.address, g);
@@ -286,12 +319,62 @@ export function summariseActionGroup(body) {
 // The comparison
 // ---------------------------------------------------------------------------
 
-const FAILING = new Set(['MISSING', 'DISABLED', 'NOT WIRED', 'DRIFT', 'NOT AUTHORIZED', 'READ FAILED']);
+/** Rule states that fail the run. UNREADABLE, GATED OFF, ABSENT and OK do not. */
+export const FAILING = new Set(['MISSING', 'DISABLED', 'NOT WIRED', 'DRIFT', 'NOT AUTHORIZED', 'READ FAILED']);
 
-function readFailureLabel(read) {
-  return read.status === 'denied' || read.status === 'not-visible' || read.status === 'unauthenticated'
-    ? 'NOT AUTHORIZED'
-    : 'READ FAILED';
+/** Action-group states that fail the run. */
+const FAILING_GROUP = new Set(['BROKEN', 'NOT AUTHORIZED', 'READ FAILED']);
+
+/** Read statuses that mean "this identity may not look", as opposed to an error. */
+const REFUSED = new Set(['denied', 'not-visible']);
+
+/**
+ * The state a failed read gives everything behind it: UNREADABLE when the
+ * subscription is recorded in `unreadable` and the read was refused,
+ * NOT AUTHORIZED for any other refusal (and for a 401), READ FAILED otherwise.
+ */
+export function readFailureLabel(read, subscription, unreadable = UNREADABLE) {
+  if (REFUSED.has(read.status) && subscription in unreadable) return 'UNREADABLE';
+  return REFUSED.has(read.status) || read.status === 'unauthenticated' ? 'NOT AUTHORIZED' : 'READ FAILED';
+}
+
+/** A verdict for a rule whose resource group could not be read. */
+function unreadVerdict(base, read, unreadable) {
+  const state = readFailureLabel(read, base.rule.subscription, unreadable);
+  if (state === 'UNREADABLE') {
+    return { ...base, state, notes: [...base.notes, `${unreadable[base.rule.subscription].record} (${read.reason})`] };
+  }
+  return { ...base, state, problems: [read.reason] };
+}
+
+/** A verdict for a rule its resource group does not hold. */
+function absentVerdict(base, pending) {
+  if (base.expect.expected === 'absent') return { ...base, state: 'GATED OFF' };
+  if (base.expect.expected === 'unknown') return { ...base, state: 'ABSENT', notes: [...base.notes, 'gate state unknown'] };
+  const waiting = pending.get(base.rule.address);
+  const problems = waiting
+    ? [`create declared in scripts/assert-expected-plan.mjs and waiting for an apply: ${waiting}`]
+    : ['not in Azure'];
+  return { ...base, state: 'MISSING', problems };
+}
+
+/** Every [state, text] problem with a rule that is live. */
+export function liveProblems(rule, found, expect, ids) {
+  const problems = [];
+  if (expect.expected === 'absent') {
+    // Terraform's count is 0 for an off gate, so a live rule means the gate is
+    // on after all or the rule was made by hand: either way, not as recorded.
+    problems.push(['DRIFT', `live although GATES records var.${rule.gate.variable} as off; correct the record`]);
+  }
+  if (found.enabled === false && rule.enabled !== false) problems.push(['DISABLED', 'enabled is false']);
+  for (const group of rule.actionGroups) {
+    if (!wiredTo(found, group, ids)) problems.push(['NOT WIRED', `actions do not name ${group.name} in ${group.resourceGroup}`]);
+  }
+  if (rule.actionGroups.length === 0) problems.push(['NOT WIRED', 'no action group is declared']);
+  if (rule.autoMitigate !== null && typeof found.autoMitigate === 'boolean' && found.autoMitigate !== rule.autoMitigate) {
+    problems.push(['DRIFT', `autoMitigate is ${found.autoMitigate}, declared ${rule.autoMitigate}`]);
+  }
+  return problems;
 }
 
 /** Whether a live rule's actions name the declared action group. */
@@ -305,48 +388,39 @@ export function wiredTo(live, group, ids) {
   });
 }
 
+/** The verdict for one declared rule. */
+function judgeRule(rule, live, { gates, pending, unreadable }) {
+  const expect = expectation(rule, gates);
+  const read = live.lists.get(listKey(rule.subscription, rule.resourceGroup, rule.armType)) ?? {
+    status: 'failed',
+    reason: 'not read',
+  };
+  const base = { rule, expect, live: null, problems: [], notes: expect.why ? [expect.why] : [] };
+  if (read.status !== 'ok') return unreadVerdict(base, read, unreadable);
+  const found = read.rules.get(rule.name.toLowerCase()) ?? null;
+  if (!found) return absentVerdict(base, pending);
+  const problems = liveProblems(rule, found, expect, live.ids);
+  if (problems.length === 0) return { ...base, live: found, state: 'OK' };
+  return { ...base, live: found, state: problems[0][0], problems: problems.map(([, text]) => text) };
+}
+
 /** One verdict per declared rule. */
-export function compare(rules, live, { gates = GATES, pending = pendingCreates() } = {}) {
-  return rules.map((rule) => {
-    const expect = expectation(rule, gates);
-    const read = live.lists.get(listKey(rule.subscription, rule.resourceGroup, rule.armType)) ?? {
-      status: 'failed',
-      reason: 'not read',
-    };
-    const base = { rule, expect, live: null, problems: [], notes: [] };
-    if (expect.why) base.notes.push(expect.why);
+export function compare(rules, live, { gates = GATES, pending = pendingCreates(), unreadable = UNREADABLE } = {}) {
+  return rules.map((rule) => judgeRule(rule, live, { gates, pending, unreadable }));
+}
 
-    if (read.status !== 'ok') {
-      return { ...base, state: readFailureLabel(read), problems: [read.reason] };
-    }
-    const found = read.rules.get(rule.name.toLowerCase()) ?? null;
-    if (!found) {
-      if (expect.expected === 'absent') return { ...base, state: 'GATED OFF' };
-      if (expect.expected === 'unknown') return { ...base, state: 'ABSENT', notes: [...base.notes, 'gate state unknown'] };
-      const waiting = pending.get(rule.address);
-      const problems = waiting
-        ? [`create declared in scripts/assert-expected-plan.mjs and waiting for an apply: ${waiting}`]
-        : ['not in Azure'];
-      return { ...base, state: 'MISSING', problems };
-    }
-
-    const verdict = { ...base, live: found };
-    if (expect.expected === 'absent') {
-      verdict.notes.push(`live although GATES records var.${rule.gate.variable} as off; correct the record`);
-    }
-    if (found.enabled === false && rule.enabled !== false) verdict.problems.push(['DISABLED', 'enabled is false']);
-    for (const group of rule.actionGroups) {
-      if (!wiredTo(found, group, live.ids)) {
-        verdict.problems.push(['NOT WIRED', `actions do not name ${group.name} in ${group.resourceGroup}`]);
-      }
-    }
-    if (rule.actionGroups.length === 0) verdict.problems.push(['NOT WIRED', 'no action group is declared']);
-    if (rule.autoMitigate !== null && typeof found.autoMitigate === 'boolean' && found.autoMitigate !== rule.autoMitigate) {
-      verdict.problems.push(['DRIFT', `autoMitigate is ${found.autoMitigate}, declared ${rule.autoMitigate}`]);
-    }
-    if (verdict.problems.length === 0) return { ...verdict, state: 'OK' };
-    return { ...verdict, state: verdict.problems[0][0], problems: verdict.problems.map(([, text]) => text) };
-  });
+/**
+ * UNREADABLE entries a read has contradicted: a subscription recorded as
+ * unreadable in which some list came back. Reported, not failed, so the entry
+ * is deleted with the grant that made it stale.
+ */
+export function staleUnreadable(rules, live, unreadable = UNREADABLE) {
+  const readOk = new Set(
+    rules
+      .filter((r) => live.lists.get(listKey(r.subscription, r.resourceGroup, r.armType))?.status === 'ok')
+      .map((r) => r.subscription)
+  );
+  return Object.keys(unreadable).filter((subscription) => readOk.has(subscription));
 }
 
 /** Live rules in the groups read that no declaration names. */
@@ -363,10 +437,14 @@ export function undeclared(rules, live) {
 }
 
 /** Problems with the action groups themselves. */
-export function actionGroupProblems(rules, live) {
+export function actionGroupProblems(rules, live, unreadable = UNREADABLE) {
   return uniqueActionGroups(rules).map((group) => {
     const read = live.actionGroups.get(group.address) ?? { status: 'failed', reason: 'not read' };
-    if (read.status !== 'ok') return { group, state: readFailureLabel(read), problems: [read.reason], read };
+    if (read.status !== 'ok') {
+      const state = readFailureLabel(read, group.subscription, unreadable);
+      const detail = state === 'UNREADABLE' ? `${unreadable[group.subscription].record} (${read.reason})` : read.reason;
+      return { group, state, problems: [detail], read };
+    }
     const problems = [];
     if (!read.enabled) problems.push('the action group is disabled');
     if (!read.receivers.some((r) => r.status === 'Enabled')) problems.push('no receiver has status Enabled');
@@ -378,9 +456,58 @@ export function actionGroupProblems(rules, live) {
 // The report
 // ---------------------------------------------------------------------------
 
-const cell = (value) => (value === undefined || value === null || value === '' ? '—' : `\`${value}\``);
+/**
+ * Text made safe for one cell of a Markdown table (code scanning, #1051).
+ *
+ * A pipe ends the cell, so it is escaped as `\|`; and because that escape is
+ * a backslash, a backslash already in the text is escaped first, or `\|` in
+ * an ARM error message would arrive as an escaped backslash and a bare pipe.
+ * Line breaks end the row, so they become spaces.
+ */
+export function tableCell(text) {
+  return String(text).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+}
 
-export function renderReport({ rules, verdicts, extra, groups, when, subscriptionsRead }) {
+/** A value shown in code style, or a dash for nothing. */
+const cell = (value) => (value === undefined || value === null || value === '' ? '—' : `\`${tableCell(value)}\``);
+
+/** The closing lines: the verdict in one sentence, and what the states mean. */
+function summaryLines(verdicts, groups, stale) {
+  const failing = verdicts.filter((v) => FAILING.has(v.state)).length + groups.filter((g) => FAILING_GROUP.has(g.state)).length;
+  const unread = verdicts.filter((v) => v.state === 'UNREADABLE').length;
+  const unreadGroups = groups.filter((g) => g.state === 'UNREADABLE').length;
+  const lines = [''];
+  if (failing === 0 && unread + unreadGroups === 0) {
+    lines.push('**Every expected rule is live, enabled and wired to its action group.**');
+  } else if (failing === 0) {
+    lines.push(
+      `**Every rule this identity can read is live, enabled and wired.** ${unread} rule(s) and ${unreadGroups} ` +
+        'action group(s) are in a subscription it cannot read yet, recorded in `UNREADABLE`: their state is ' +
+        '**unknown**, not healthy.'
+    );
+  } else {
+    lines.push(`**${failing} finding(s).** Each is named in the State column above.`);
+  }
+  if (verdicts.some((v) => v.state === 'NOT AUTHORIZED') || groups.some((g) => g.state === 'NOT AUTHORIZED')) {
+    lines.push(
+      '',
+      '`NOT AUTHORIZED` means this identity could not read that resource group, so the state of the rules in it ' +
+        'is unknown; it is not the same finding as `MISSING`. The Detail column says why, and `infra/oidc.tf` ' +
+        'holds the grants of `github_reader`, the identity this workflow signs in as.'
+    );
+  }
+  for (const subscription of stale) {
+    lines.push(
+      '',
+      `**\`${subscription}\` is readable now**, so its \`UNREADABLE\` entry in \`scripts/verify-alert-state.mjs\` ` +
+        'is stale. Delete it, so a later refusal there fails the run again.'
+    );
+  }
+  return lines;
+}
+
+/** The job-summary report: one row per rule, one per action group, then the verdict. */
+export function renderReport({ rules, verdicts, extra, groups, when, subscriptionsRead, stale = [] }) {
   const lines = ['## Alert rule state', ''];
   const where = new Set(rules.map((r) => `\`${r.resourceGroup}\` (${r.subscription})`));
   lines.push(
@@ -395,7 +522,7 @@ export function renderReport({ rules, verdicts, extra, groups, when, subscriptio
   lines.push('| --- | --- | --- | :---: | :---: | --- | --- | :---: | --- |');
   for (const v of verdicts) {
     const l = v.live ?? {};
-    const detail = [...v.problems, ...v.notes].join('; ').replace(/\|/g, '\\|');
+    const detail = tableCell([...v.problems, ...v.notes].join('; '));
     lines.push(
       `| \`${v.rule.name}\` | \`${v.rule.resourceGroup}\` | **${v.state}** | ${cell(l.enabled)} | ${cell(l.autoMitigate)} | ` +
         `${cell(l.evaluationFrequency)} | ${cell(l.windowSize)} | ${cell(l.severity)} | ${detail || ''} |`
@@ -403,31 +530,41 @@ export function renderReport({ rules, verdicts, extra, groups, when, subscriptio
   }
   lines.push('', '### Action groups', '', '| Action group | Resource group | State | Receivers | Detail |', '| --- | --- | --- | --- | --- |');
   for (const g of groups) {
-    const receivers = g.read?.receivers?.map((r) => `${r.kind} \`${r.name}\` ${r.status}`).join(', ') ?? '—';
-    lines.push(`| \`${g.group.name}\` | \`${g.group.resourceGroup}\` | **${g.state}** | ${receivers} | ${g.problems.join('; ').replace(/\|/g, '\\|')} |`);
+    const receivers = g.read?.receivers?.map((r) => `${r.kind} \`${tableCell(r.name)}\` ${tableCell(r.status)}`).join(', ') ?? '—';
+    lines.push(`| \`${g.group.name}\` | \`${g.group.resourceGroup}\` | **${g.state}** | ${receivers} | ${tableCell(g.problems.join('; '))} |`);
   }
   if (extra.length > 0) {
     lines.push('', '### Live rules no declaration names', '');
     lines.push('These page if they fire, and nothing in `infra/` manages them. Not a failure; delete or declare them.', '');
     for (const { rule } of extra) lines.push(`- \`${rule.name}\` (${rule.armType}, enabled ${rule.enabled})`);
   }
-  lines.push('');
-  const failing = verdicts.filter((v) => FAILING.has(v.state)).length + groups.filter((g) => g.state !== 'OK').length;
-  const denied = verdicts.some((v) => v.state === 'NOT AUTHORIZED') || groups.some((g) => g.state === 'NOT AUTHORIZED');
-  if (failing === 0) {
-    lines.push('**Every expected rule is live, enabled and wired to its action group.**');
-  } else {
-    lines.push(`**${failing} finding(s).** Each is named in the State column above.`);
-    if (denied) {
-      lines.push(
-        '',
-        '`NOT AUTHORIZED` means this identity could not read that resource group, so the state of the rules in it ' +
-          'is unknown; it is not the same finding as `MISSING`. The Detail column says why, and `infra/oidc.tf` ' +
-          'holds the grants of `github_reader`, the identity this workflow signs in as.'
-      );
-    }
-  }
+  lines.push(...summaryLines(verdicts, groups, stale));
   return `${lines.join('\n')}\n`;
+}
+
+/** Whether a run with these verdicts fails. UNREADABLE and gated-off rules do not. */
+export function runFails(verdicts, groups, subscriptionsRead) {
+  if (subscriptionsRead?.status !== 'ok') return true;
+  return verdicts.some((v) => FAILING.has(v.state)) || groups.some((g) => FAILING_GROUP.has(g.state));
+}
+
+/**
+ * GitHub Actions warning annotations, one per subscription recorded as
+ * unreadable, so a green run still shows the gap on its summary page.
+ */
+export function unreadableWarnings(verdicts, groups) {
+  const bySubscription = new Map();
+  for (const v of verdicts.filter((x) => x.state === 'UNREADABLE')) {
+    bySubscription.set(v.rule.subscription, (bySubscription.get(v.rule.subscription) ?? 0) + 1);
+  }
+  for (const g of groups.filter((x) => x.state === 'UNREADABLE')) {
+    if (!bySubscription.has(g.group.subscription)) bySubscription.set(g.group.subscription, 0);
+  }
+  return [...bySubscription].map(
+    ([subscription, count]) =>
+      `::warning title=Alert rules not readable::${count} declared rule(s) in ${subscription} were not read: ` +
+      `${UNREADABLE[subscription]?.record ?? 'not recorded'}. Their state is unknown.`
+  );
 }
 
 /** The declared inventory as a table, for --list. */
@@ -455,6 +592,7 @@ exit 0  every expected rule is live, enabled and wired
 exit 1  at least one finding, named in the report
 exit 2  the check could not run`;
 
+/** The command line: --list, --help, or the live comparison. Resolves to the exit code. */
 async function main(argv) {
   let args;
   try {
@@ -497,17 +635,19 @@ async function main(argv) {
   const verdicts = compare(rules, live);
   const groups = actionGroupProblems(rules, live);
   const extra = undeclared(rules, live);
+  const stale = staleUnreadable(rules, live);
   const when = new Date().toISOString().replace(/:\d\d\.\d+Z$/, ' UTC').replace('T', ' ');
-  const report = renderReport({ rules, verdicts, extra, groups, when, subscriptionsRead: live.subscriptionsRead });
+  const report = renderReport({ rules, verdicts, extra, groups, when, subscriptionsRead: live.subscriptionsRead, stale });
 
   // Both destinations, as before: the summary for a person on a phone, stdout
   // for the logs API, which does not expose the summary.
   process.stdout.write(report);
   if (args.options.summary) appendFileSync(args.options.summary, report);
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    for (const line of unreadableWarnings(verdicts, groups)) console.log(line);
+  }
 
-  if (live.subscriptionsRead.status !== 'ok') return 1;
-  const failing = verdicts.some((v) => FAILING.has(v.state)) || groups.some((g) => g.state !== 'OK');
-  return failing ? 1 : 0;
+  return runFails(verdicts, groups, live.subscriptionsRead) ? 1 : 0;
 }
 
 // pathToFileURL, not a `file://` template: see entrypoint-guards.test.mjs.

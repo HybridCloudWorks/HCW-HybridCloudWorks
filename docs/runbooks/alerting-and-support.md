@@ -244,8 +244,9 @@ per declared rule to the job summary (legible from a phone) and to the log:
 | `MISSING` | Declared, not live. If the detail says the create is **waiting for an apply**, `scripts/assert-expected-plan.mjs` declares it and the run has not been confirmed | Confirm the pending run in the `hcw-azure` workspace; otherwise the rule was deleted out of band, and an apply restores it |
 | `DISABLED` | Live with `enabled: false`; nothing in `infra/` disables a rule, so this was done by hand | Find out who and why first (the Activity Log has the write), then re-apply |
 | `NOT WIRED` | Live, but its actions do not name the ops action group | Re-apply; the rule pages nobody until then |
-| `DRIFT` | `autoMitigate` differs from the declaration | Re-apply |
+| `DRIFT` | `autoMitigate` differs from the declaration, or a `count`-gated rule is live while `GATES` records its gate as off | Re-apply; for a gate, correct `GATES` if the gate was armed on purpose |
 | `NOT AUTHORIZED` | The workflow's identity could not read that resource group. The rules' state is **unknown**, which is not the same finding as `MISSING` | See the identity note below |
+| `UNREADABLE` | The same refusal, in a subscription the script's `UNREADABLE` table records as not yet readable. Shown in every run and as a warning annotation; the state is **unknown**. Does not fail the run | Decide the grant below; once it applies, the report says the entry is stale, and it is deleted |
 | `READ FAILED` | ARM answered with some other error; the detail carries the status and code, with IDs masked | Re-run; if it repeats, the detail says what ARM refused |
 | `ABSENT` | A `count`-gated rule whose gate `GATES` does not record, and absent. Not a failure, and not a pass either | Record the gate in `GATES`; the test suite already refuses a new gate without an entry |
 | `GATED OFF` | A `count`-gated rule whose gate is recorded as off (`GATES` in the script), and absent | Nothing. Arming the gate is an owner decision; record it in `GATES` in the same change |
@@ -256,12 +257,19 @@ the address and number are not, because the report is public. A live rule that
 no declaration names is listed and does not fail the run.
 
 **The identity, and what it cannot yet read.** The job runs as `github_reader`
-(`READER_CLIENT_ID`), which writes nowhere in the estate and holds Reader on
-`rg-web-site-prod-cus` (`infra/oidc.tf`). It holds **nothing in the Management
-subscription**, so until a read grant on `rg-mgmt-plat-prod-cus` is applied,
-the capacity rule, the lab rules and the action group report
-`NOT AUTHORIZED` and every run is red on them. That is deliberate: an unknown
-state is not a pass. The grant is the owner's decision, recorded on #964.
+(`READER_CLIENT_ID`) and makes only GET calls. The identity is not purely a
+reader, though: besides Reader on `rg-web-site-prod-cus` and the app-settings
+list action, it holds the origin-window role on the Function App, a config
+write `publish-content-manifest.yml` needs (`infra/oidc.tf`). It holds
+**nothing in the Management subscription**, so until a read grant on
+`rg-mgmt-plat-prod-cus` is applied, the capacity rule, the lab rules and the
+action group report `UNREADABLE`: listed in every run, raised as a warning on
+the run page, and called unknown, never healthy. The run itself passes or
+fails on the rules it can read, because a monitor that is red every week for a
+reason everyone knows gets muted. The grant is the owner's decision, recorded
+on #964; a verification-only identity holding just the four alert-rule and
+action-group read actions in both groups is the narrower alternative to
+widening `github_reader`.
 
 The same check runs from an operator's machine under the operator's own
 rights, which do reach the Management subscription. Run it from the repository

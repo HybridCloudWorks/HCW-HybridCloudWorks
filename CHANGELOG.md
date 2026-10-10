@@ -4260,8 +4260,15 @@ This project has not cut a tagged release; entries are grouped under
   - The workflow runs every Monday at 07:53 UTC and on dispatch, still as
     `github_reader`. **That identity holds no role in the Management
     subscription**, so the capacity and lab rules and the action group report
-    `NOT AUTHORIZED` until the owner grants a read on
-    `rg-mgmt-plat-prod-cus`; this change does not widen it.
+    `UNREADABLE` until the owner grants a read on `rg-mgmt-plat-prod-cus`:
+    listed in every run and raised as a warning, their state called unknown,
+    while the run passes or fails on what it can read. A weekly red run for a
+    gap everyone knows is how `validate-deployed.yml` came to be ignored. A
+    refusal anywhere else still fails, and the report says when the
+    `UNREADABLE` entry has gone stale. This change does not widen the
+    identity. A rule live while its `count` gate is recorded off is `DRIFT`.
+    The workflow and runbook no longer call `github_reader` a pure reader: it
+    also holds the origin-window config write on the Function App.
   - Delivery was proven on 2026-08-30: a CLI test notification reached
     `ops-email` and then `ops-sms` (T-709), and the cross-subscription hop
     had delivered on 2026-08-25 when `alert-app-exceptions-prod-cus` fired.

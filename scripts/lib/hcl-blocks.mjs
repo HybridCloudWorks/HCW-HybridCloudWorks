@@ -22,6 +22,7 @@ const CLOSERS = new Set(['}', ')', ']']);
 const HEREDOC = /<<(-?)([A-Za-z_][A-Za-z0-9_]*)\r?\n/y;
 const IDENT = /[A-Za-z_][A-Za-z0-9_-]*/y;
 
+/** Throw a scan error that names where in the source it happened. */
 function fail(message, offset) {
   throw new Error(`${message} at offset ${offset}`);
 }
@@ -32,6 +33,7 @@ function lineEnd(src, i) {
   return n === -1 ? src.length : n;
 }
 
+/** Index just past the block comment whose opening slash-star is at `i`. */
 function skipBlockComment(src, i) {
   const end = src.indexOf('*/', i + 2);
   if (end === -1) fail('unterminated /* comment', i);
@@ -167,6 +169,7 @@ function skipTrivia(src, i) {
   return j;
 }
 
+/** The identifier that starts at `i`, or null when none does. */
 function readIdent(src, i) {
   IDENT.lastIndex = i;
   const m = IDENT.exec(src);

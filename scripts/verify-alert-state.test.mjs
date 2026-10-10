@@ -25,8 +25,14 @@ import {
   pendingCreates,
   readLive,
   renderReport,
+  readFailureLabel,
+  runFails,
+  staleUnreadable,
   summariseActionGroup,
+  tableCell,
   undeclared,
+  unreadableWarnings,
+  UNREADABLE,
 } from './verify-alert-state.mjs';
 
 const REPO = join(INFRA, '..');
@@ -330,6 +336,7 @@ const IDS = new Map([
 const OPS = { address: 'azurerm_monitor_action_group.ops', name: 'ag-ops', resourceGroup: 'rg-mgmt', subscription: MGMT };
 const OPS_ID = `/subscriptions/${IDS.get(MGMT)}/resourceGroups/rg-mgmt/providers/microsoft.insights/actionGroups/ag-ops`;
 
+/** A declared rule, as declaredAlertRules() returns one, with overrides. */
 function rule(overrides = {}) {
   return {
     address: 'azurerm_monitor_scheduled_query_rules_alert_v2.r',
@@ -347,6 +354,7 @@ function rule(overrides = {}) {
   };
 }
 
+/** A live rule, as normaliseRule() returns one, wired to OPS by default. */
 function liveRule(overrides = {}) {
   return {
     name: 'alert-r',
@@ -358,6 +366,7 @@ function liveRule(overrides = {}) {
   };
 }
 
+/** A readLive() result holding an empty list for each rule's group, then the given [declared, live] pairs. */
 function liveWith(rules, entries) {
   const lists = new Map();
   for (const r of rules) {
@@ -446,9 +455,11 @@ describe('compare', () => {
     const on = { g: { armed: true, record: 'armed' } };
     expect(compare([r], liveWith([r], []), { gates: off, pending: new Map() })[0].state).toBe('GATED OFF');
     expect(compare([r], liveWith([r], []), { gates: on, pending: new Map() })[0].state).toBe('MISSING');
+    // Live while recorded off fails (review of #1051): Terraform's count is 0
+    // for an off gate, so the rule is either hand-made or the record is wrong.
     const [present] = compare([r], liveWith([r], [[r, liveRule()]]), { gates: off, pending: new Map() });
-    expect(present.state).toBe('OK');
-    expect(present.notes.join(' ')).toMatch(/correct the record/);
+    expect(present.state).toBe('DRIFT');
+    expect(present.problems.join(' ')).toMatch(/live although GATES records var\.g as off; correct the record/);
   });
 
   it('does not guess at a gate nothing records', () => {
@@ -462,6 +473,49 @@ describe('compare', () => {
     const r = rule();
     const live = liveWith([r], [[r, liveRule()], [r, liveRule({ name: 'hand-made' })]]);
     expect(undeclared([r], live).map((x) => x.rule.name)).toEqual(['hand-made']);
+  });
+});
+
+describe('UNREADABLE', () => {
+  it('turns only a refusal in a recorded subscription into a non-failing state', () => {
+    const recorded = { 'sub-mgmt': { record: 'no grant yet' } };
+    expect(readFailureLabel({ status: 'denied' }, 'sub-mgmt', recorded)).toBe('UNREADABLE');
+    expect(readFailureLabel({ status: 'not-visible' }, 'sub-mgmt', recorded)).toBe('UNREADABLE');
+    // A 401, a 5xx or a 404 is not the recorded gap, and still fails.
+    expect(readFailureLabel({ status: 'unauthenticated' }, 'sub-mgmt', recorded)).toBe('NOT AUTHORIZED');
+    expect(readFailureLabel({ status: 'failed' }, 'sub-mgmt', recorded)).toBe('READ FAILED');
+    expect(readFailureLabel({ status: 'group-not-found' }, 'sub-mgmt', recorded)).toBe('READ FAILED');
+    expect(readFailureLabel({ status: 'denied' }, 'sub-app', recorded)).toBe('NOT AUTHORIZED');
+  });
+
+  it('records only subscriptions a declared rule lives in', () => {
+    const subscriptions = new Set(declaredAlertRules(terraformSource()).map((r) => r.subscription));
+    for (const name of Object.keys(UNREADABLE)) expect(subscriptions.has(name), name).toBe(true);
+  });
+});
+
+describe('tableCell', () => {
+  it('escapes a backslash before the pipe it uses to escape, and flattens line breaks', () => {
+    // Code scanning js/incomplete-sanitization on #1051: escaping the pipe
+    // alone turned `a\|b` into `a\\|b`, an escaped backslash and a bare pipe
+    // that splits the cell.
+    expect(tableCell('a|b')).toBe('a\\|b');
+    expect(tableCell('a\\b')).toBe('a\\\\b');
+    expect(tableCell('a\\|b')).toBe('a\\\\\\|b');
+    expect(tableCell('one\r\ntwo\nthree')).toBe('one two three');
+    expect(tableCell(42)).toBe('42');
+  });
+
+  it('keeps an ARM message with a backslash and a pipe inside one cell of the report', () => {
+    const r = rule();
+    const live = liveWith([r], []);
+    live.lists.set(`${APP}|rg-web|${r.armType}`, { status: 'failed', reason: 'HTTP 500: path C:\\x | y' });
+    const verdicts = compare([r], live, { pending: new Map() });
+    const report = renderReport({ rules: [r], verdicts, extra: [], groups: [], when: 'now', subscriptionsRead: { status: 'ok' } });
+    const row = report.split('\n').find((line) => line.startsWith('| `alert-r`'));
+    // Ten unescaped pipes make the nine cells of the row; an escaped one does not count.
+    expect(row.match(/(?<!\\)(?:\\\\)*\|/g)).toHaveLength(10);
+    expect(row).toContain('C:\\\\x \\| y');
   });
 });
 
@@ -488,7 +542,8 @@ describe('the action group', () => {
       { kind: 'email', name: 'ops-email', status: 'Enabled' },
       { kind: 'sms', name: 'ops-sms', status: 'Enabled' },
     ]);
-    expect(JSON.stringify(summary)).not.toMatch(/example\.com|5555550100/);
+    expect(JSON.stringify(summary)).not.toContain('owner@example.com');
+    expect(JSON.stringify(summary)).not.toContain('5555550100');
   });
 
   it('fails a disabled group, and one whose receivers are all off', () => {
@@ -507,6 +562,7 @@ describe('the action group', () => {
 // The ARM reader, against a fake ARM
 // ---------------------------------------------------------------------------
 
+/** A fetch stand-in answering from [pattern, [status, body]] routes, recording each call. */
 function fakeArm(routes) {
   const calls = [];
   const fetchImpl = async (url, init) => {
@@ -578,7 +634,9 @@ describe('readLive and the report, end to end on the real inventory', () => {
     const out = [[/\/subscriptions\?api-version=/, [200, { value: subs }]]];
     out.push([
       /\/actionGroups\//,
-      [200, { properties: { enabled: true, emailReceivers: [{ name: 'ops-email', emailAddress: 'x@example.com', status: 'Enabled' }] } }],
+      deny === ag.subscription
+        ? [403, { error: { code: 'AuthorizationFailed', message: 'no' } }]
+        : [200, { properties: { enabled: true, emailReceivers: [{ name: 'ops-email', emailAddress: 'x@example.com', status: 'Enabled' }] } }],
     ]);
     for (const r of rules) {
       const pattern = new RegExp(`/subscriptions/${idOf(r.subscription)}/resourceGroups/${r.resourceGroup}/providers/${r.armType}\\?`);
@@ -602,21 +660,61 @@ describe('readLive and the report, end to end on the real inventory', () => {
     const report = renderReport({ rules, verdicts, extra: [], groups, when: 'now', subscriptionsRead: live.subscriptionsRead });
     for (const r of rules) expect(report).toContain(`\`${r.name}\``);
     expect(report).toMatch(/Every expected rule is live, enabled and wired/);
-    expect(report).not.toMatch(/example\.com/);
+    expect(report).not.toContain('x@example.com');
     for (const call of calls) expect(call.url.startsWith(`${ARM}/`)).toBe(true);
     for (const path of Object.keys(API_VERSIONS).filter((k) => k.includes('/'))) {
       expect(calls.some((c) => c.url.includes(`${path}?api-version=${API_VERSIONS[path]}`))).toBe(rules.some((r) => r.armType === path));
     }
   });
 
-  it('marks every Management rule NOT AUTHORIZED when that read is refused, and fails', async () => {
+  it('marks a refused, unrecorded subscription NOT AUTHORIZED, and fails', async () => {
     const mgmt = rules.find((r) => r.subscription.includes('mgmt')).subscription;
     const { fetchImpl } = fakeArm(routes({ deny: mgmt }));
     const live = await readLive(rules, { token: 't', fetchImpl });
-    const verdicts = compare(rules, live, { pending: new Map() });
+    const verdicts = compare(rules, live, { pending: new Map(), unreadable: {} });
     for (const v of verdicts.filter((x) => x.rule.subscription === mgmt)) expect(v.state).toBe('NOT AUTHORIZED');
-    const report = renderReport({ rules, verdicts, extra: [], groups: actionGroupProblems(rules, live), when: 'now', subscriptionsRead: live.subscriptionsRead });
+    const groups = actionGroupProblems(rules, live, {});
+    const report = renderReport({ rules, verdicts, extra: [], groups, when: 'now', subscriptionsRead: live.subscriptionsRead });
     expect(report).toMatch(/not the same finding as `MISSING`/);
+    expect(runFails(verdicts, groups, live.subscriptionsRead)).toBe(true);
+  });
+
+  it('reports the recorded Management gap every run without failing on it, and still fails on the rest', async () => {
+    // Today's estate: github_reader may read rg-web-site-prod-cus and nothing
+    // in Management. The run is green on what it can read, says which rules
+    // it could not, and is red the moment a readable rule is wrong.
+    const mgmt = rules.find((r) => r.subscription.includes('mgmt')).subscription;
+    expect(UNREADABLE[mgmt], 'the Management subscription is recorded').toBeDefined();
+    const { fetchImpl } = fakeArm(routes({ deny: mgmt }));
+    const live = await readLive(rules, { token: 't', fetchImpl });
+    const verdicts = compare(rules, live, { pending: new Map() });
+    const groups = actionGroupProblems(rules, live);
+    for (const v of verdicts.filter((x) => x.rule.subscription === mgmt)) {
+      expect(v.state).toBe('UNREADABLE');
+      expect(v.notes.join(' ')).toContain(UNREADABLE[mgmt].record);
+    }
+    expect(groups.map((g) => g.state)).toEqual(['UNREADABLE']);
+    expect(runFails(verdicts, groups, live.subscriptionsRead)).toBe(false);
+    const report = renderReport({ rules, verdicts, extra: [], groups, when: 'now', subscriptionsRead: live.subscriptionsRead });
+    expect(report).toMatch(/Every rule this identity can read is live, enabled and wired/);
+    expect(report).toMatch(/\*\*unknown\*\*, not healthy/);
+    const warnings = unreadableWarnings(verdicts, groups);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/^::warning title=Alert rules not readable::\d+ declared rule\(s\) in sub-plat-mgmt-prod-cus/);
+
+    const appRule = verdicts.find((v) => v.rule.subscription !== mgmt);
+    const broken = verdicts.map((v) => (v === appRule ? { ...v, state: 'MISSING' } : v));
+    expect(runFails(broken, groups, live.subscriptionsRead)).toBe(true);
+  });
+
+  it('says when the recorded gap has closed, so the entry is deleted with the grant', async () => {
+    const { fetchImpl } = fakeArm(routes());
+    const live = await readLive(rules, { token: 't', fetchImpl });
+    const stale = staleUnreadable(rules, live);
+    expect(stale).toEqual(Object.keys(UNREADABLE));
+    const verdicts = compare(rules, live, { pending: new Map() });
+    const report = renderReport({ rules, verdicts, extra: [], groups: actionGroupProblems(rules, live), when: 'now', subscriptionsRead: live.subscriptionsRead, stale });
+    expect(report).toMatch(/is readable now\*\*, so its `UNREADABLE` entry/);
   });
 
   it('reports a subscription it cannot see as invisible, not as an empty group', async () => {

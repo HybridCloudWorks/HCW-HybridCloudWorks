@@ -32,19 +32,29 @@
 # and they are opposite diagnoses: one means the alert fabric is gone, the
 # other that this workflow's own grant is.
 #
-# READ-ONLY, and structurally so. The identity is github_reader, which holds
-# nothing that writes anywhere in the estate, and every call the script makes is
-# an ARM GET: one token from `az account get-access-token`, then the
-# subscription list, the three alert rule lists per resource group, and each
-# action group. Its grant on rg-web-site-prod-cus is Reader (`*/read`).
+# READ-ONLY IN WHAT IT DOES: every call the script makes is an ARM GET: one
+# token from `az account get-access-token`, then the subscription list, the
+# three alert rule lists per resource group, and each action group. The
+# identity is github_reader, whose grant on rg-web-site-prod-cus is Reader
+# (`*/read`). It is not a pure reader, and this comment said it was until the
+# review of #1051: it also holds the app-settings list action and the
+# origin-window role on the Function App, a config write publish-content-
+# manifest needs (infra/oidc.tf). This job uses neither. A verification-only
+# identity holding just the alert-rule and action-group reads is the narrower
+# shape, and it is the owner's to choose along with the Management grant.
 #
 # THE MANAGEMENT SUBSCRIPTION IS NOT YET READABLE BY THIS IDENTITY. The
-# capacity rule and the three lab rules live in rg-mgmt-plat-prod-cus, with the
-# action group, and github_reader holds no role there (infra/oidc.tf). Until a
-# read grant on that resource group is applied, those rules and the action
-# group report NOT AUTHORIZED and this job fails on them: their state is
-# unknown, and an unknown is not a pass. PLAT-4's pull request records the
-# grant rather than making it; widening an identity is the owner's call.
+# capacity rule and the lab rules live in rg-mgmt-plat-prod-cus, with the
+# action group, and github_reader holds no role there (infra/oidc.tf). The
+# script records that gap in its UNREADABLE table: those rules and the action
+# group report UNREADABLE in every run's table and as a warning annotation,
+# with their state called unknown, and the run passes or fails on everything
+# it CAN read. Failing every week on a gap everyone already knows is how a
+# monitor gets muted (validate-deployed.yml, deleted 2026-09-08 after three
+# weeks red); a refusal anywhere else, or any other read error, still fails.
+# When the read starts succeeding the report says the entry is stale. PLAT-4's
+# pull request records the grant rather than making it; widening an identity
+# is the owner's call.
 #
 # NO `environment:` KEY, deliberately. Declaring one changes the OIDC subject
 # GitHub presents from repo:<owner>/<repo>:ref:<ref> to
@@ -117,8 +127,10 @@ jobs:
           tenant-id: ${{ vars.TENANT_ID }}
           subscription-id: ${{ vars.SUBSCRIPTION_ID }}
 
-      # Exit 0: every expected rule is live, enabled and wired. Exit 1: a
-      # finding, named in the report. Exit 2: the check could not run, which
-      # fails the step the same way and is never reported as health.
+      # Exit 0: every rule it could read is live, enabled and wired (rules in
+      # a subscription UNREADABLE records are listed and raised as a warning
+      # annotation, never counted as healthy). Exit 1: a finding, named in the
+      # report. Exit 2: the check could not run, which fails the step the same
+      # way and is never reported as health.
       - name: Compare the declared rules with the live ones
         run: node scripts/verify-alert-state.mjs --summary "$GITHUB_STEP_SUMMARY"
