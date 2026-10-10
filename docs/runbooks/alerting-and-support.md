@@ -572,19 +572,23 @@ az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | 
 (az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).networkRuleSet.ipRules
 ```
 
-Record the address, then take the role and record its id, then open the
-firewall. Each change is recorded before or as it is made:
+Choose the role assignment's id before it exists, and record it with the
+address, so every change is in the record before it is made:
 
 ```powershell
-@{ ip = $ip; ra = '' } | ConvertTo-Json | Set-Content -LiteralPath $sf
+$ran = [guid]::NewGuid().Guid
 ```
 
 ```powershell
-$ra = (az role assignment create --assignee-object-id $me --assignee-principal-type User --role "Storage Queue Data Contributor" --scope $sa -o json | ConvertFrom-Json).id
+$ra = "$sa/providers/Microsoft.Authorization/roleAssignments/$ran"
 ```
 
 ```powershell
 @{ ip = $ip; ra = $ra } | ConvertTo-Json | Set-Content -LiteralPath $sf
+```
+
+```powershell
+az role assignment create --name $ran --assignee-object-id $me --assignee-principal-type User --role "Storage Queue Data Contributor" --scope $sa -o none
 ```
 
 ```powershell
@@ -604,8 +608,7 @@ az storage queue create --name platform-jobs-poison --account-name stsitefuncpro
 az storage message put --queue-name platform-jobs-poison --account-name stsitefuncprodcus01 --auth-mode login --content plat4-fire-test --time-to-live 900 -o none
 ```
 
-Then undo both, whether or not the put worked, by the recorded address and id,
-and remove the record:
+Then undo both, whether or not the put worked, by the recorded address and id:
 
 ```powershell
 az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-web-site-prod-cus --ip-address $ip -o none
@@ -613,10 +616,6 @@ az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-
 
 ```powershell
 az role assignment delete --ids $ra
-```
-
-```powershell
-Remove-Item -LiteralPath $sf
 ```
 
 Success is `alert-jobs-poison-prod-cus` within about 30 minutes, and the two
@@ -630,9 +629,18 @@ az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | 
 (az storage account show -n stsitefuncprodcus01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json).networkRuleSet.ipRules
 ```
 
+Only once both print nothing, remove the record. Until then it is what a
+recovery works from:
+
+```powershell
+Remove-Item -LiteralPath $sf
+```
+
 **If the test was interrupted**, recover from the record, in any window, still
 alone. It removes the address the test opened, even if this machine's address
-has changed since, and the assignment the test created:
+has changed since, and the assignment the test created or was about to create.
+A delete that answers that the assignment does not exist means the run stopped
+before creating it, which is fine:
 
 ```powershell
 $s = Get-Content -LiteralPath (Join-Path $HOME 'plat4-poison-test.json') -Raw | ConvertFrom-Json
@@ -646,17 +654,8 @@ az storage account network-rule remove --account-name stsitefuncprodcus01 -g rg-
 az role assignment delete --ids $s.ra
 ```
 
-If `$s.ra` is empty, the run stopped between creating the role and recording
-it. Then the role the test made is the only one there, because the stop
-conditions held and the test ran alone, so list it and delete it by its id.
-Set `$sa` and `$me` again first if this is a new window:
-
-```powershell
-az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Where-Object roleDefinitionName -eq 'Storage Queue Data Contributor' | Select-Object id, roleDefinitionName, scope
-```
-
-Then delete the record, and finish with the two verification reads above, which
-should both print nothing:
+Then run the two verification reads above (set `$sa` and `$me` again first in
+a new window). Only once both print nothing, delete the record:
 
 ```powershell
 Remove-Item -LiteralPath (Join-Path $HOME 'plat4-poison-test.json')
