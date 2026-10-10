@@ -188,6 +188,8 @@ async function readHealth(fetchImpl, config) {
       signal: controller.signal,
     });
     if (response.status !== 200) {
+      // End the exchange before the deadline is cleared: a rejected answer's body is never read, so cancel it.
+      await response.body?.cancel?.().catch(() => {});
       throw Object.assign(new Error(`the health read answered ${response.status}`), {
         status: response.status,
       });

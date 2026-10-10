@@ -312,6 +312,16 @@ describe('getAddonStatus', () => {
     expectNoUrl(res.body, ...context.warn.mock.calls.flat(), ...context.error.mock.calls.flat());
   });
 
+  it('cancels the body of a rejected answer so the exchange ends with the deadline', async () => {
+    streamCancel.mockClear();
+    const res = await handlers({ fetchImpl: () => Promise.resolve(streamed('nope', 503)) }).getAddonStatus(
+      request('migration'),
+      context
+    );
+    expect(body(res)).toMatchObject({ configured: true, reachable: false });
+    expect(streamCancel).toHaveBeenCalledTimes(1);
+  });
+
   it('reads a streamed health body and cancels one that passes the budget', async () => {
     streamCancel.mockClear();
     const small = await handlers({ fetchImpl: () => Promise.resolve(streamed(JSON.stringify(HEALTH))) }).getAddonStatus(
