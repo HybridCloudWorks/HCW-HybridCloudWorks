@@ -17,7 +17,7 @@ the changelog.
 
 ## Where the open items live
 
-The board: https://github.com/users/saulpatinojr/projects/6 (the owner's private Work Board) — every open
+The board: https://github.com/users/saulpatinojr/projects/6 (the HCW Work Board, public) — every open
 issue, with a Priority (`P1 now` / `P2 next` / `P3 later` / `Gated`). The
 issues list behind it: https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues
 
