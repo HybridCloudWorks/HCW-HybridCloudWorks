@@ -19,6 +19,7 @@
 
 import React from 'react';
 import {
+  ArrowRightLeft,
   Award,
   BookOpen,
   Bot,
@@ -271,6 +272,23 @@ async function testHybridLab() {
   return `${base}${describeTokenExpiry(expiry)}`;
 }
 
+async function testMigrationAddon() {
+  // The pane page's own read (public/addons/migration/status), which the
+  // server answers from ADDON_MIGRATION_URL and caches for a minute. The
+  // body is a six-field projection; version and edition are what an
+  // operator wants to read here.
+  const res = await getJSON('public/addons/migration/status');
+  if (!res?.configured) {
+    throw new Error('The migration add-on is not configured: ADDON_MIGRATION_URL is not set.');
+  }
+  if (!res.reachable) {
+    throw new Error(
+      'The migration add-on is configured but did not answer its health read within 5 s.'
+    );
+  }
+  return `Connected: version ${res.version ?? 'unknown'}, edition ${res.edition ?? 'unknown'}.`;
+}
+
 async function testCloudPricing() {
   // The public read the comparison page makes, for the default region, and
   // always FRESH: a diagnostic that could answer from the browser's copy would
@@ -355,6 +373,12 @@ export const SERVICE_GROUPS = Object.freeze([
     title: 'Hybrid Lab',
     blurb:
       'The browser workspaces learners open from the labs page, and the check that lets the Landing Zone Builder send the lab a job.',
+  },
+  {
+    id: 'addons',
+    title: 'Tool add-ons',
+    blurb:
+      'Independently built tools the site shows in a pane under Tools, each with its own status read.',
   },
 ]);
 
@@ -810,6 +834,29 @@ export const SERVICES = Object.freeze([
       'Inbound: workspace status comes from Coder, and the lab host hands over a renewed status token; a Turnstile token goes to Cloudflare to verify.',
     securityNote:
       'The status token is read-only in Coder and never reaches a browser; a renewed one from the lab host is stored only after Coder shows it is a working, read-only key of the status user. The Turnstile secret goes to Cloudflare siteverify and nowhere else.',
+  },
+
+  // ── Tool add-ons (ADR 0035) ─────────────────────────────────────────────
+  {
+    id: 'migration-addon',
+    group: 'addons',
+    icon: ArrowRightLeft,
+    name: 'Migration add-on',
+    description:
+      'The Azure migration assessment shown in a pane on the Migration Hub: its own container on the lab host, read through the status proxy.',
+    url: 'https://github.com/saulpatinojr/HCW-AzMigrateOrchestrator_Addon/releases',
+    // The pane page's own read, cached server-side.
+    test: testMigrationAddon,
+    // No site secret: the add-on's human-verification secret lives in the
+    // lab host's Ansible vault (vault_addon_migration_turnstile_secret) and
+    // is listed on Credentials, not here.
+    secrets: [],
+    capabilities: ['Read the add-on version and edition', 'Decide whether the pane opens'],
+    usedIn: ['Tools (Migration Hub)'],
+    dataDirection:
+      'Inbound only: the Function App reads the add-on’s health; the add-on holds no site credential and nothing goes out to it.',
+    securityNote:
+      'The address is a plain app setting (ADDON_MIGRATION_URL), public because it is the frame’s source and in the CSP. The browser never calls the add-on’s API; a visitor’s upload goes to the add-on inside the pane and is held in memory for at most two hours.',
   },
 ]);
 

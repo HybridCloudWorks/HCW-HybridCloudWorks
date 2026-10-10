@@ -1,0 +1,191 @@
+---
+# Fail closed before touching the host: whatever the variables say, every
+# add-on is published on the loopback only, on its own port, and never
+# without the vault key its environment names.
+- name: Refuse to publish an add-on anywhere but the host's loopback
+  ansible.builtin.assert:
+    that:
+      - addons_publish_address == '127.0.0.1'
+    fail_msg: >-
+      Add-ons would be published on {{ addons_publish_address }}. They are reached through Caddy
+      alone, so they are published on 127.0.0.1 only (ADR 0035; roles/addons/README.md).
+    quiet: true
+
+- name: Refuse an add-on row without an integer port of its own, or two rows with one id
+  ansible.builtin.assert:
+    that:
+      - addons_active | map(attribute='port') | reject('integer') | list | length == 0
+      - addons_active | map(attribute='port') | select('lt', 1024) | list | length == 0
+      - addons_active | map(attribute='port') | select('gt', 65535) | list | length == 0
+      - addons_active | map(attribute='port') | unique | length == addons_active | length
+      - addons_active | map(attribute='id') | unique | length == addons_active | length
+      - addons_active | map(attribute='id') | reject('match', '^[a-z0-9]+(-[a-z0-9]+)*$') | list | length == 0
+    fail_msg: >-
+      Every row of addons in group_vars/all.yml needs an id of lowercase letters, digits and
+      hyphens and an integer port between 1024 and 65535 that no other row uses; found
+      {{ addons_active | map(attribute='id') | zip(addons_active | map(attribute='port')) | list }}.
+    quiet: true
+
+- name: Refuse an add-on digest that is not a sha256 image digest
+  ansible.builtin.assert:
+    that:
+      - item.image_digest | default('') == '' or item.image_digest is match('^sha256:[0-9a-f]{64}$')
+    fail_msg: >-
+      {{ item.id }}: image_digest must be empty (not deployed yet) or sha256: followed by 64 hex
+      characters, the image index digest the add-on's publish-images summary prints; found
+      {{ item.image_digest | default('') }}.
+    quiet: true
+  loop: "{{ addons_active }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+# Every secret_env value names a vault key; the container is not started
+# while any of them is unset, because the add-on would then start without
+# human verification or refuse to start, and either is better said here.
+# The loop prints key NAMES only; the values are never looked at outside
+# the assertion.
+- name: Collect the vault keys the enabled add-ons need
+  ansible.builtin.set_fact:
+    addons_secret_refs: >-
+      {{ addons_secret_refs | default([])
+         + (item.secret_env | default({}) | dict2items | map('combine', {'id': item.id}) | list) }}
+  loop: "{{ addons_running }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Refuse to start an add-on whose vault key is not set
+  ansible.builtin.assert:
+    that:
+      - lookup('ansible.builtin.vars', item.value, default='') | length > 0
+    fail_msg: >-
+      hcw-addon-{{ item.id }} needs {{ item.key }} from the vault key {{ item.value }}, which is not
+      set. Set it from the workstation with the add-on's secret on the clipboard:
+      (Get-Clipboard -Raw) | ssh hcw-lab "sudo -n /usr/local/sbin/hcw-vault-set {{ item.value }}"
+      (lab-host/README.md, "Tool add-ons"), then re-run bootstrap.sh.
+    quiet: true
+  loop: "{{ addons_secret_refs | default([]) }}"
+  loop_control:
+    label: "{{ item.id }}: {{ item.key }} from {{ item.value }}"
+
+# A row whose digest is still empty is not deployed: its release has not
+# been published yet (lab-host/README.md, "Tool add-ons"). The route is
+# rendered all the same, so its name answers the site's sentence with 503
+# and the site's status proxy reads the add-on as unreachable, which is the
+# truth. The run says so rather than failing, because the other roles must
+# still converge.
+- name: Say which enabled add-ons have no digest yet and are not deployed
+  ansible.builtin.debug:
+    msg: >-
+      hcw-addon-{{ item.id }} is enabled but addons[].image_digest for {{ item.id }} is empty in
+      group_vars/all.yml, so nothing is pulled or run for it and its name answers 503. Put the
+      digest the add-on's publish-images summary prints there and re-run bootstrap.sh.
+  loop: "{{ addons_running | rejectattr('image_digest') | list }}"
+  loop_control:
+    label: "{{ item.id }}"
+
+- name: Pull each deployable add-on image by digest
+  community.docker.docker_image_pull:
+    name: "{{ item.image }}@{{ item.image_digest }}"
+    platform: linux/amd64
+  loop: "{{ addons_running | selectattr('image_digest') | list }}"
+  loop_control:
+    label: "{{ item.id }}: {{ item.image }}@{{ item.image_digest }}"
+
+# One hardened container per row (ADR 0035 decision 6; the standard's
+# section 16): read-only root with /tmp on tmpfs, every capability dropped,
+# no new privileges, memory, pids and one CPU bounded, no volume, no socket,
+# the default bridge only, under the daemon's user-namespace remap (no
+# userns_mode: host), the image's own HEALTHCHECK, json-file logs capped.
+# The environment is the row's env plus each secret_env key read from its
+# vault variable, so no_log: the secret would otherwise be in the diff.
+# comparisons env strict: a key removed from the row is removed from the
+# container on the next run rather than kept.
+- name: Run each deployable add-on, published on the host's loopback only
+  community.docker.docker_container:
+    name: "hcw-addon-{{ item.id }}"
+    image: "{{ item.image }}@{{ item.image_digest }}"
+    pull: false
+    state: started
+    restart_policy: unless-stopped
+    published_ports:
+      - "{{ addons_publish_address }}:{{ item.port }}:{{ addons_container_port }}"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opts:
+      - no-new-privileges:true
+    memory: "{{ item.memory }}"
+    pids_limit: "{{ item.pids_limit }}"
+    cpus: 1
+    log_driver: json-file
+    log_options:
+      max-size: "{{ addons_log_max_size }}"
+      max-file: "3"
+    env: "{{ item.env | combine(addon_secret_values) }}"
+    comparisons:
+      env: strict
+      published_ports: strict
+  vars:
+    addon_secret_values: >-
+      {{ dict(item.secret_env | default({}) | dict2items | map(attribute='key')
+              | zip(item.secret_env | default({}) | dict2items | map(attribute='value')
+                    | map('extract', vars))) }}
+  no_log: true
+  loop: "{{ addons_running | selectattr('image_digest') | list }}"
+  loop_control:
+    label: "hcw-addon-{{ item.id }} on {{ addons_publish_address }}:{{ item.port }}"
+
+- name: Wait for each deployed add-on to answer its health read on the loopback
+  ansible.builtin.uri:
+    url: "http://{{ addons_publish_address }}:{{ item.port }}/api/health"
+    follow_redirects: none
+    status_code: 200
+  register: addons_health
+  until: addons_health.status == 200
+  retries: "{{ addons_wait_retries }}"
+  delay: "{{ addons_wait_delay }}"
+  loop: "{{ addons_running | selectattr('image_digest') | list }}"
+  loop_control:
+    label: "hcw-addon-{{ item.id }}"
+  when: not ansible_check_mode
+
+- name: Stop and remove each add-on container that is disabled
+  community.docker.docker_container:
+    name: "hcw-addon-{{ item.id }}"
+    state: absent
+  loop: "{{ addons | rejectattr('id', 'in', addons_running | map(attribute='id') | list) | list }}"
+  loop_control:
+    label: "hcw-addon-{{ item.id }}"
+
+- name: Render the Caddy route for the enabled add-ons' names
+  ansible.builtin.template:
+    src: 20-addons.caddy.j2
+    dest: "{{ addons_caddy_route_file }}"
+    owner: root
+    group: "{{ addons_caddy_group }}"
+    mode: "0640"
+  when: addons_running | length > 0
+  notify: Reload caddy for the addons route
+
+- name: Remove the Caddy route while no add-on is enabled
+  ansible.builtin.file:
+    path: "{{ addons_caddy_route_file }}"
+    state: absent
+  when: addons_running | length == 0
+  notify: Reload caddy for the addons route
+
+- name: Say what runs
+  ansible.builtin.debug:
+    msg: >-
+      {% if addons_running | selectattr('image_digest') | list | length > 0 %}
+      Tool add-ons running: {{ addons_running | selectattr('image_digest') | map(attribute='id')
+      | map('regex_replace', '^', 'hcw-addon-') | join(', ') }}, each on the loopback behind Caddy
+      at <id>.{{ lab_host_domain }}. Health over SSH: curl -s http://127.0.0.1:<port>/api/health
+      (lab-host/README.md, "Tool add-ons").
+      {% else %}
+      No tool add-on is running: addons_enabled is {{ addons_enabled }} and no enabled row has a
+      digest. To run one, set addons_enabled true and the row's enabled true and image_digest in
+      group_vars/all.yml and re-run bootstrap.sh (lab-host/README.md, "Tool add-ons").
+      {% endif %}

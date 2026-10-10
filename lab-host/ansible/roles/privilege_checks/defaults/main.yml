@@ -18,3 +18,9 @@ privilege_checks_coder_enabled: "{{ coder_enabled }}"
 privilege_checks_coder_compose_file: /etc/hcw/coder/docker-compose.yml
 privilege_checks_sandbox_socket_dir: /run/hcw-coder-docker
 privilege_checks_sandbox_docker_host: unix:///run/hcw-coder-docker/docker.sock
+
+# The tool add-on containers (ADR 0035): every enabled row with a digest,
+# the ones the addons role deployed; none while addons_enabled is false.
+privilege_checks_addons: >-
+  {{ (addons | default([])) | selectattr('enabled') | selectattr('image_digest') | list
+     if (addons_enabled | default(false)) | bool else [] }}

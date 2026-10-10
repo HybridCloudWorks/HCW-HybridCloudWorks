@@ -59,6 +59,8 @@ describe('the service registry', () => {
       'Cloud pricing cache',
       'Qlty',
       'Hybrid Lab (Coder and Turnstile)',
+      // ADR 0035: the first tool add-on, read through the status proxy.
+      'Migration add-on',
     ]);
   });
 

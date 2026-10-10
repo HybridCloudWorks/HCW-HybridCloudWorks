@@ -19,6 +19,7 @@ import { VALID_PROVIDERS } from '@/context/ProviderContext';
 import { PrerenderDataContext } from '@/hooks/prerenderData';
 import { certifications as azureCertifications } from '@/data/azure/certifications';
 import { availableLabs, labPanePath, labsPath, providersWithLabs } from '@/data/labs/catalogue';
+import { addonPanePath, addons } from '@/data/addons/catalogue';
 
 /**
  * Sections that exist under every provider, as declared by App.jsx's
@@ -91,7 +92,6 @@ const STANDALONE_ROUTES = [
   '/docker/tools',
   '/github/workflows',
   '/github/tools',
-  '/tools/migration',
   '/tools/comparison',
   '/tools/resources',
   '/tools/decisions',
@@ -134,6 +134,15 @@ const LAB_ROUTES = [
   ]),
 ];
 
+/**
+ * The AddOn panes (ADR 0035): one page per row of the AddOn catalogue at
+ * `/tools/<id>`, available and coming alike. A coming row pre-renders as
+ * its explainer page, which is a real page rather than a soft 404. Like the
+ * lab pages, the built page is the heading and the opening sentence; the
+ * status read and the frame start in the browser.
+ */
+const ADDON_ROUTES = addons.map(addonPanePath);
+
 export function routes(manifest = null) {
   return [
     '/',
@@ -146,6 +155,7 @@ export function routes(manifest = null) {
     ...STANDALONE_ROUTES,
     ...AZURE_CERT_ROUTES,
     ...LAB_ROUTES,
+    ...ADDON_ROUTES,
     ...(manifest?.routes || []),
   ];
 }

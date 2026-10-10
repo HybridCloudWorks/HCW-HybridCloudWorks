@@ -232,7 +232,12 @@ export const staticRoutes = {
   education: '/education',
   labs: '/education/labs',
   comparison: '/tools/comparison',
+  // AddOn panes (ADR 0035): one entry per row of data/addons/catalogue.js,
+  // `/tools/<id>` with the id camel-cased; the catalogue test holds them to
+  // each other.
   migration: '/tools/migration',
+  networkAssessment: '/tools/network-assessment',
+  cloudAssessment: '/tools/cloud-assessment',
   resources: '/tools/resources',
   decisions: '/tools/decisions',
   landingZone: '/tools/landing-zone',

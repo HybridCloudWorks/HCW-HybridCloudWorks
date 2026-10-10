@@ -471,6 +471,17 @@ const OTHER_ENTRIES = [
     rotate: 'Roll it in the Cloudflare dashboard, edit the vault key and re-run bootstrap.sh; also on every host rebuild.',
   },
   {
+    id: 'lab-addon-migration-turnstile-secret',
+    name: 'vault_addon_migration_turnstile_secret',
+    store: 'lab-vault',
+    consumer: 'The migration add-on’s human verification on uploads (hcw-addon-migration, ADR 0035)',
+    issuer: 'Cloudflare (the add-on’s own Turnstile widget, separate from the site’s)',
+    renewal: 'hand',
+    lifetimeDays: null,
+    rotate:
+      'Rotate it in the widget’s settings, set the vault key with hcw-vault-set and re-run bootstrap.sh, which recreates the container: docs/runbooks/labs-host.md, "Tool add-ons".',
+  },
+  {
     id: 'lab-arc-service-principal-secret',
     name: 'vault_arc_service_principal_secret',
     store: 'lab-vault',

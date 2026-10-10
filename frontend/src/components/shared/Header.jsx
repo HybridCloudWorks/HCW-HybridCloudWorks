@@ -3,6 +3,7 @@ import { Link, useLocation } from 'react-router';
 import { cn } from '@/lib/utils';
 import { useProvider } from '@/context/ProviderContext';
 import { routes, staticRoutes, parseRoute } from '@/lib/routeFactory';
+import { addonPanePath, availableAddons } from '@/data/addons/catalogue';
 import { SkipToMainContent } from '@/components/accessibility/SkipToMainContent';
 
 /**
@@ -217,7 +218,12 @@ export default function Header() {
     { label: 'Resource Comparison', path: staticRoutes.resources },
     { label: 'Decision Matrix', path: staticRoutes.decisions },
     { label: 'Pricing Comparison', path: staticRoutes.comparison },
-    { label: 'Migration Hub', path: staticRoutes.migration },
+    // The AddOn panes (ADR 0035): one item per available catalogue row, in
+    // the position the Migration Hub has always held.
+    ...availableAddons.map((addon) => ({
+      label: addon.menuLabel ?? addon.title,
+      path: addonPanePath(addon),
+    })),
     { label: 'Landing Zone Builder', path: staticRoutes.landingZone },
     ...(currentProvider === 'finops'
       ? [{ label: 'FinOps Tools', path: routes.tools('finops') }]

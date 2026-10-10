@@ -54,6 +54,7 @@ changes merged after that and were not on it:
 | Lab image digests (#989) | 2026-10-07 07:16 | Not yet |
 | LAB-5: the agent behind its own Docker proxy and in no docker group, user-namespace remapping on the host daemon, Coder's workspaces on a rootless daemon (#987) | 2026-10-07 07:26 | Not yet |
 | Lab images published to Docker Hub only (#1002), and the digests that followed (#1003) | 2026-10-08 05:53 and 06:24 | Not yet. The run that applies them must be followed at once by the template push |
+| ADR 0035: the `addons` role and the migration add-on's row, the per-name direct-visit redirect in the Caddyfile, and the add-on checks in `privilege_checks` | Not merged yet (the Phase 6 website pull request) | Not yet. The row's `image_digest` is written in at PR time from the add-on's `v0.3.0` publish, and the owner seeds `vault_addon_migration_turnstile_secret` before the run ([runbook](../runbooks/labs-host.md), "Tool add-ons") |
 
 Each row below that describes one of these says when it merged and that it
 is not yet on the host. When the owner's run has applied them, this section
@@ -73,6 +74,7 @@ lose the note.
 | node-exporter | Host metrics for the lab status page; listens on localhost only | Host-native systemd service |
 | Azure Connected Machine agent and Azure Monitor Agent | Arc onboarding as `arcs-lab-hybrid-prod-cus-01`; heartbeat, `auth`/`authpriv` syslog, the `daemon`/`syslog`/`kern`/`cron`/`user` facilities at Warning and above, and four host counters (CPU, memory, root disk used and free), by the data collection rule `dcr-lab-hybrid-prod-cus` | Host services. The Connected Machine agent is installed and connected by the Ansible `arc` role, switched on by the host's arc fact; the Azure Monitor Agent is an Arc extension added after onboarding. Both are started by the owner's `scripts/lab/Register-LabArc.ps1 -Connect` ([runbook](../runbooks/labs-host.md), "Arc onboarding", step 4) |
 | Coder workspaces and lab job containers | Transient. Workspaces carry Coder's `com.coder.resource=true` label and stop after an hour; job containers carry the `hcw.lab-job` label and live for one job. With LAB-5 (merged 2026-10-07 in #987, not yet on the host: [Applied state](#applied-state)) every container on the host daemon runs with user-namespace remapping (its root is an unprivileged uid on the host), and workspaces run on the sandbox daemon | Job containers: the host daemon, started by `vps-agent` through its proxy. Workspaces: the sandbox daemon, started by Coder through its proxy |
+| Tool add-ons (`hcw-addon-<id>`) | Independently built tools the site shows in a pane at `/tools/<id>` ([ADR 0035](../decisions/0035-addon-pane-model.md); [AddOn integration standard](../standards/addon-integration-standard.md)): the first is `hcw-addon-migration`, the Azure migration assessment, at `migration.lab.hybridcloudworks.com`. Each takes an uploaded export, holds the assessment in memory for at most two hours, reaches no cloud by design, and gates uploads with its own human-verification widget whose secret is in the host's Ansible vault (`vault_addon_<id>_turnstile_secret`). Merged in the ADR 0035 pull request, not yet on the host: [Applied state](#applied-state) | One hardened container per row of `addons[]` in `group_vars`, run directly by the `addons` role (no Compose): `docker.io/hybridcloudworks/hcw-addon-<id>` by digest, read-only root, every capability dropped, no volume, no socket, under the user-namespace remap; `127.0.0.1:<port>` only (migration 18081; network assessment 18082 and cloud assessment 18083 reserved), behind Caddy on `<id>.lab` |
 | Portainer Business Edition | The owner's view of the host's Docker: containers, images, volumes, logs. Holds the Docker socket (with `--userns=host`, which the socket needs under the remap), so it is root on the host; it sees the host daemon, not the sandbox daemon the workspaces run on; reachable only through an SSH tunnel. Off until the owner turns it on (owner decision 2026-09-26) | One container, `portainer`, with a named volume; HTTPS on `127.0.0.1:9443` only, no Caddy route |
 | HashiCorp Vault | Secrets for the lab host only, never production HybridCloudWorks secrets (those stay in Key Vault `kv-site-prod-cus-01`). Initialised by the owner over SSH. Since 2026-09-29 it unseals itself at every start with the key `vault-seal` in the lab-only Key Vault `kv-labhybrid-prod-cus-01`, as the Arc machine's identity (#726; ADR 0032, amendment of 2026-09-29, accepted and live that day). The five Shamir keys are recovery keys. On since 2026-09-26 (#729; owner decision that day) | Host-native systemd service `vault`, user `vault`, raft storage in `/var/lib/vault`; `127.0.0.1:8200` and `127.0.0.1:8201` only. With auto-unseal, the unit also joins the `himds` group and reaches Key Vault over HTTPS |
 
@@ -80,7 +82,12 @@ Nothing else. A container that is neither a named service above nor carries
 one of the two labels is a finding, and the validation list in ADR 0032 checks
 `docker ps` that way, by name and label rather than by count, on each of the
 two daemons: the host's (`sudo docker ps`) and the sandbox's (`sudo docker
--H unix:///run/hcw-coder-docker/docker.sock ps`).
+-H unix:///run/hcw-coder-docker/docker.sock ps`). The named services gained
+`hcw-addon-<id>`, one per enabled `addons[]` row, by reference to
+[ADR 0035](../decisions/0035-addon-pane-model.md) decision 8, which amends
+ADR 0032's "Compose is for Coder only" line with single containers the
+`addons` role runs directly ([REVIEW REQUIRED]: the owner confirms that
+amendment).
 
 `bootstrap.sh` enforces the "nothing else" on the way in: its first run on a
 host refuses, before it changes anything, when the host already runs a
@@ -112,10 +119,12 @@ reaches the lab only inside the site's pages, as described under
 [panes only](#panes-only).
 
 On the host's loopback, and nowhere else: node-exporter (9100), Coder (7080,
-behind Caddy), Portainer (9443) and Vault (8200, and raft's 8201 once
-unsealed). Docker's iptables rules for a published port come before ufw's, so
-the two published through Docker name `127.0.0.1` in the publish itself, and
-the Portainer role refuses any other address. The owner reaches Portainer
+behind Caddy), the tool add-ons (18081 for `hcw-addon-migration`, behind
+Caddy; 18082 and 18083 reserved for the network and cloud assessments), Portainer
+(9443) and Vault (8200, and raft's 8201 once unsealed). Docker's iptables
+rules for a published port come before ufw's, so the three published through
+Docker name `127.0.0.1` in the publish itself, and the Portainer and addons
+roles refuse any other address. The owner reaches Portainer
 through an SSH tunnel and Vault through the CLI over SSH; neither has a Caddy
 route or a public name.
 
@@ -132,7 +141,7 @@ route added later is covered without doing anything
 | Rule | What Caddy does |
 | --- | --- |
 | Only the site may frame the lab | Every response carries `Content-Security-Policy: frame-ancestors 'self' https://hybridcloudworks.com https://www.hybridcloudworks.com`. `www` is listed because it serves the site with a 200 rather than redirecting to the apex (checked 2026-09-28). `'self'` is for code-server, whose webviews are iframes of its own origin. It admits no other site, because the browser checks every ancestor up to the top window. There is no `X-Frame-Options`, because it cannot name an allowed origin |
-| No direct browsing | A request with `Sec-Fetch-Dest: document`, a top-level navigation, gets `302` to `https://hybridcloudworks.com/education/labs`. So does a request with `Sec-Fetch-Mode: navigate` and no `Sec-Fetch-Dest`, which is a navigation from a browser that sends fetch metadata without the destination |
+| No direct browsing | A request with `Sec-Fetch-Dest: document`, a top-level navigation, gets `302` to `https://hybridcloudworks.com/education/labs`. So does a request with `Sec-Fetch-Mode: navigate` and no `Sec-Fetch-Dest`, which is a navigation from a browser that sends fetch metadata without the destination. Since [ADR 0035](../decisions/0035-addon-pane-model.md) the target is a Caddy variable the snippet sets for every name and a route may set again for its own: a visit to an add-on's name (`migration.lab`) goes to that add-on's page on the site, `https://hybridcloudworks.com/tools/migration`. The ordering this relies on is checked with `caddy adapt` in CI (`lab-host/ansible/roles/caddy/tests/caddy-adapt.test.sh`) |
 | Everything else passes | `iframe` (the panes); `empty` (fetch, XHR and WebSockets from a page in a pane, such as Coder's API calls); subresources; and requests with no fetch metadata at all: Coder's workspace agents and CLI, and the Function App's status proxy (Node's `fetch` sends `Sec-Fetch-Mode: cors` and no destination) |
 
 What keeps working, and why:
@@ -144,7 +153,15 @@ What keeps working, and why:
   lab names.
 - **The lab agent** dials out to the Functions API and receives nothing
   inbound. Nothing else on the host takes a connection through Caddy apart
-  from Coder, and Coder's own clients send no fetch metadata.
+  from Coder and the tool add-ons, and Coder's own clients send no fetch
+  metadata.
+- **The tool add-ons** ([ADR 0035](../decisions/0035-addon-pane-model.md))
+  are framed by the site's `/tools/<id>` pages the same way, from their own
+  one-label names. Each add-on sends its own `frame-ancestors` from env, set
+  by the `addons` role to the same list Caddy sends, so the two policies the
+  browser enforces agree; nothing of an add-on is let through at the top
+  level, and a stopped container answers 503 with the site's own sentence,
+  `This tool isn't available right now.`
 - **Coder** (on since 2026-09-28, for members of the `HybridCloudWorks`
   GitHub organisation only). Its route removes Coder's
   default `frame-ancestors 'self'`, because the browser enforces every
@@ -288,6 +305,9 @@ works offline, and the smoke test.
 
 - [ADR 0032](../decisions/0032-learner-labs-platform.md): the decisions this
   page records the shape of
+- [ADR 0035](../decisions/0035-addon-pane-model.md): the tool add-ons the host
+  runs beside Coder, and the [App-to-AddOn program](app-to-addon/README.md)
+  they come from
 - [Target architecture §5.3](architecture.md#53-labs-flow): the labs flow
 - [Labs host Arc onboarding](../runbooks/labs-host.md): the owner procedure
   that makes the hybrid control plane row real, and how to disconnect

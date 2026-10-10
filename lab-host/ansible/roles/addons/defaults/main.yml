@@ -1,0 +1,25 @@
+---
+# addons_enabled and the addons list (one entry per tool add-on: id, image,
+# tag, digest, port, memory, pids, env, secret_env) live in
+# group_vars/all.yml; meta/argument_specs.yml marks them required.
+#
+# The one body a pane can show from an add-on's name while its container is
+# stopped: the 503 the Caddy route answers. It is exactly the site's own
+# sentence for the same state (ADDON_UNAVAILABLE_SENTENCE in
+# frontend/src/pages/tools/AddOnPanePage.jsx), so a visitor reads one
+# message whichever side notices first; scripts/lab-host-visitor-copy.test.mjs
+# holds the two to each other and to naming no tool, host or setting.
+addons_unavailable_response: "This tool isn't available right now."
+# The Caddy route file for every enabled add-on. caddy_sites_dir and
+# caddy_group are the caddy role's defaults; the file is rendered after that
+# role has run and Caddy reloads on a change.
+addons_caddy_sites_dir: /etc/caddy/conf.d
+addons_caddy_group: caddy
+addons_caddy_route_file: "{{ addons_caddy_sites_dir }}/20-addons.caddy"
+# How long the role waits for a started container to answer its health read
+# on the loopback: retries x delay seconds.
+addons_wait_retries: 30
+addons_wait_delay: 2
+# The json-file log cap per container, so an add-on that logs every request
+# cannot fill the disk.
+addons_log_max_size: 10m

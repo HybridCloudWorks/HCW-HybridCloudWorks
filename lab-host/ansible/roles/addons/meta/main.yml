@@ -1,0 +1,20 @@
+---
+galaxy_info:
+  role_name: addons
+  namespace: hcw
+  author: HybridCloudWorks
+  description: >-
+    One hardened container per tool add-on, digest-pinned, published on the host's loopback only
+    and served through Caddy on its own lab name (ADR 0035)
+  license: Apache-2.0
+  min_ansible_version: "2.16"
+  platforms:
+    - name: Ubuntu
+      versions:
+        - resolute
+        - noble
+  galaxy_tags:
+    - docker
+    - caddy
+
+dependencies: []

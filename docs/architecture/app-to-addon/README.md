@@ -1,0 +1,89 @@
+# App-to-AddOn program
+
+The program that splits each HCW product into an upstream **App** (the engine,
+rules and UI, with an Azure appliance edition that runs on Container Apps under
+a managed identity on a client's subscription) and a downstream **AddOn** (the
+same image in a lab edition on the lab host, where a visitor uploads an Azure
+Resource Graph export and gets an assessment held in memory for two hours), and
+shows each AddOn on hybridcloudworks.com as a sandboxed pane at `/tools/<id>`.
+The model is [ADR 0035](../../decisions/0035-addon-pane-model.md); the
+contracts are the [AddOn integration standard](../../standards/addon-integration-standard.md).
+
+## The three pairs
+
+| Pair | App (upstream) | AddOn (downstream) | Site route | Row status |
+| --- | --- | --- | --- | --- |
+| [Migration](migration.md) | `HCW-AzMigrateOrchestrator_App` | `HCW-AzMigrateOrchestrator_Addon`, `migration.lab.hybridcloudworks.com` | `/tools/migration` (Tools menu: Migration Hub) | `available` |
+| [Network assessment](network-assessment.md) | `HCW-NetworkEyes_App` | `HCW-NetworkEyes_AddOn`, `network-assessment.lab.hybridcloudworks.com` | `/tools/network-assessment` | `coming` since 2026-10-10 |
+| [Cloud assessment](cloud-assessment.md) | `HCW-CloudAssessor_App` | `HCW-CloudAssessor_AddOn`, `cloud-assessment.lab.hybridcloudworks.com` | `/tools/cloud-assessment` | `coming` since 2026-10-10 |
+
+Each pair's page records what the App keeps, what the AddOn is, its origin,
+port, image and status on the site, and links the refactoring pull requests
+the program opened in each repository.
+
+## What lands where
+
+The website is the integration layer and changes once, in one pull request,
+from the written specification (owner decision 2026-10-09). Everything an
+AddOn needs on the site is derived from one catalogue row:
+
+| Side | What | Where |
+| --- | --- | --- |
+| Site, data | One frozen row per AddOn: id, title, origin, pane and health paths, status, capabilities | `frontend/src/data/addons/catalogue.js` |
+| Site, page | The generic pane page: status gate, sandbox and `allow` from the row's capabilities, the `hcw-addon` message filter, an allow-listed `navigate`, the 30-second watchdog, one unavailable sentence; a `coming` row renders an explainer | `frontend/src/pages/tools/AddOnPanePage.jsx`, one lazy wrapper per row in `pages/tools/` |
+| Site, routing | One hand-declared route per row, the pre-render list and the Tools menu, all derived | `frontend/src/App.jsx`, `lib/routeFactory.ts`, `scripts/prerender-entry.jsx`, `components/shared/Header.jsx` |
+| Site, policy | One exact origin per available row in `frame-src`; `connect-src` unchanged | `frontend/staticwebapp.config.json`, held by `lib/csp.test.js` |
+| Function App | `GET /api/public/addons/{id}/status`: a closed registry of ids, a 5-second https-only read of the AddOn's `/api/health`, a one-minute cache per id, a six-field projection | `functions/src/lib/addons/`, `functions/addons-public-http.js` |
+| Terraform | One plain app setting per available AddOn, `ADDON_<ID>_URL` (public, no vault) | `infra/functionapp.tf` |
+| Admin | The Tool add-ons group: a service card tested through the status route, a Health probe, a directory row; the AddOn's vault key on Credentials | `components/admin/integrations/serviceRegistry.jsx`, `config/integrationsDirectory.js`, `pages/admin/health/probeGroups/enhanced.js`, `functions/src/lib/credentials/register.js` |
+| Lab host | The generic `addons` Ansible role: one hardened container per `group_vars` row by digest on the loopback, a Caddy route per name with the site's sentence at 503 and a per-name direct-visit redirect, the vault key check, the end-of-run privilege checks | `lab-host/ansible/roles/addons/`, `group_vars/all.yml`, `roles/caddy/templates/Caddyfile.j2`, `roles/privilege_checks/` |
+| Docs | The standard, this package, ADR 0035, the labs host record, the runbook's "Tool add-ons", the lab host README | `docs/standards/`, `docs/architecture/app-to-addon/`, `docs/decisions/`, `docs/architecture/labs-host.md`, `docs/runbooks/labs-host.md`, `lab-host/README.md` |
+
+Nothing from an AddOn is installed into the site: no package, no secret, no
+site credential. The only coupling is the image digest the host pins and the
+address the status proxy reads.
+
+## The pane, in one picture
+
+```text
+visitor's browser                       site (Static Web App)        Function App              lab host
+───────────────                         ─────────────────────        ────────────              ────────
+GET /tools/migration  ─────────────────▶ AddOnPanePage (pre-rendered)
+                                          │ fetchAddonStatus('migration') ─▶ GET public/addons/migration/status
+                                          │                                   │ ADDON_MIGRATION_URL (https only)
+                                          │                                   │ GET /api/health, 5 s ───────────▶ Caddy ─▶ 127.0.0.1:18081 hcw-addon-migration
+                                          │ { configured, reachable, … } ◀────┘ cached 60 s per id
+                                          │ mounts <iframe sandbox="allow-scripts allow-same-origin allow-forms allow-downloads">
+                                          ▼
+GET https://migration.lab.hybridcloudworks.com/  (inside the pane only) ─────────────────────────────▶ Caddy: frame-ancestors = the site; 503 sentence if stopped
+                                          ◀── postMessage { type: 'hcw-addon', id: 'migration', state } to the site origins only
+```
+
+The site sends the pane nothing. A top-level visit to the AddOn's name is
+redirected by Caddy to the AddOn's page on the site.
+
+## Review items the program leaves open
+
+- [REVIEW REQUIRED] ADR 0035 decision 8: AddOn containers beside Coder on the
+  lab host, amending ADR 0032's "Compose is for Coder only" line.
+- [REVIEW REQUIRED] ADR 0035 decision 9: `allow-downloads` on AddOn panes
+  (`TODO.md`, Accepted risks).
+- [REVIEW REQUIRED] One human-verification widget per AddOn, created by the
+  owner; its secret seeded with `hcw-vault-set`
+  ([runbook](../../runbooks/labs-host.md), "Tool add-ons").
+- [VERIFY] The migration row's `image_digest` and `AMO_TURNSTILE_SITE_KEY` in
+  `lab-host/ansible/group_vars/all.yml`, written in by the owner from the
+  `v0.3.0` publish and the widget.
+- The per-name direct-visit redirect's directive ordering was [VERIFY] and is
+  answered: `caddy adapt` with the pinned Caddy runs in CI
+  (`lab-host/ansible/roles/caddy/tests/caddy-adapt.test.sh`).
+
+## Related
+
+- [ADR 0035](../../decisions/0035-addon-pane-model.md) and
+  [ADR 0032](../../decisions/0032-learner-labs-platform.md)
+- [AddOn integration standard](../../standards/addon-integration-standard.md)
+- [Labs host](../labs-host.md): the estate record, with the AddOn containers
+  and ports
+- [Required inputs §4.5 and §4.7](../../standards/required-inputs.md): the app
+  setting and the vault key

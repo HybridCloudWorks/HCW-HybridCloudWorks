@@ -1,0 +1,16 @@
+---
+# Derived values. Not meant to be overridden, which is why they are vars and
+# not defaults.
+# The host's loopback and nothing else. Docker writes its own iptables rules
+# for a published port, ahead of ufw's, so ufw would not stop a publish on
+# 0.0.0.0: the address here is the only thing between the internet and a
+# container that is meant to be reached through Caddy alone. tasks/main.yml
+# asserts it.
+addons_publish_address: 127.0.0.1
+# The port every add-on image listens on inside its container (PORT=8080 in
+# each image); the host port is the row's `port`.
+addons_container_port: 8080
+# The rows the role acts on this run: every row while addons_enabled is true,
+# none otherwise (then every row is removed).
+addons_active: "{{ addons if addons_enabled | bool else [] }}"
+addons_running: "{{ addons_active | selectattr('enabled', 'defined') | selectattr('enabled') | list }}"

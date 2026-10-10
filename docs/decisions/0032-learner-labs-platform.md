@@ -1120,6 +1120,11 @@ bodies.
 - [Target architecture §5.3](../architecture/architecture.md#53-labs-flow),
   corrected alongside this record
 - [Labs host](../architecture/labs-host.md): the estate record for the host
+- [ADR 0035](0035-addon-pane-model.md): the AddOn pane model, which reuses
+  decision 4's status proxy and the panes-only amendment for independently
+  built tools, and amends this record's "Compose is for Coder only" line by
+  adding single containers run by the `addons` role as a second workload
+  kind on the host (its decision 8, awaiting the owner's review)
 - [Required inputs §4.7](../standards/required-inputs.md#47-vps-agent-hostinger-env-never-committed):
   the inputs this record names
 - Epics: #656 (the hybrid lab host), #657 (Landing Zone Builder), #658
