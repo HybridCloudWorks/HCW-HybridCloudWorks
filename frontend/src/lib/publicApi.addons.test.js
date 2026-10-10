@@ -13,6 +13,7 @@ vi.mock('@/lib/functionsBase', () => ({
   requireFunctionsBase: () => 'https://api.test',
 }));
 
+/** A fetch Response stand-in carrying `body` as JSON. */
 const jsonResponse = (body, status = 200) => ({
   ok: status >= 200 && status < 300,
   status,

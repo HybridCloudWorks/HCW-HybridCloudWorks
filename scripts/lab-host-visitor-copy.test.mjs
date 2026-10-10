@@ -42,6 +42,7 @@ import { fileURLToPath } from 'node:url';
 import { ME_PATH, MESSAGES as LAUNCHER_MESSAGES, runLauncher } from '../lab-host/coder/launcher/launcher.js';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** A repository file as text. */
 const read = (relative) => readFileSync(path.join(repoRoot, relative), 'utf8');
 
 const ROLES = 'lab-host/ansible/roles';

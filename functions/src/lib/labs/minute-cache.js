@@ -56,6 +56,7 @@ export function jsonResponse(status, body, cacheSeconds = 0) {
 /** What a cache warning says about a failure: its class and code, which name the kind of trouble without its text. */
 const errorLabel = (error) => `${error?.name ?? 'Error'} (${error?.code ?? 'no code'})`;
 
+/** A one-minute cache for one document id in the cache container: `read` returns the fresh value or null, `write` replaces it; neither throws. */
 export function createMinuteCache({ store, id, kind, now = () => Date.now(), seconds = MINUTE_CACHE_SECONDS }) {
   const freshMs = seconds * 1000;
 

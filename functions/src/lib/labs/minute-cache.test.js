@@ -6,12 +6,14 @@ import { createMinuteCache, MINUTE_CACHE_SECONDS } from './minute-cache.js';
 const NOW = Date.parse('2026-09-25T12:00:00Z');
 const context = { warn: vi.fn(), error: vi.fn() };
 
+/** A store stand-in with a missing document and a succeeding write, unless overridden. */
 const makeStore = (over = {}) => ({
   readDoc: vi.fn(async () => null),
   upsertDoc: vi.fn(async (_c, d) => d),
   ...over,
 });
 
+/** A minute cache over `store` with a fixed clock. */
 const cacheFor = (store, now = () => NOW) =>
   createMinuteCache({ store, id: 'labs:test', kind: 'labs-test', now });
 

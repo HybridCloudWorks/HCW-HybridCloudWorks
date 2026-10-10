@@ -399,8 +399,11 @@ function Pane({ addon }) {
             onLoad={() => {
               setLoaded(true);
               // Focus moves into the tool on open (the standard's section 7): keyboard and
-              // screen-reader users continue in the pane, not at the toolbar behind it.
-              frameRef.current?.focus();
+              // screen-reader users continue in the pane, not at the toolbar behind it. Only
+              // while focus is still where the page left it: a visitor who has already moved
+              // to a control keeps it, and the load does not interrupt their typing.
+              const active = document.activeElement;
+              if (active === null || active === document.body) frameRef.current?.focus();
             }}
             className="block w-full flex-1 border-0"
           />

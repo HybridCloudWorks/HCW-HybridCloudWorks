@@ -272,6 +272,7 @@ async function testHybridLab() {
   return `${base}${describeTokenExpiry(expiry)}`;
 }
 
+/** Read the migration add-on's status through the site's own proxy; configured and reachable is a pass. */
 async function testMigrationAddon() {
   // The pane page's own read (public/addons/migration/status), which the
   // server answers from ADDON_MIGRATION_URL and caches for a minute. The

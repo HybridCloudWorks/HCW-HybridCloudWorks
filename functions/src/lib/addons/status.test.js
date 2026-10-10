@@ -18,14 +18,34 @@ const URL_SETTING = 'https://migration.lab.example/';
 const ENV = { ADDON_MIGRATION_URL: URL_SETTING };
 
 const context = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+/** A GET request for one id, as the Function host hands it over. */
 const request = (id) => ({ method: 'GET', params: { id }, query: { get: () => null } });
+/** The parsed JSON body of an answer. */
 const body = (res) => JSON.parse(res.body);
 
+/** A cache store stand-in: readDoc misses and upsertDoc succeeds unless overridden. */
 const makeStore = (over = {}) => ({
   readDoc: vi.fn(async () => null),
   upsertDoc: vi.fn(async (_c, d) => d),
   ...over,
 });
+
+/** A fetch Response stand-in whose body is a readable stream of `text`, in 8 KiB chunks, with a cancel spy. */
+const streamCancel = vi.fn();
+const streamed = (text, status = 200) => {
+  const bytes = new TextEncoder().encode(text);
+  let offset = 0;
+  const stream = new ReadableStream({
+    pull(controller) {
+      if (offset >= bytes.length) return controller.close();
+      controller.enqueue(bytes.subarray(offset, offset + 8192));
+      offset += 8192;
+      return undefined;
+    },
+    cancel: streamCancel,
+  });
+  return { ok: status < 300, status, headers: { get: () => null }, body: stream };
+};
 
 /** A fetch Response stand-in: status, the body as text, and no Content-Length unless given. */
 const okJson = (data, status = 200, headers = {}) => ({
@@ -63,6 +83,7 @@ function addonFetch(routes, calls = []) {
   return fetchImpl;
 }
 
+/** A cache document for the migration id, written `ageMs` before NOW. */
 const cachedDoc = (value, ageMs) => ({
   id: addonStatusCacheId('migration'),
   kind: ADDON_STATUS_CACHE_KIND,
@@ -70,6 +91,7 @@ const cachedDoc = (value, ageMs) => ({
   cachedAt: new Date(NOW - ageMs).toISOString(),
 });
 
+/** The handlers under test with a healthy fetch, a fresh store and a fixed clock, unless overridden. */
 const handlers = (over = {}) =>
   createAddonStatusHandlers({
     store: makeStore(),
@@ -163,7 +185,7 @@ describe('projectHealth', () => {
     expect(() => projectHealth(health)).toThrow(/health body/);
   });
 
-  it.each(['0.3.0', '1.2.3-beta.1', '1.2.3+build.7', '1.2.3-rc.1+sha.abc'])('accepts the whole semver %s', (version) => {
+  it.each(['0.3.0', '1.2.3-beta.1', '1.2.3+build.7', '1.2.3-rc.1+sha.abc', '1.2.3-feature-branch-2026-10-10.1'])('accepts the whole semver %s', (version) => {
     expect(projectHealth({ ...HEALTH, version }).version).toBe(version);
   });
 
@@ -290,6 +312,24 @@ describe('getAddonStatus', () => {
     expectNoUrl(res.body, ...context.warn.mock.calls.flat(), ...context.error.mock.calls.flat());
   });
 
+  it('reads a streamed health body and cancels one that passes the budget', async () => {
+    streamCancel.mockClear();
+    const small = await handlers({ fetchImpl: () => Promise.resolve(streamed(JSON.stringify(HEALTH))) }).getAddonStatus(
+      request('migration'),
+      context
+    );
+    expect(body(small)).toMatchObject({ reachable: true, version: '0.3.0' });
+    expect(streamCancel).not.toHaveBeenCalled();
+
+    const large = await handlers({ fetchImpl: () => Promise.resolve(streamed('x'.repeat(40_000))) }).getAddonStatus(
+      request('migration'),
+      context
+    );
+    expect(body(large)).toMatchObject({ configured: true, reachable: false });
+    expect(streamCancel).toHaveBeenCalledTimes(1);
+    expect(context.warn).toHaveBeenCalledWith(expect.stringContaining('too large'));
+  });
+
   it('reads live past a minute, replacing the stale document', async () => {
     const store = makeStore({
       readDoc: vi.fn(async () => cachedDoc({ configured: true, reachable: false }, 61_000)),
@@ -319,6 +359,7 @@ describe('getAddonStatus', () => {
     ['answers no JSON', () => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => '<html>' })],
     ['declares a body over the budget', () => okJson(HEALTH, 200, { 'content-length': '100000' })],
     ['sends a body over the budget', () => okJson({ ...HEALTH, padding: 'x'.repeat(20_000) })],
+    ['streams a body over the budget with no Content-Length', () => streamed('x'.repeat(40_000))],
     ['answers ok: false', () => okJson({ ...HEALTH, ok: false })],
     ['answers without a version', () => okJson({ ok: true, id: 'migration' })],
   ])('reports unreachable, caches the failure and names no URL when the AddOn %s', async (_label, answer) => {

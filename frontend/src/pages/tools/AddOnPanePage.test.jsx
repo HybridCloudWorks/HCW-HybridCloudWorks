@@ -50,6 +50,7 @@ const REACHABLE = {
 const BEHIND_THE_SITE =
   /\bcoder\b|oauth|code-server|\bvps\b|callback|caddy|hostinger|turnstile|cloudflare|docker|\bapi\b/i;
 
+/** Render the page for one row inside a router and the shared providers. */
 function renderPane(addonId = MIGRATION.id) {
   return render(
     <HelmetProvider>
@@ -235,6 +236,16 @@ describe('AddOnPanePage, the pane', () => {
     expect(document.activeElement).not.toBe(frame);
     fireEvent.load(frame);
     expect(document.activeElement).toBe(frame);
+  });
+
+  it('leaves focus alone when the visitor has already moved it before the frame loads', async () => {
+    renderPane();
+    const pane = await screen.findByTestId('addon-pane');
+    const link = within(pane).getByRole('link', { name: 'Back to home' });
+    link.focus();
+    expect(document.activeElement).toBe(link);
+    fireEvent.load(document.querySelector('iframe'));
+    expect(document.activeElement).toBe(link);
   });
 
   it('grants the pane no permission the row does not name', async () => {

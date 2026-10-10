@@ -143,6 +143,7 @@ const LAB_ROUTES = [
  */
 const ADDON_ROUTES = addons.map(addonPanePath);
 
+/** Every path the site pre-renders: the static routes, the provider routes, the catalogue-driven add-on pages and the content routes from the manifest. */
 export function routes(manifest = null) {
   return [
     '/',

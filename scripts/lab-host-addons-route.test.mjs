@@ -25,6 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/** A repository file as text. */
 const read = (relative) => readFileSync(path.join(repoRoot, relative), 'utf8');
 
 const ROLES = 'lab-host/ansible/roles';

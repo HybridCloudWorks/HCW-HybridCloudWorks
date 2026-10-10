@@ -32,6 +32,7 @@ import {
   availableAddons,
 } from './catalogue';
 
+/** Whether a value is a string with visible characters. */
 const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
 
 /** The copy fields public-copy.test.js's rule applies to (standard, section 4). */

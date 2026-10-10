@@ -68,9 +68,10 @@ export const ADDON_STATUS_FIELDS = Object.freeze([
   'asOf',
 ]);
 
-// The whole string, not a prefix: a semver core with an optional pre-release and build, and never longer than
-// SHORT_STRING_MAX, so nothing past the version can ride into the cache and out to every status caller.
-const SEMVER = /^\d{1,5}\.\d{1,5}\.\d{1,5}(?:-[0-9A-Za-z.-]{1,20})?(?:\+[0-9A-Za-z.-]{1,20})?$/;
+// The whole string, not a prefix: a semver core with an optional pre-release and build. The only length bound is
+// the whole string's (SHORT_STRING_MAX), so a long but valid pre-release is accepted and nothing past the version
+// can ride into the cache and out to every status caller.
+const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const SHORT_STRING_MAX = 40;
 const CAPABILITIES_MAX = 20;
 
@@ -142,10 +143,39 @@ export function projectHealth(body) {
 export const ADDON_HEALTH_MAX_BYTES = 16 * 1024;
 
 /**
+ * The response body as text, read no further than `max` bytes: the stream is cancelled the moment the count passes
+ * it, so a faulty endpoint cannot make this Function App buffer an unbounded body. A response without a readable
+ * stream (a test stand-in) is read whole and then measured.
+ */
+async function readBoundedText(response, max) {
+  const body = response.body;
+  if (!body || typeof body.getReader !== 'function') {
+    const text = await response.text();
+    if (text.length > max) throw new Error('the health body was too large');
+    return text;
+  }
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    received += value.byteLength;
+    if (received > max) {
+      await reader.cancel();
+      throw new Error('the health body was too large');
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
+
+/**
  * Read and project the AddOn's health. One deadline (ADDON_TIMEOUT_MS) covers
  * the whole exchange, body included; the body is refused past
- * ADDON_HEALTH_MAX_BYTES before it is parsed, by Content-Length when the AddOn
- * sends one and by its length once read.
+ * ADDON_HEALTH_MAX_BYTES, by Content-Length when the AddOn sends one and by a
+ * byte count while the stream is read, before anything is parsed.
  */
 async function readHealth(fetchImpl, config) {
   const controller = new AbortController();
@@ -166,9 +196,7 @@ async function readHealth(fetchImpl, config) {
     if (Number.isFinite(declared) && declared > ADDON_HEALTH_MAX_BYTES) {
       throw new Error('the health body was too large');
     }
-    const text = await response.text();
-    if (text.length > ADDON_HEALTH_MAX_BYTES) throw new Error('the health body was too large');
-    return projectHealth(JSON.parse(text));
+    return projectHealth(JSON.parse(await readBoundedText(response, ADDON_HEALTH_MAX_BYTES)));
   } catch (error) {
     if (error?.name === 'AbortError') {
       throw Object.assign(new Error(`timeout after ${ADDON_TIMEOUT_MS} ms`), { code: 'FETCH_TIMEOUT' });
