@@ -141,3 +141,9 @@ argument_specs:
         required: false
         default: /etc/ufw/after.rules
         description: Where the egress rules are written so ufw restores them at boot.
+      addons_test_site_keys:
+        type: list
+        elements: str
+        required: false
+        default: [1x00000000000000000000AA, 2x00000000000000000000AB, 3x00000000000000000000FF]
+        description: The verification provider's test site keys; a deployed row's env may not carry one.

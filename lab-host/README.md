@@ -1046,8 +1046,10 @@ The add-on gates every upload with a human-verification token it verifies
 server side with the secret above. The site key is public (the add-on
 publishes it in `/api/health` so the pane renders the widget), so it lives
 in `group_vars`; the secret never does. The `migration` row ships with the
-always-passes test key `1x00000000000000000000AA`, so every challenge passes
-until the owner replaces it with the widget's site key.
+provider's documented test key `1x00000000000000000000AA`, and the role
+refuses to deploy a row whose environment still carries a test key: a real
+widget secret rejects the token a test key produces, so the pair would never
+verify an upload. The owner replaces it with the widget's site key.
 
 ### Bumping the digest
 

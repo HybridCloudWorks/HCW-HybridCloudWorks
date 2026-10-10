@@ -68,3 +68,11 @@ addons_egress_cidrs:
 # reloaded from here: a ufw reload would flush the rules Docker holds for its
 # running containers (the docker role's README, "ufw and Docker").
 addons_ufw_after_rules: /etc/ufw/after.rules
+# The human-verification provider's documented test site keys (always pass,
+# always block, forces a challenge). A row whose environment still carries one
+# is not deployed: the widget's real secret rejects the token a test key
+# produces, so the add-on would refuse every upload while looking configured.
+addons_test_site_keys:
+  - 1x00000000000000000000AA
+  - 2x00000000000000000000AB
+  - 3x00000000000000000000FF

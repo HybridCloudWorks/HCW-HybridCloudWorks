@@ -26,6 +26,24 @@
       {{ addons_active | map(attribute='id') | zip(addons_active | map(attribute='port')) | list }}.
     quiet: true
 
+# A deployed row must carry its own widget's site key, never a test key: the
+# real secret the vault holds rejects the token a test key produces, and the
+# add-on would then refuse every upload while reporting itself configured.
+- name: Refuse to deploy an add-on whose environment still carries a verification test key
+  ansible.builtin.assert:
+    that:
+      - item.env | default({}) | dict2items | map(attribute='value') | map('string')
+        | intersect(addons_test_site_keys) | length == 0
+    fail_msg: >-
+      hcw-addon-{{ item.id }} has a digest, so it would be deployed, but its env still carries a
+      verification test site key. Create the add-on's widget and put its site key in
+      addons[].env in group_vars/all.yml (lab-host/README.md, "Tool add-ons"), then re-run
+      bootstrap.sh.
+    quiet: true
+  loop: "{{ addons_deployed }}"
+  loop_control:
+    label: "{{ item.id }}"
+
 - name: Refuse an add-on digest that is not a sha256 image digest
   ansible.builtin.assert:
     that:

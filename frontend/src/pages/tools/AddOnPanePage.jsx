@@ -233,7 +233,7 @@ function ComingAddOn({ addon }) {
         >
           <p className="font-semibold text-slate-900 dark:text-slate-100">{addon.comingReason}</p>
           <Link to={staticRoutes.home} className={`${SECONDARY} self-start`}>
-            Back to tools
+            Back to home
           </Link>
         </section>
       </div>
@@ -289,7 +289,7 @@ function Unavailable() {
       </p>
       <p className={`text-sm ${MUTED}`}>Try again in a few minutes.</p>
       <Link to={staticRoutes.home} className={`${SECONDARY} self-start`}>
-        Back to tools
+        Back to home
       </Link>
     </section>
   );
@@ -376,7 +376,7 @@ function Pane({ addon }) {
             </button>
           ) : null}
           <Link to={staticRoutes.home} className={SECONDARY}>
-            Back to tools
+            Back to home
           </Link>
         </div>
         {src ? (

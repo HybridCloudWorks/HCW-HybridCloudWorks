@@ -185,7 +185,7 @@ describe('AddOnPanePage before the pane', () => {
     const { container } = renderPane();
     const unavailable = await screen.findByTestId('addon-unavailable');
     expect(unavailable).toHaveTextContent(ADDON_UNAVAILABLE_SENTENCE);
-    expect(within(unavailable).getByRole('link', { name: 'Back to tools' })).toHaveAttribute(
+    expect(within(unavailable).getByRole('link', { name: 'Back to home' })).toHaveAttribute(
       'href',
       staticRoutes.home
     );
@@ -248,7 +248,7 @@ describe('AddOnPanePage, the pane', () => {
   it('keeps the way back on the toolbar, and says nothing behind the site', async () => {
     renderPane();
     const pane = await screen.findByTestId('addon-pane');
-    expect(within(pane).getByRole('link', { name: 'Back to tools' })).toHaveAttribute(
+    expect(within(pane).getByRole('link', { name: 'Back to home' })).toHaveAttribute(
       'href',
       staticRoutes.home
     );
@@ -445,7 +445,7 @@ describe('AddOnPanePage, a coming row', () => {
       expect(container.textContent).toContain(addon.summary);
       const coming = screen.getByTestId('addon-coming');
       expect(coming).toHaveTextContent(addon.comingReason);
-      expect(within(coming).getByRole('link', { name: 'Back to tools' })).toHaveAttribute(
+      expect(within(coming).getByRole('link', { name: 'Back to home' })).toHaveAttribute(
         'href',
         staticRoutes.home
       );
@@ -471,8 +471,10 @@ describe('AddOnPanePage routing', () => {
     fetchAddonStatus.mockResolvedValue(REACHABLE);
     renderPane();
     await screen.findByTestId('addon-pane');
-    expect(document.querySelector('link[rel="canonical"]')?.getAttribute('href') ?? '').toMatch(
-      /\/tools\/migration$|^$/
+    await vi.waitFor(() =>
+      expect(document.querySelector('link[rel="canonical"]')?.getAttribute('href')).toBe(
+        'https://hybridcloudworks.com/tools/migration'
+      )
     );
   });
 });

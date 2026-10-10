@@ -54,7 +54,7 @@ means the check exists in the repository's workflows but could not run in this s
 
 | Website | AzMigrate AddOn | AzMigrate App core | Cloud Assessor AddOn | NetworkEyes AddOn | Pane protocol | Health envelope |
 |---|---|---|---|---|---|---|
-| #1043 (ba54eee) | 0.3.0 (`APP_REF` v0.2.x interim shims) | v0.2.x (v0.3.0 planned: 5 props, `AddOnHealth`) | 0.1.0 | 0.1.0 | `hcw-addon` v1 (states `loading|ready|working|unavailable`) | flat v1 |
+| #1043 (ba54eee) | 0.3.0 (`APP_REF` v0.2.x interim shims) | v0.2.x (v0.3.0 planned: 5 props, `AddOnHealth`) | 0.1.0 | 0.1.0 | `hcw-addon` v1 (states `loading`, `ready`, `working`, `unavailable`) | flat v1 |
 
 Editions: `demo` (migration), `lab` (cloud-assessment, network-assessment). Node floor 26 (AzMigrate AddOn), Python 3.14.6+
 (both Python AddOns). Base images pinned by digest `[VERIFY]`.

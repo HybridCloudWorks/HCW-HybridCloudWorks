@@ -1511,8 +1511,11 @@ the widget name `hcw-addon-migration`, the hostname
 `migration.lab.hybridcloudworks.com`, Managed mode and no pre-clearance. The
 widget's **Site Key** is public: put it in `addons[].env.AMO_TURNSTILE_SITE_KEY`
 of the `migration` row in `lab-host/ansible/group_vars/all.yml` in a pull
-request [VERIFY]: the row ships with the always-passes test key
-`1x00000000000000000000AA` until then, so every challenge passes. Then copy
+request [VERIFY]: the row ships with the provider's documented test key
+`1x00000000000000000000AA` until then, and the `addons` role refuses to
+deploy a row whose environment still carries a test key, because a widget's
+real secret rejects the token a test key produces and no upload would ever
+verify. Then copy
 the **Secret Key** and, with it on the clipboard, set the vault key.
 PowerShell:
 

@@ -326,7 +326,9 @@ addons:
       AMO_SITE_ORIGINS: "{{ caddy_frame_ancestors | reject('equalto', \"'self'\") | join(' ') }}"
       AMO_ALLOWED_ORIGINS: ""
       AMO_TRUST_PROXY: "1"
-      AMO_TURNSTILE_SITE_KEY: "1x00000000000000000000AA" # [VERIFY at PR time] the TEST key; the owner replaces it with the migration widget's site key
+      # [VERIFY at PR time] the provider's TEST key: the role refuses to deploy while it is here;
+      # the owner replaces it with the migration widget's site key.
+      AMO_TURNSTILE_SITE_KEY: "1x00000000000000000000AA"
       AMO_RATE_LIMIT_POSTS: "10"
       AMO_RATE_LIMIT_WINDOW_MINUTES: "10"
       AMO_MAX_CONCURRENT: "2"

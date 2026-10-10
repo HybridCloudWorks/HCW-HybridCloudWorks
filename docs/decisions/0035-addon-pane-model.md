@@ -139,7 +139,8 @@ change on the site. The decision has nine parts.
    sandbox widening; until then the migration row ships without `downloads`
    (its catalogue row grants `navigate` only) and relies on "Copy report". The
    capability machinery is in place and tested, so confirming is a one-word
-   change to the row.
+   change to the row. Tracked with decision 8 in
+   [#1044](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/1044).
 
 The [AddOn integration standard](../standards/addon-integration-standard.md)
 carries the contracts in full, with each requirement marked Mandatory or
