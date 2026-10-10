@@ -352,10 +352,13 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
     # `sites/config` write after it, and the setting was present again.
     #
     # It is stripped inside this same apply by the azapi read-then-update pair
-    # below the resource — so the setting never survives the run that creates
-    # it, and nothing downstream has to remember to clean up. deploy-functions.yml
-    # asserts it is absent and FAILS if it is not, rather than deleting it:
-    # a repair there would hide a regression in the strip. T-511.
+    # below the resource — so the setting does not survive an apply that
+    # completes, and nothing downstream has to remember to clean up. An apply
+    # that fails between the write and the strip can leave it behind; no
+    # ordering prevents that, and the PLAT-2 note above the pair says exactly
+    # when it happens and what detects it. deploy-functions.yml asserts it is
+    # absent and FAILS if it is not, rather than deleting it: a repair there
+    # would hide a regression in the strip. T-511.
     #
     # The failure mode is worth remembering: a keyless connection string does
     # not fail at deploy, and does not fail as "storage". It fails as a 404 on
@@ -928,6 +931,52 @@ resource "azurerm_function_app_flex_consumption" "hcw" {
 # post-apply check in deploy-functions.yml, which is what fails if this stops
 # working. Keep the azapi provider: lab-hybrid.tf creates the lab Vault's seal
 # key with it (#726).
+#
+# WHAT THE ORDER GUARANTEES, AND WHAT NO ORDER CAN (PLAT-2, #962).
+#
+# Terraform runs a node only when every node it depends on finished without
+# error. A node whose dependency failed is skipped ("upstream dependencies
+# failed"), and every node that does not depend on the failure still runs: an
+# error does not stop the walk (internal/dag/walk.go in hashicorp/terraform,
+# read 2026-10-09). Nothing a configuration can declare runs after a
+# dependency that failed; the one vertex type that does, dag.AlwaysRunVertex,
+# is Terraform's own policy evaluation.
+#
+# The pair below depends on the Function App and on nothing else outside
+# itself, so:
+#
+#   - An error in any OTHER resource cannot strand the strip. If that resource
+#     is not one the Function App depends on, the list and the strip still run
+#     after azurerm's write. If it is, the Function App is skipped as well and
+#     azurerm writes nothing that needs stripping. The Cloudflare record that
+#     errored on 2026-10-06 (frontend.tf) is the first kind.
+#   - An error ON the path can: the Function App's own update failing after
+#     azurerm's settings write has reached ARM, the list or the strip failing,
+#     the azapi provider failing, or the run being cancelled between them. So
+#     can a `-target` that names the Function App and not the pair, and that
+#     apply is green. No ordering closes this, because the strip has to run
+#     after the write and Terraform runs nothing after a node that failed.
+#
+# So the order below is already the strongest Terraform offers, and what
+# remains is detection and convergence:
+#
+#   - The pair has no depends_on and references only the Function App and the
+#     list. Every resource added to its ancestry is one more failure that can
+#     strand it, so scripts/webjobs-strip-ancestry.test.mjs fails if it gains
+#     one.
+#   - A stranded host carries the strip's signature inverted: AzureWebJobsStorage
+#     present, or RUNTIME_CONFIG_WRITER other than azapi-strip.
+#     deploy-functions.yml fails on either before it syncs triggers, and
+#     monitor-functions-registered.yml reports both on its timer.
+#   - Re-applying converges. Both are replaced through replace_triggered_by,
+#     and Terraform destroys the old instances before the Function App update
+#     they depend on (DestroyEdgeTransformer, internal/terraform/
+#     transform_destroy_edge.go). A skipped create therefore leaves the list
+#     or the strip absent from state, and one whose own call failed may leave
+#     it tainted, so the next plan creates or replaces it whether or not the
+#     Function App still shows a change. That plan is not the permanent diff,
+#     so tfc-plan-check.yml reports it; it is the repair, and the owner's read
+#     after it is docs/runbooks/deployment-runbook.md, section 4 step 1.
 
 # SECRETS-IN-STATE: THIS EXPORT IS THE WHOLE LIVE SETTINGS MAP (T-723).
 #

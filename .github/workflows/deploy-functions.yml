@@ -114,6 +114,7 @@ jobs:
       # the token's subject against the `federated_subjects`
       # output — the usual cause is a ref or repository name that has moved.
       - name: Azure Login
+        id: login
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3
         with:
           client-id: ${{ vars.CLIENT_ID }}
@@ -237,6 +238,17 @@ jobs:
       # quietly cleaned up by the next deploy. If this fires, the azapi
       # resources did not run or did not work — re-apply and look at why,
       # rather than deleting the setting by hand.
+      #
+      # TWO SETTINGS, NOT ONE (PLAT-2, #962). Terraform cannot guarantee the
+      # strip runs after the provider's write in an apply that fails on that
+      # path (infra/functionapp.tf says exactly when), so a stranded host is
+      # detected rather than prevented, by the strip's whole signature:
+      # AzureWebJobsStorage absent AND RUNTIME_CONFIG_WRITER = azapi-strip, the
+      # stamp the strip writes. `azurerm` there means the provider's write was
+      # the last to land and the strip did not follow it, whether or not the
+      # provider happened to inject the setting this time.
+      # monitor-functions-registered.yml has always asserted both; this step
+      # asserted only the first.
       - name: Assert AzureWebJobsStorage is absent, then sync triggers
         env:
           APP: ${{ vars.FUNCTION_APP_NAME }}
@@ -251,6 +263,13 @@ jobs:
             exit 1
           fi
           echo "AzureWebJobsStorage absent — as the apply-time strip guarantees"
+
+          writer=$(az functionapp config appsettings list -n "$APP" -g "$RG" --query "[?name=='RUNTIME_CONFIG_WRITER'].value | [0]" -o tsv)
+          if [ "$writer" != "azapi-strip" ]; then
+            echo "::error::RUNTIME_CONFIG_WRITER on $APP is '${writer:-unset}', not 'azapi-strip'. The last Terraform apply's provider write was not followed by the strip (azapi_update_resource.function_app_settings_without_webjobs_storage). Re-apply infra/ in HCP Terraform to convergence; do not edit the setting by hand."
+            exit 1
+          fi
+          echo "RUNTIME_CONFIG_WRITER is azapi-strip — the strip was the last write to the settings"
 
           # The other half of #454. The pre-flight guard refuses to START while
           # a run is going; it cannot stop one that BEGINS after this job read
@@ -277,10 +296,6 @@ jobs:
             echo "syncfunctiontriggers attempt $attempt failed; retrying in 20 s"
             sleep 20
           done
-          sleep 15
-          count=$(az functionapp function list -n "$APP" -g "$RG" --query "length(@)" -o tsv)
-          echo "functions registered after sync: $count"
-          [ "$count" -gt 0 ] || { echo "::error::no functions registered after SyncTriggers"; exit 1; }
 
       # Deliberately BEFORE the storage window closes, so the two unwind in the
       # reverse of the order they opened.
@@ -334,6 +349,93 @@ jobs:
             --query "networkRuleSet.defaultAction" -o tsv | grep -qx Deny \
             || { echo "::error::default action is not Deny after the window closed"; exit 1; }
 
+      # Every function this commit registers, by name (PLAT-2, #962).
+      #
+      # Its own step, AFTER both firewall windows close. The listing is a
+      # control-plane read that needs neither window (the registration monitor
+      # makes the same call from a runner with no window at all), and polling
+      # for up to three minutes inside them would hold the host storage
+      # account at default-Allow for that long.
+      - name: Assert every expected function is registered
+        env:
+          APP: ${{ vars.FUNCTION_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+          # Registration lands over tens of seconds after a package swap and
+          # a SyncTriggers, so it is polled: the first read 15 s into this
+          # step, then every 15 s while a further read can start inside the
+          # budget.
+          REG_POLL_INTERVAL_S: '15'
+          REG_BUDGET_S: '180'
+        run: |
+          set -euo pipefail
+
+          # This was `count > 0` at the end of the step that syncs triggers,
+          # and the 2026-08-21 incident (83 deployed, 80 registered, three
+          # timers down) passed it. The expected set is
+          # functions/function-inventory.json in this checkout, which CI holds
+          # to the registrations in src/functions/index.js; the script names
+          # every function missing from the live listing, with its trigger.
+          #
+          # Exit 1 (something missing) is retried until the budget runs out,
+          # because a host still registering looks the same as one that never
+          # will. Exit 2 (the check could not run) is not retried and is not a
+          # verdict on the app. An `az` failure is retried: the host answers
+          # errors for a while after a package swap (run 32521270400).
+          started=$SECONDS
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            sleep "$REG_POLL_INTERVAL_S"
+            status=0
+            if names=$(az functionapp function list -n "$APP" -g "$RG" --query "[].name" -o tsv --only-show-errors); then
+              verdict=$(printf '%s\n' "$names" | node scripts/check-registered-functions.mjs) || status=$?
+            else
+              status=3
+              verdict="listing failed"$'\n'"az functionapp function list failed on attempt ${attempt}."
+            fi
+            elapsed=$((SECONDS - started))
+            echo "registration attempt ${attempt} at +${elapsed} s: ${verdict%%$'\n'*}"
+            if [ "$status" -eq 0 ] || [ "$status" -eq 2 ]; then
+              break
+            fi
+            if [ $((elapsed + REG_POLL_INTERVAL_S)) -gt "$REG_BUDGET_S" ]; then
+              break
+            fi
+          done
+
+          printf '%s\n' "$verdict"
+          {
+            echo "### Function registration"
+            echo
+            echo "Attempt ${attempt}, +${elapsed} s into this check."
+            echo
+            printf '%s\n' "$verdict"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          case "$status" in
+            0) ;;
+            2)
+              echo "::error::The registration check could not run (see the job summary). That says nothing about the Function App; fix the check."
+              exit 1 ;;
+            3)
+              echo "::error::az functionapp function list kept failing for ${elapsed} s, so registration is unknown."
+              exit 1 ;;
+            *)
+              # The script lists each as "- `name` (trigger)"; the annotation
+              # carries them as "name (trigger), ...".
+              missing=""
+              while IFS= read -r line; do
+                case "$line" in
+                  "- \`"*)
+                    entry=${line#"- \`"}
+                    missing+="${missing:+, }${entry/"\` ("/ (}" ;;
+                esac
+              done <<< "$verdict"
+              echo "::error::Expected functions are not registered after ${elapsed} s of polling (${verdict%%$'\n'*}): ${missing}. The strip's signature passed earlier in this run, so the host log holds why these did not start; read it before redeploying."
+              exit 1 ;;
+          esac
+
       # Probe the ORIGIN through a temporary firewall window, not Cloudflare.
       #
       # Going through Cloudflare does not work and cannot be made to work on
@@ -354,8 +456,10 @@ jobs:
       #
       # WHAT THIS DOES NOT TEST, deliberately recorded: the Cloudflare path.
       # It proves the app is healthy, not that the proxied route works. The
-      # origin-lock assertion below is what keeps that from being a blind spot
-      # — if Cloudflare were not the only way in, that check would fail.
+      # window itself is why the lock is asserted separately, after the window
+      # closes: a health check that passes through a hole in the lock says
+      # nothing about whether the lock is on. That step reads the Function
+      # App's own restriction rather than asking Cloudflare (PLAT-2, #962).
       - name: Open origin firewall window for this runner
         id: appfw
         env:
@@ -385,7 +489,6 @@ jobs:
       - name: Post-deploy smoke test
         env:
           APP_HOSTNAME: ${{ vars.APP_HOSTNAME }}
-          FUNCTIONS_URL: ${{ vars.FUNCTIONS_URL }}
           POLL_INTERVAL_S: '10'
           POLL_BUDGET_S: '150'
         run: |
@@ -431,20 +534,6 @@ jobs:
 
           echo "✅ Health check: **PASSED**" >> "$GITHUB_STEP_SUMMARY"
 
-          # The origin lock must still refuse everyone else. Without this the
-          # window above would quietly become a way to pass the check while the
-          # lock was open — a green test asserting the opposite of what it
-          # claims. Cloudflare's challenge is what a non-allowlisted caller
-          # gets, and a challenge is itself proof the request never reached
-          # Azure.
-          CF=$(curl -sS -m 30 -o /dev/null -w "%{http_code}" "${FUNCTIONS_URL}/health" || echo "000")
-          echo "non-allowlisted path returned: $CF"
-          if [ "$CF" = "200" ]; then
-            echo "❌ Origin lock: **NOT ENFORCING** — an unlisted caller got 200" >> "$GITHUB_STEP_SUMMARY"
-            exit 1
-          fi
-          echo "✅ Origin lock: **enforcing** (unlisted caller got HTTP $CF)" >> "$GITHUB_STEP_SUMMARY"
-
       - name: Close origin firewall window
         if: ${{ always() && steps.appfw.outputs.runner_ip != '' }}
         env:
@@ -456,3 +545,48 @@ jobs:
             --name "${APP}" \
             --rule-name "ci-smoke-${GITHUB_RUN_ID}" \
             --output none
+
+      # The origin lock, read where Azure enforces it (PLAT-2, #962).
+      #
+      # This used to be a curl of the API's public hostname at the end of the
+      # smoke test, passing on anything but a 200. That request never reached
+      # Azure. A GitHub-hosted runner asking the Cloudflare-proxied host is
+      # answered by Bot Fight Mode with a challenge and a 403, the same 403
+      # that sends the smoke test through a window to the origin above, so the
+      # step read Cloudflare's answer and reported "enforcing" whatever the
+      # Function App's restriction said. Setting functions_origin_lock_enabled
+      # to false would have left it green.
+      #
+      # Now it reads the restriction itself from the control plane and holds
+      # it to infra/: unmatched requests must be Deny (what the variable sets,
+      # and what decides IPv6); every address in every Allow rule is read,
+      # not the field as one string; a cloudflare-* rule may list only ranges
+      # cloudflare_ip_ranges declares, a ci-* window only one address, and no
+      # other Allow rule may exist; every declared range must be admitted; and
+      # this run's ci-smoke window must be gone. The rules and their tests are
+      # in scripts/assert-origin-lock.mjs.
+      #
+      # AFTER the window closes, so what it reads is the standing posture and
+      # it can prove the window went. It runs whenever the sign-in succeeded
+      # and the run was not cancelled, even when an earlier step failed: the
+      # standing lock does not depend on this deploy getting far. Whether this
+      # run's own window closed is asserted only when the run may have opened
+      # one, on the close step's own condition. The deploy identity's Website
+      # Contributor on the app covers the read; the SCM window steps above
+      # already make the same call.
+      - name: Assert the origin lock is enforcing
+        if: ${{ !cancelled() && steps.login.outcome == 'success' }}
+        env:
+          APP: ${{ vars.FUNCTION_APP_NAME }}
+          RG: ${{ vars.RESOURCE_GROUP }}
+          WINDOW_OPENED: ${{ steps.appfw.outputs.runner_ip != '' }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "$WINDOW_OPENED" = "true" ]; then
+            args=(--window-closed "ci-smoke-${GITHUB_RUN_ID}")
+          fi
+          restrictions=$(az functionapp config access-restriction show -n "$APP" -g "$RG" -o json --only-show-errors)
+          printf '%s\n' "$restrictions" \
+            | node scripts/assert-origin-lock.mjs "${args[@]}" \
+            | tee -a "$GITHUB_STEP_SUMMARY"

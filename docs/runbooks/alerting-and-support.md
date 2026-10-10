@@ -258,17 +258,43 @@ that is simply mis-tuned, because the suppression outlives the reason for it.
 ## The failure with no alert
 
 Run this when the site is reported down but Azure looks healthy, and as step 1
-of the post-apply sequence:
+of the post-apply sequence. The latest **Monitor Functions Registered** run's
+job summary answers all three questions below, if one has landed since the
+change; these are the same reads by hand. All are PowerShell.
 
-```bash
-az functionapp function list -n func-site-prod-cus-01 -g rg-web-site-prod-cus --query "length(@)" -o tsv
-az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus --query "[?name=='AzureWebJobsStorage'] | length(@)" -o tsv
-az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus --query "[?name=='RUNTIME_CONFIG_WRITER'].value | [0]" -o tsv
+Which expected functions are not registered. This reads
+`functions/function-inventory.json`, so run it from the repository root of a
+checkout of `main`, and only when `main` is what was last deployed (the
+monitor reads the deployed commit's copy itself). Confirm the file is there
+first; `True` means it is:
+
+```powershell
+Test-Path functions/function-inventory.json
 ```
 
-A function count of `0`, or an `AzureWebJobsStorage` count of `1`, is the
-condition behind all three recorded incidents. The mechanism is documented at
-`infra/main.tf` beside the azapi strip pair: `azurerm` writes an
+```powershell
+az functionapp function list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | ForEach-Object name | node scripts/check-registered-functions.mjs
+```
+
+Success is a first line of two equal numbers, the size of the inventory twice
+(`248 of 248` when this was written), and `$LASTEXITCODE` of `0`. Anything
+missing is listed beneath as `` `name` (trigger) ``, and the exit code is `1`.
+
+The strip's stamp, which should be one row reading `azapi-strip`, and the
+`AzureWebJobsStorage` row count, which should be `0`:
+
+```powershell
+az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'RUNTIME_CONFIG_WRITER' | Select-Object name, value
+```
+
+```powershell
+(az functionapp config appsettings list -n func-site-prod-cus-01 -g rg-web-site-prod-cus -o json | ConvertFrom-Json | Where-Object name -eq 'AzureWebJobsStorage' | Measure-Object).Count
+```
+
+An expected function missing, or an `AzureWebJobsStorage` count of `1`, is the
+condition behind all three recorded incidents: every function missing on
+2026-08-20, three timers on 2026-08-21. The mechanism is documented in
+`infra/functionapp.tf` beside the azapi strip pair: `azurerm` writes an
 `AzureWebJobsStorage` connection string with an empty account key on every write
 to the site and never shows it in a plan, the host prefers it over the
 identity-based setting, and every storage call then fails on the signature —
@@ -276,12 +302,16 @@ which presents as SyncTriggers not registering functions, not as a storage
 error.
 
 `RUNTIME_CONFIG_WRITER` should read `azapi-strip`. If it reads `azurerm`, the
-strip did not complete and the app is running on the first write.
+strip did not complete and the app is running on the first write. When that
+can happen, and why no Terraform ordering prevents it, is in
+[Deployment runbook](deployment-runbook.md) §4 step 1.
 
 The repair is to re-apply `infra/` so the strip runs again. **Do not delete the
-setting by hand** — that hides the regression from the assertion in
-`deploy-functions.yml`, which is the only automated detector this failure class
-has.
+setting by hand** — that hides the regression from the assertions in
+`deploy-functions.yml` and `monitor-functions-registered.yml`, which are the
+automated detectors this failure class has. When the strip's two reads are
+healthy and functions are still missing, the strip is not the cause: the named
+functions failed to start, and the host log says why.
 
 ## Break-glass: storage after shared-key authentication is disabled
 
