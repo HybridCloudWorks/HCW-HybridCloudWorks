@@ -46,9 +46,10 @@ This project has not cut a tagged release; entries are grouped under
     the token's own record, so a refusal is cleared only by the same read
     succeeding. A 401 writes a warning starting `coder-status: Coder
     refused CODER_STATUS_TOKEN (401)` for a log alert to match; a 403 now
-    says it lacks a read scope rather than "expired or revoked". The canary
-    runs `checkToken` once an hour, which asks Coder directly and never
-    through the anonymous minute cache, so warm-cache traffic cannot hide a
+    says it lacks a read scope rather than "expired or revoked".
+    `checkAgentHealth`, which is armed, runs `checkTokenIfDue` and so asks
+    Coder directly once an hour, never through the anonymous minute cache,
+    whether or not the canary is armed, so warm-cache traffic cannot hide a
     refusal; visitors' live reads record their answers too.
   - Two more Health Hub probes, recorded by the pulse and shown by the Labs
     snapshot: **Lab job canary** (`lab-canary`; offline when nothing ran the

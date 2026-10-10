@@ -170,10 +170,6 @@ export function judgeJob(job, payload) {
  * @param {(ms: number) => Promise<void>} [deps.sleep]
  * @param {() => string} [deps.uuid]
  * @param {object} [deps.log] the invocation context
- * @param {() => Promise<unknown>} [deps.checkCoderToken] the scheduled token
- *   check (coder-status.js checkToken), once per run: it asks Coder directly,
- *   never through the anonymous minute cache, so the status-token check has
- *   evidence whatever visitors do (CodeRabbit, #1056); never fatal
  */
 export function createLabCanary({
   store,
@@ -181,7 +177,6 @@ export function createLabCanary({
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   uuid = randomUUID,
   log = {},
-  checkCoderToken = null,
 }) {
   const readState = () => store.readDoc('admin_config', LAB_CANARY_DOC_ID, ADMIN_CONFIG_PARTITION);
 
@@ -445,15 +440,6 @@ export function createLabCanary({
     });
   }
 
-  async function checkCoder() {
-    if (!checkCoderToken) return;
-    try {
-      await checkCoderToken();
-    } catch (error) {
-      log.warn?.(`[labCanary] the scheduled token check failed (${error?.code ?? 'error'})`);
-    }
-  }
-
   async function run() {
     const started = now();
     const startedMs = started.getTime();
@@ -485,7 +471,6 @@ export function createLabCanary({
       return { ok: false, outcome: 'overlap', claimSeconds: null, runSeconds: null, jobLeftInFlight: false };
     }
     const recorded = await record(outcome.result, outcome.pendingJobId, atIso, outcome.ownJobId ?? null);
-    await checkCoder();
 
     const { result } = outcome;
     if (!result.ok) {

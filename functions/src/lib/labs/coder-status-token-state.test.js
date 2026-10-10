@@ -169,7 +169,7 @@ describe('the scheduled check asks Coder whatever the anonymous cache holds (Cod
     expect(visitor.capacity.running).toBe(1);
     expect(fetchImpl).not.toHaveBeenCalled();
 
-    // The canary's hourly check asks Coder anyway, and records the refusal.
+    // The hourly scheduled check asks Coder anyway, and records the refusal.
     const warn = vi.fn();
     expect(await h.checkToken({ warn })).toEqual({ checked: true, refusedStatus: 401 });
     expect(fetchImpl.mock.calls.map(([url]) => new URL(url).pathname).sort()).toEqual([
@@ -199,6 +199,35 @@ describe('the scheduled check asks Coder whatever the anonymous cache holds (Cod
     });
     expect(down.createDoc).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith('coder-status: the scheduled token check could not reach a verdict (Coder answered 502)');
+  });
+
+  it('checkTokenIfDue asks Coder once an hour: not again while the status answer is younger, and at once without one', async () => {
+    const fresh = store({ operations: { status: { lastAcceptedAt: ago(TOKEN_STATE_REFRESH_MS - 60_000) } } });
+    const quiet = coderFetch(HEALTHY);
+    expect(await handlers(fresh, quiet).checkTokenIfDue({ warn: vi.fn() })).toEqual({ checked: false, reason: 'not due' });
+    expect(quiet).not.toHaveBeenCalled();
+
+    // A refusal an hour old is due too: a renewed token is seen within the hour.
+    const refused = store({ operations: { status: { lastRefusedAt: ago(TOKEN_STATE_REFRESH_MS), lastRefusedStatus: 401 } } });
+    expect(await handlers(refused, coderFetch(HEALTHY)).checkTokenIfDue({ warn: vi.fn() })).toEqual({
+      checked: true,
+      refusedStatus: null,
+    });
+    expect(isRefusing(recorded(refused, 'status'))).toBe(false);
+
+    // The expiry read's answers do not make the status check any less due.
+    const expiryOnly = store({ operations: { expiry: { lastAcceptedAt: ago(1_000) } } });
+    const asked = coderFetch(HEALTHY);
+    expect((await handlers(expiryOnly, asked).checkTokenIfDue({ warn: vi.fn() })).checked).toBe(true);
+    expect(asked).toHaveBeenCalled();
+  });
+
+  it('checkTokenIfDue asks anyway when the record cannot be read', async () => {
+    const s = store();
+    s.readDoc.mockRejectedValueOnce(Object.assign(new Error('Cosmos is down'), { code: 503 }));
+    const fetchImpl = coderFetch(HEALTHY);
+    expect((await handlers(s, fetchImpl).checkTokenIfDue({ warn: vi.fn() })).checked).toBe(true);
+    expect(fetchImpl).toHaveBeenCalled();
   });
 
   it('does nothing without a token', async () => {

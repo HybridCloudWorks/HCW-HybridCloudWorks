@@ -95,8 +95,11 @@
  * Anonymous visitors keep the one-minute cache warm, and a read that finds
  * it warm never asks Coder, so a check riding on that read could go hours
  * without seeing a refusal. `checkToken` asks Coder directly, with the
- * status read's two calls, records the answer, and leaves the cache alone;
- * the hourly lab canary calls it (labs/canary.js).
+ * status read's two calls, records the answer, and leaves the cache alone.
+ * `checkTokenIfDue` runs it when the status operation's newest answer is an
+ * hour old, and checkAgentHealth, which is armed and runs every five
+ * minutes, calls that, so the check needs no flag of its own and does not
+ * depend on the lab canary being armed (CodeRabbit, #1056).
  */
 
 import { fetchWithTimeout } from '../http/fetch-with-timeout.js';
@@ -827,9 +830,32 @@ export function createCoderStatusHandlers({
     return { checked: true, refusedStatus: null };
   }
 
+  /**
+   * `checkToken`, at most once per TOKEN_STATE_REFRESH_MS: due when the
+   * status operation's newest recorded answer is that old, or when there is
+   * none or it cannot be read (failing toward asking). Without
+   * CODER_STATUS_TOKEN it asks nothing. Never throws.
+   */
+  async function checkTokenIfDue(context) {
+    let entry = null;
+    try {
+      entry = (await store.readDoc('admin_config', TOKEN_STATE_DOC_ID, 'admin_config'))?.operations?.status ?? null;
+    } catch {
+      entry = null;
+    }
+    const answers = [entry?.lastAcceptedAt, entry?.lastRefusedAt]
+      .map((iso) => Date.parse(String(iso ?? '')))
+      .filter(Number.isFinite);
+    if (answers.length && now() - Math.max(...answers) < TOKEN_STATE_REFRESH_MS) {
+      return { checked: false, reason: 'not due' };
+    }
+    return checkToken(context);
+  }
+
   return {
     readStatus,
     checkToken,
+    checkTokenIfDue,
 
     /**
      * GET /api/cms/labs/coder-token — editor. When the status token expires,

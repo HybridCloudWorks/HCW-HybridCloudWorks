@@ -219,7 +219,7 @@ export function coderTokenVerdict(state, nowMs) {
   if (entries.length === 0) {
     return result(
       'unknown',
-      'No read of Coder with CODER_STATUS_TOKEN has been recorded yet; the labs status read, the hourly canary and the Integrations card record each one.'
+      "No read of Coder with CODER_STATUS_TOKEN has been recorded yet; the labs status read, checkAgentHealth's hourly check and the Integrations card record each one."
     );
   }
   const detail = entries.map(([operation, entry]) => operationLine(operation, entry)).join('\n');

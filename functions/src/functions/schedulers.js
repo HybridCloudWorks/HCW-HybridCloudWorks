@@ -48,6 +48,7 @@ import { createSkillsHubScrape } from '../lib/timers/skills-hub.js';
 import { createMcpTokenRefresh } from '../lib/timers/mcp-token-refresh.js';
 import { createAgentHealthCheck } from '../lib/timers/agent-health.js';
 import { createMainHistoryReader } from '../lib/labs/drift.js';
+import { createCoderStatusHandlers } from '../lib/labs/coder-status.js';
 import { createTempStorageCleanup } from '../lib/timers/temp-storage.js';
 import { createForgeScheduled } from '../lib/timers/forge-scheduled.js';
 import { findDuplicateContent, buildDedupFields } from '../lib/cms/content-dedup.js';
@@ -262,12 +263,16 @@ timer('checkAgentHealth', 'CHECK_AGENT_HEALTH', '0 */5 * * * *', (context) =>
   // The notifier is how the owner hears that the lab closed (LAB-2); the
   // mark itself never depends on it. The drift reader is main's lab-host/
   // and vps-agent/ history, read once an hour for the lab-drift check
-  // (#1009, labs/drift.js), after the marks and messages.
+  // (#1009, labs/drift.js), after the marks and messages. Last, once an
+  // hour, the Coder status token is checked directly, past the labs page's
+  // minute cache, for the coder-token check (labs/coder-status.js
+  // checkTokenIfDue; CodeRabbit, #1056).
   createAgentHealthCheck({
     store,
     notifier: createNotifier({ store, log: context }),
     log: context,
     driftReader: createMainHistoryReader(),
+    coderTokenCheck: () => createCoderStatusHandlers({ store }).checkTokenIfDue(context),
   }).run()
 );
 
@@ -292,21 +297,11 @@ timer('healthPulse', 'HEALTH_PULSE', '0 2-59/5 * * * *', async (context) => {
 // waited for until the agent has run it end to end, recorded for the Health
 // Hub's lab-canary probe, and deleted. Twenty past, clear of the five-minute
 // timers' marks. A real job on the owner's host, so off until LAB_CANARY is
-// in enabled_timers. It also checks the Coder status token once, live and
-// never through the anonymous minute cache, so the coder-token probe has
-// evidence whatever visitors do (lib/labs/canary.js, coder-status.js
-// checkToken).
+// in enabled_timers (lib/labs/canary.js). The Coder status token is
+// checked by checkAgentHealth, above, which is armed, not by this.
 timer('labCanary', 'LAB_CANARY', '0 20 */1 * * *', async (context) => {
-  const [{ createLabCanary }, { createCoderStatusHandlers }] = await Promise.all([
-    import('../lib/labs/canary.js'),
-    import('../lib/labs/coder-status.js'),
-  ]);
-  const coderStatus = createCoderStatusHandlers({ store });
-  return createLabCanary({
-    store,
-    log: context,
-    checkCoderToken: () => coderStatus.checkToken(context),
-  }).run();
+  const { createLabCanary } = await import('../lib/labs/canary.js');
+  return createLabCanary({ store, log: context }).run();
 });
 
 // ── AI ───────────────────────────────────────────────────────────────────────

@@ -87,16 +87,14 @@ function harness({ s, script = [], startMs = START, jobId = JOB_ID }) {
     for (const step of script) if (step.at === sleeps) await step.act(s);
   });
   const log = { warn: vi.fn(), log: vi.fn() };
-  const checkCoderToken = vi.fn(async () => ({ checked: true, refusedStatus: null }));
   const canary = createLabCanary({
     store: s,
     now: () => new Date(nowMs),
     sleep,
     uuid: () => jobId,
     log,
-    checkCoderToken,
   });
-  return { canary, log, sleep, checkCoderToken, advance: (ms) => (nowMs += ms) };
+  return { canary, log, sleep, advance: (ms) => (nowMs += ms) };
 }
 
 const at = (ms) => new Date(START + ms).toISOString();
@@ -167,7 +165,6 @@ describe('a run', () => {
     });
     expect(h.sleep).toHaveBeenCalledWith(CANARY_POLL_MS);
     expect(h.log.warn).not.toHaveBeenCalled();
-    expect(h.checkCoderToken).toHaveBeenCalledTimes(1);
   });
 
   it('fails a job that ran and failed, still deleting it, and counts the streak', async () => {
@@ -248,7 +245,6 @@ describe('a run', () => {
     const h = harness({ s });
     expect(await h.canary.run()).toMatchObject({ ok: false, outcome: 'no-agent' });
     expect(s.data.lab_jobs.size).toBe(0);
-    expect(h.checkCoderToken).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -367,7 +363,6 @@ describe('one run holds the record at a time (CodeRabbit, #1056)', () => {
     expect(secondSummary).toEqual({ ok: false, outcome: 'overlap', claimSeconds: null, runSeconds: null, jobLeftInFlight: false });
     expect(second.log.warn).toHaveBeenCalledWith('[labCanary] another canary run holds the record; this run left it alone');
     expect(s.createDoc.mock.calls.filter(([container]) => container === 'lab_jobs')).toHaveLength(1);
-    expect(second.checkCoderToken).not.toHaveBeenCalled();
     // The first run was not disturbed, and its own last write released its hold.
     expect(summary).toMatchObject({ ok: true, outcome: 'succeeded' });
     expect(s.data.admin_config.get(LAB_CANARY_DOC_ID)).toMatchObject({ pendingJobId: null, activeRun: null });

@@ -58,6 +58,13 @@
  * lag, calls no third party. Last, and never fatal: the marks and messages
  * above are done before GitHub is asked anything, and a failed read is
  * recorded on the document and logged at warn, not thrown.
+ *
+ * AND THE CODER STATUS TOKEN, ONCE AN HOUR (#1009; CodeRabbit, #1056). Last
+ * of all, `coderTokenCheck` asks Coder with the status token directly, never
+ * through the labs page's minute cache, when the recorded answer is an hour
+ * old (labs/coder-status.js checkTokenIfDue), so the health pulse's
+ * `coder-token` probe has evidence whatever visitors do and without the lab
+ * canary armed. Never fatal, like the read of main.
  */
 import { AGENT_DOWN_STATUSES, AGENT_STALE_AFTER_MS } from '../labs.js';
 import { refreshDriftRecord } from '../labs/drift.js';
@@ -218,6 +225,9 @@ export async function tellOwnerAgentBack({ notifier, agent, backAtMs, log = {}, 
  * @param {object} [deps.log]
  * @param {{ hostCommits: Function }|null} [deps.driftReader] main's history
  *   (labs/drift.js createMainHistoryReader); null skips the hourly read
+ * @param {(() => Promise<{ checked: boolean, refusedStatus?: number|null, reason?: string }>)|null}
+ *   [deps.coderTokenCheck] the hourly status-token check (coder-status.js
+ *   checkTokenIfDue); null skips it
  */
 export function createAgentHealthCheck({
   store,
@@ -225,6 +235,7 @@ export function createAgentHealthCheck({
   now = () => new Date(),
   log = {},
   driftReader = null,
+  coderTokenCheck = null,
 }) {
   const patchAgent = (agent, updates, options = {}) =>
     store.patchDoc('lab_agents', agentIdOf(agent), updates, { partitionKey: agentIdOf(agent), ...options });
@@ -304,7 +315,23 @@ export function createAgentHealthCheck({
     const notifiedBack = await tellOwnerBack(plan.notifyBack, atMs);
     const summary = { markedOffline: marked, heartbeatWon: lost.size, notifiedOffline, notifiedBack };
     if (driftReader) summary.mainRead = await readMain(agents, atMs);
+    if (coderTokenCheck) summary.tokenCheck = await checkToken();
     return summary;
+  }
+
+  /**
+   * The hourly status-token check: 'accepted', 'refused', 'not due',
+   * 'skipped' (no token, or Coder gave no verdict) or 'failed'. Never throws.
+   */
+  async function checkToken() {
+    try {
+      const outcome = await coderTokenCheck();
+      if (!outcome?.checked) return outcome?.reason === 'not due' ? 'not due' : 'skipped';
+      return outcome.refusedStatus ? 'refused' : 'accepted';
+    } catch (error) {
+      log.warn?.(`[checkAgentHealth] the status token check failed (${error?.code ?? 'error'})`);
+      return 'failed';
+    }
   }
 
   /**

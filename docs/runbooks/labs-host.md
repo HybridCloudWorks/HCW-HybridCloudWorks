@@ -786,13 +786,14 @@ the health pulse records each every five minutes.
 - **Coder status token.** Every read of Coder with `CODER-STATUS-TOKEN`
   records Coder's answer, kept apart for the two things the token does: the
   labs status read (a visitor's read that misses the one-minute cache, and
-  the canary's hourly check, which asks Coder directly and never through
-  that cache) and the Integrations card's read of the token's own record.
+  `checkAgentHealth`'s hourly check, which asks Coder directly and never
+  through that cache) and the Integrations card's read of the token's own
+  record.
   Critical from the first 401 or 403 on either until that same read
   succeeds again, naming which read and since when; so opening Integrations
   never clears a status read's 403. Unknown when nothing has read Coder for
-  a day. With the canary armed, the status read is checked hourly whatever
-  visitors do. A 401 also writes a warning line starting `coder-status:
+  a day, which with the hourly check means the check itself has stopped. A
+  401 also writes a warning line starting `coder-status:
   Coder refused CODER_STATUS_TOKEN (401)` (no alert rule pages on it yet;
   "What these still do not cover" in `alerting-and-support.md` has the
   query). The fix is the automatic renewal below, run now with
