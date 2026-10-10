@@ -19,6 +19,15 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Added
 
+- **ADR 0035 accepted (2026-10-10, #1044).** The owner confirmed decision 8
+  (AddOn containers run beside Coder on the lab host, amending ADR 0032) and
+  decision 9 (`allow-downloads` on AddOn panes): the migration catalogue row
+  now grants `navigate` and `downloads`, so its sandbox is `allow-scripts
+  allow-same-origin allow-forms allow-downloads` and the report bundle saves
+  from inside the frame; the accepted-risk row in `TODO.md` applies. The
+  standard, the program package and the decisions index record the
+  confirmation; `[REVIEW REQUIRED]` remains only on the per-AddOn
+  human-verification widgets, which the owner creates.
 - **AddOn panes: independently built tools in sandboxed panes on their own
   lab names, starting with the Migration Hub (ADR 0035; the Phase 6
   website pull request of the App-to-AddOn program).** The site gains a

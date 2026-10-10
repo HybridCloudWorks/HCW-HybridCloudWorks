@@ -70,12 +70,11 @@ redirected by Caddy to the AddOn's page on the site.
 
 ## Review items the program leaves open
 
-- [REVIEW REQUIRED] ADR 0035 decision 8: AddOn containers beside Coder on the
-  lab host, amending ADR 0032's "Compose is for Coder only" line
+- Confirmed 2026-10-10: ADR 0035 decision 8 (AddOn containers beside Coder on
+  the lab host, amending ADR 0032's "Compose is for Coder only" line) and
+  decision 9 (`allow-downloads` on AddOn panes; the migration row now grants
+  `downloads` and the accepted-risk row in `TODO.md` applies)
   ([#1044](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/1044)).
-- [REVIEW REQUIRED] ADR 0035 decision 9: `allow-downloads` on AddOn panes
-  ([#1044](https://github.com/saulpatinojr/HCW-HybridCloudWorks/issues/1044));
-  once confirmed, the accepted-risk row in `TODO.md` applies.
 - [REVIEW REQUIRED] One human-verification widget per AddOn, created by the
   owner; its secret seeded with `hcw-vault-set`
   ([runbook](../../runbooks/labs-host.md), "Tool add-ons").

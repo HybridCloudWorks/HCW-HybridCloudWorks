@@ -187,8 +187,8 @@ describe('addon catalogue', () => {
     const migration = addonById('migration');
     expect(migration.status).toBe('available');
     expect(migration.menuLabel).toBe('Migration Hub');
-    // No `downloads` until the owner confirms ADR 0035 decision 9.
-    expect(migration.capabilities).toEqual(['navigate']);
+    // `downloads` confirmed by the owner on 2026-10-10 (ADR 0035 decision 9, #1044).
+    expect(migration.capabilities).toEqual(['navigate', 'downloads']);
     expect(migration.origin).toBe('https://migration.lab.hybridcloudworks.com');
     expect(migration.panePath).toBe('/');
     expect(migration.healthPath).toBe('/api/health');

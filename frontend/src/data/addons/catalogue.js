@@ -116,9 +116,9 @@ export const addons = Object.freeze([
     providers: Object.freeze(['azure']),
     technology: Object.freeze(['azure-resource-mover', 'terraform']),
     status: 'available',
-    // `downloads` is not granted until the owner confirms ADR 0035 decision 9 (the sandbox widening);
-    // until then the pane's report bundle is reached through the tool's "Copy report" (TODO.md).
-    capabilities: Object.freeze(['navigate']),
+    // `downloads` (allow-downloads on the sandbox) confirmed by the owner on 2026-10-10, ADR 0035 decision 9, #1044;
+    // the accepted-risk row in TODO.md applies. The pane keeps its "Copy report" control as the fallback.
+    capabilities: Object.freeze(['navigate', 'downloads']),
     docsUrl: 'https://github.com/saulpatinojr/HCW-AzMigrateOrchestrator_Addon#readme',
     articleSlugs: Object.freeze([]),
   }),

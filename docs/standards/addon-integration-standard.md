@@ -113,7 +113,7 @@ Complete example row:
   providers: ['azure'],
   technology: ['azure-resource-mover', 'terraform'],
   status: 'available',
-  capabilities: ['navigate'], // 'downloads' once ADR 0035 decision 9 is confirmed
+  capabilities: ['navigate', 'downloads'], // ADR 0035 decision 9, confirmed 2026-10-10
   docsUrl: 'https://github.com/saulpatinojr/HCW-AzMigrateOrchestrator_Addon#readme',
   articleSlugs: [],
 }
@@ -176,7 +176,7 @@ Frame: `<iframe src={addonPaneUrl(addon)} title={addon.title} sandbox={sandboxFo
 | Sandbox | When |
 | --- | --- |
 | `allow-scripts allow-same-origin allow-forms` | Always. `allow-same-origin` is required: without it the frame is an opaque origin, its own `fetch('/api/…')` arrives with `Origin: null`, exact-origin CORS refuses it, and the verification widget cannot bind to its hostname. The AddOn is always cross-origin to the site, so scripts plus same-origin cannot lift the sandbox. |
-| `allow-downloads` | Row has `downloads`. Needed by any AddOn that saves a file (bundle zip, sample CSV). [REVIEW REQUIRED] (section 20). |
+| `allow-downloads` | Row has `downloads`. Needed by any AddOn that saves a file (bundle zip, sample CSV). Confirmed by the owner on 2026-10-10 (ADR 0035 decision 9, section 21). |
 | `allow-popups` | Row has `popups`. Discouraged; popups inherit the sandbox. |
 | `allow-top-navigation` | Never. |
 
@@ -451,8 +451,8 @@ platform and not to AddOns. **Mandatory** that an AddOn uses none of them:
 
 | Item | Flag | Who |
 | --- | --- | --- |
-| `allow-downloads` on AddOn panes (sandbox widening beyond the labs pane) | [REVIEW REQUIRED] | Owner, as a website security decision, recorded in ADR 0035 |
-| ADR 0032 amendment: AddOn containers on the lab host beyond Coder and its database | [REVIEW REQUIRED] | Owner, in ADR 0035 |
+| `allow-downloads` on AddOn panes (sandbox widening beyond the labs pane) | Confirmed 2026-10-10 (#1044) | Owner, as a website security decision, recorded in ADR 0035 decision 9 |
+| ADR 0032 amendment: AddOn containers on the lab host beyond Coder and its database | Confirmed 2026-10-10 (#1044) | Owner, in ADR 0035 decision 8 |
 | One human-verification widget per AddOn (separate site key and secret from the site's own) and its creation | [REVIEW REQUIRED] | Owner creates each widget; secret seeded with `hcw-vault-set` |
 | Per-host direct-visit redirect in the Caddyfile (directive ordering) | [VERIFY] | `caddy adapt` in CI before merge |
 
