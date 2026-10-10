@@ -270,8 +270,31 @@ export function createLabCanary({
   /** Enqueue, wait, judge, clean up: `{ result, pendingJobId }`. */
   async function runJob(startedMs) {
     const jobId = uuid();
-    const payload = canaryPayload(jobId);
     await store.createDoc('lab_jobs', canaryJob(jobId, new Date(startedMs).toISOString()));
+    // From here the job exists, so whatever fails while it is followed, its id
+    // must reach the record: the next run settles it, and enqueues nothing new
+    // while it may still be queued or running (CodeRabbit, #1055).
+    try {
+      return await followJob(jobId, startedMs);
+    } catch (error) {
+      log.warn?.(
+        `[labCanary] the canary job could not be followed after it was created (${error?.code ?? 'error'}); the next run settles it`
+      );
+      return {
+        result: {
+          ok: false,
+          outcome: 'error',
+          reason: 'the job could not be read or cleaned up after it was created; the next run settles it',
+          totalMs: now().getTime() - startedMs,
+        },
+        pendingJobId: jobId,
+      };
+    }
+  }
+
+  /** Wait for a created job, judge it, clean it up: `{ result, pendingJobId }`. May throw. */
+  async function followJob(jobId, startedMs) {
+    const payload = canaryPayload(jobId);
     const job = await waitFor(jobId, startedMs + CANARY_WAIT_MS);
     const totalMs = now().getTime() - startedMs;
     if (!job) {
