@@ -86,7 +86,7 @@ These apply regardless of component, and CI enforces most of them:
   Repository Policy workflow unless allowlisted in
   `scripts/validate-repository-structure.ps1`. Narrative docs belong in
   `docs/` (published to docs.hybridcloudworks.com), open work in GitHub issues
-  on [the Work Board](https://github.com/users/saulpatinojr/projects/6) (a private user project), completed
+  on [the Work Board](https://github.com/users/saulpatinojr/projects/6), completed
   work in `CHANGELOG.md`, accepted risks in `TODO.md`. If a change completes
   tracked work, check that the issue closes with it and CHANGELOG.md records it.
   A comment that sends the reader to `TODO.md` for open work is a finding:

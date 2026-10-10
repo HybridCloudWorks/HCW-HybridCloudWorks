@@ -3391,6 +3391,12 @@ This project has not cut a tagged release; entries are grouped under
 
 ### Changed
 
+- **The HCW Work Board is public, so CONTRIBUTING links it again (owner,
+  2026-10-10).** Open work stays GitHub issues; CONTRIBUTING, TODO.md and the
+  code-review skill now name the board as public and link it
+  (https://github.com/users/saulpatinojr/projects/6), where #1045 had pointed
+  visitors at Issues alone while it was private.
+
 - **The former organisation's board links and the docs CNAME now follow the
   repository to its owner's account (public readiness).** `infra/frontend.tf`
   points `docs.hybridcloudworks.com` at `saulpatinojr.github.io` instead of
