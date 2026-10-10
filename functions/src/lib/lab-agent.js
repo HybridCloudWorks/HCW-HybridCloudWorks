@@ -31,7 +31,11 @@ const json = (status, body) => ({
 });
 
 import { AGENT_DOWN_STATUSES } from './labs.js';
-import { createCoderAutomationReporter } from './labs/coder-automation.js';
+import {
+  MAX_CLOCK_SKEW_MS,
+  createCoderAutomationReporter,
+  parseIsoDateTime,
+} from './labs/coder-automation.js';
 import {
   BACK_ONLINE_SENT,
   OFFLINE_NOTIFY_AFTER_MS,
@@ -255,6 +259,40 @@ async function reportOutage({ store, notifier }, context, agent, outage, atMs) {
   }
 }
 
+const COMMIT_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * The commit the agent's host last converged from, as a heartbeat carries it
+ * (`applied`, vps-agent/lib/applied-commit.js; #1009), checked: a full
+ * lower-case sha and two ISO 8601 date-times with a zone, normalised to UTC.
+ * Null for anything else, and for a date more than MAX_CLOCK_SKEW_MS ahead of
+ * the site's clock: both say when something already happened, and the host's
+ * clock is checked, not trusted (labs/coder-automation.js has the same rule).
+ *
+ * Not an authorization input, unlike `capabilities` and `oid`: it is the
+ * host's own account of itself, which is all the drift check
+ * (labs/drift.js) can have, and a host that lies about it only hides its own
+ * lag from its owner.
+ *
+ * @returns {{ commit: string, committedAt: string, appliedAt: string } | null}
+ */
+export function parseAppliedRecord(raw, nowMs) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  if (typeof raw.commit !== 'string' || !COMMIT_SHA.test(raw.commit)) return null;
+  const committedAt = parseIsoDateTime(raw.committedAt);
+  const appliedAt = parseIsoDateTime(raw.appliedAt);
+  if (!committedAt || !appliedAt) return null;
+  const ahead = (iso) => Date.parse(iso) - nowMs > MAX_CLOCK_SKEW_MS;
+  if (ahead(committedAt) || ahead(appliedAt)) return null;
+  return { commit: raw.commit, committedAt, appliedAt };
+}
+
+/** True when the stored record already says exactly this. */
+const sameApplied = (stored, next) =>
+  stored?.commit === next.commit &&
+  stored?.committedAt === next.committedAt &&
+  stored?.appliedAt === next.appliedAt;
+
 /**
  * Record liveness for this agent.
  *
@@ -267,6 +305,7 @@ async function reportOutage({ store, notifier }, context, agent, outage, atMs) {
  * `capabilities` and `oid` are NOT writable through this path — they are
  * the registry's authorization inputs, and an endpoint the VPS can reach
  * must not be able to grant the VPS new job types or rebind its identity.
+ * `applied`, the commit the host converged from, is (parseAppliedRecord).
  */
 async function heartbeatAgent({ guard, store, now, notifier }, request, context) {
   const parsed = await authenticatedAgentBody(guard, request);
@@ -299,6 +338,13 @@ async function heartbeatAgent({ guard, store, now, notifier }, request, context)
   };
   if (typeof body.hostname === 'string') updates.hostname = body.hostname.slice(0, 255);
   if (typeof body.version === 'string') updates.version = body.version.slice(0, 64);
+
+  // The host's applied commit (#1009), one patch operation as one object, and
+  // only when it changed: it moves once per bootstrap.sh run, not per beat.
+  // An absent or refused record leaves the stored one as it was; the drift
+  // verdict judges its age, so a host that stops reporting is not hidden.
+  const applied = parseAppliedRecord(body.applied, at.getTime());
+  if (applied && !sameApplied(agent.applied, applied)) updates.applied = applied;
 
   // The transitions the health timer would otherwise have to find: the
   // record said the agent was up and this heartbeat says it has gone, or

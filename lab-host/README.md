@@ -195,8 +195,22 @@ sudo /opt/hcw-src/lab-host/bootstrap.sh
 ```
 
 A successful run ends with a `PLAY RECAP` line for `localhost` showing
-`failed=0` and `unreachable=0`. On a host that is already configured,
-`changed=0` is the normal result; anything else names the task that changed.
+`failed=0` and `unreachable=0`. On a host that is already configured, the
+one change every run makes is its last task, **Record the commit this host
+converged from, for the agent's heartbeat**, which writes
+`/etc/hcw/applied-commit.json` (`root:root` `0644`: the commit, its committer
+date and the time the run finished); anything else changed names the task
+that changed it. A run that fails before that task leaves the previous
+record, so the record only ever names a commit the whole playbook converged
+from, and a `--check` run writes nothing.
+
+The agent sends that record on every heartbeat, and the site compares it
+with `main` (#1009): the Labs **Agents** tab shows `commit <8 hex> ·
+converged <time>` on the agent's card with the verdict under it, and the
+Health Hub's **Lab host runs main** turns critical once a change under
+`lab-host/` or `vps-agent/` has waited on `main` for more than a day without
+a run. Nothing re-runs the playbook for you: the check raises the lag, and
+the line above clears it.
 
 **Then push the Coder template at once** ("Publishing the template",
 below). `lab_images` removes the images the checked-out commit no longer

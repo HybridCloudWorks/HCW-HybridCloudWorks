@@ -36,6 +36,7 @@ import { readFileSync } from 'node:fs';
 import { CAPABILITIES } from './lib/capabilities.js';
 import { runInDocker } from './lib/docker-runner.js';
 import { createApiClient } from './lib/api.js';
+import { readAppliedCommit } from './lib/applied-commit.js';
 import { missingConfig, readApiConfig } from './lib/config.js';
 import { createLogger } from './lib/log.js';
 
@@ -102,13 +103,19 @@ let shuttingDown = false;
 // Once shutdown begins every heartbeat says `stopping`, the interval's and a
 // finishing job's included: an `idle` or `busy` one during the drain would
 // reopen the public door that `stopping` closed (review of #1018).
+//
+// `applied` is the commit the playbook last converged this host from, read
+// afresh each time (lib/applied-commit.js says why), so the site can raise a
+// host that lags main (#1009). Absent when there is no valid record.
 async function sendHeartbeat(status = shuttingDown ? 'stopping' : 'idle') {
   try {
+    const applied = await readAppliedCommit();
     await api.heartbeat({
       status,
       activeJobs,
       hostname: os.hostname(),
       version: AGENT_VERSION,
+      applied,
     });
   } catch (err) {
     // Never fatal. A heartbeat gap shows as "offline" in the Labs dashboard,

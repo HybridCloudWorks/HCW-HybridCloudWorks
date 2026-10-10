@@ -122,6 +122,32 @@ export async function runLabAgents() {
   return labAgentsVerdict(read.value);
 }
 
+// ── Lab recurrence checks (#1009) ────────────────────────────────────────────
+
+/**
+ * One of the Hybrid Lab's recurrence checks (`lab-drift`, `coder-template`),
+ * as the labs snapshot states it. The server judges it with the same function
+ * the health pulse records it with (functions/src/lib/labs/lab-checks.js), so
+ * this repeats the verdict rather than re-deriving it, and the card cannot
+ * flip between two opinions. A snapshot without the check is an API from
+ * before it, said as unknown.
+ */
+export async function runLabCheck(id) {
+  const read = await attempt('The labs snapshot could not be read', async () => {
+    const snapshot = await postJSON('getLabsSnapshot', {});
+    return snapshot?.checks?.[id] ?? null;
+  });
+  if (read.failure) return read.failure;
+  const check = read.value;
+  if (!check?.status || !check.summary) {
+    return result(
+      'unknown',
+      'The labs snapshot does not carry this check: the Functions app predates it, or could not read it.'
+    );
+  }
+  return result(check.status, check.summary, check.detail ? { detail: check.detail } : {});
+}
+
 // ── MCP servers ──────────────────────────────────────────────────────────────
 
 const mcpLine = (server) => {

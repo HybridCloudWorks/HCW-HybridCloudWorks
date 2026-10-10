@@ -97,9 +97,19 @@ export function createApiClient({
       return job ?? null;
     },
 
-    /** Liveness. The server owns the field names and the busy/idle derivation. */
-    heartbeat({ status, activeJobs, hostname, version }) {
-      return post('agent/heartbeat', { status, activeJobs, hostname, version });
+    /**
+     * Liveness. The server owns the field names and the busy/idle derivation.
+     * `applied` is the commit the host last converged from
+     * (lib/applied-commit.js); null or absent leaves it out of the body.
+     */
+    heartbeat({ status, activeJobs, hostname, version, applied }) {
+      return post('agent/heartbeat', {
+        status,
+        activeJobs,
+        hostname,
+        version,
+        applied: applied ?? undefined,
+      });
     },
 
     /** Terminal result. The server refuses jobs this agent does not hold. */

@@ -17,7 +17,12 @@
  * references, storage, scheduled publishing, publishing failures, review
  * queue age, orphaned images, live-page links, the forge and Telegram
  * notices. Three point queries answer the lab agents' heartbeats, the AI
- * providers' last recorded tests and the MCP servers' last syncs.
+ * providers' last recorded tests and the MCP servers' last syncs. Two more
+ * answer the Hybrid Lab's recurrence checks (#1009, labs/lab-checks.js):
+ * whether each host runs main (`lab-drift`, from the agents' applied
+ * commits and the hourly read of main that checkAgentHealth stores), and
+ * whether Coder serves the template of the host's commit (`coder-template`,
+ * from the host's daily Coder upkeep report).
  *
  * WHAT IT DOES NOT. It calls no third party and spends nothing: the service
  * tests (Publer, Resend, the models) stay on their Test buttons, and the AI
@@ -47,6 +52,12 @@ import {
 } from './probe-results.js';
 import { healthProbe } from './probe-catalogue.js';
 import { ADMIN_CONFIG_PARTITION } from '../cosmos-client.js';
+import {
+  CODER_TEMPLATE_PROBE,
+  LAB_DRIFT_PROBE,
+  readCoderTemplate,
+  readLabDrift,
+} from '../labs/lab-checks.js';
 
 export const PULSE_ACTOR = 'pulse';
 
@@ -128,6 +139,12 @@ export function createHealthPulse({
           nowMs
         )
       ),
+      // Its own words, without the per-agent lines the Labs cards carry.
+      timed(LAB_DRIFT_PROBE, async () => {
+        const { agents: _perAgent, ...verdict } = await readLabDrift(store, nowMs);
+        return verdict;
+      }),
+      timed(CODER_TEMPLATE_PROBE, () => readCoderTemplate(store, nowMs)),
     ]);
 
   async function record(checkedAt, row) {

@@ -28,10 +28,14 @@
  *
  *   { agentId, statusToken?, report: { checkedAt, statusTokenExpiresAt?,
  *     statusTokenRotatedAt?, rotationTokenExpiresAt?, templatePushedAt?,
- *     templateVersion?, lastError? } }
+ *     templateVersion?, templateDigest?, templateSourceDigest?, lastError? } }
  *
  * Every date an ISO 8601 date-time with seconds and a zone; `templateVersion`
- * at most 64 characters, `lastError` at most 300. An unknown key, a wrong
+ * at most 64 characters, `lastError` at most 300; the two digests 64
+ * lower-case hex characters (#1009): `templateDigest` is the host's
+ * template_digest of what it last published, `templateSourceDigest` the same
+ * digest of its checkout at report time, and labs/lab-checks.js raises a
+ * pair that differs. An unknown key, a wrong
  * type, a date that is not one, or a string too long is a 400 with a
  * sentence, before any store call, any Coder call, or any vault call.
  * Validation runs after the guard, so a caller without a credential learns
@@ -77,15 +81,18 @@
  *   { id: 'coder_automation', configScope: 'admin_config',
  *     docType: 'coder_automation', agentId, reportedAt, checkedAt,
  *     statusTokenExpiresAt, statusTokenRotatedAt, rotationTokenExpiresAt,
- *     templatePushedAt, templateVersion, lastError }
+ *     templatePushedAt, templateVersion, templateDigest,
+ *     templateSourceDigest, lastError }
  *
  * A MERGE, under the document's ETag. The event fields (the four dates after
- * checkedAt, and templateVersion) say when something last happened, so a
- * report that does not mention one keeps the stored value: a daily check
- * that published nothing must not erase when the template was last
- * published. `checkedAt`, `lastError`, `reportedAt` and `agentId` describe
- * THIS report and are always replaced; a report with no `lastError` clears
- * the last one, because the check it describes went well.
+ * checkedAt, templateVersion and templateDigest) say when something last
+ * happened, or what, so a report that does not mention one keeps the stored
+ * value: a daily check that published nothing must not erase when the
+ * template was last published. `checkedAt`, `templateSourceDigest`,
+ * `lastError`, `reportedAt` and `agentId` describe THIS report and are always
+ * replaced; a report with no `lastError` clears the last one, because the
+ * check it describes went well, and one with no `templateSourceDigest` leaves
+ * none, because a digest of an earlier checkout is not this one's.
  *
  * Two fields the server decides rather than records. When it stores a token,
  * `statusTokenRotatedAt` is the server's time of the store, whatever the
@@ -144,6 +151,8 @@ export const REPORT_FIELDS = Object.freeze({
   rotationTokenExpiresAt: 'date',
   templatePushedAt: 'date',
   templateVersion: 'version',
+  templateDigest: 'digest',
+  templateSourceDigest: 'digest',
   lastError: 'error',
 });
 
@@ -164,6 +173,7 @@ export const EVENT_FIELDS = Object.freeze([
   'rotationTokenExpiresAt',
   'templatePushedAt',
   'templateVersion',
+  'templateDigest',
 ]);
 
 /** Everything the document carries besides its identity, and everything the read answers. */
@@ -172,6 +182,7 @@ export const STORED_FIELDS = Object.freeze([
   'reportedAt',
   'checkedAt',
   ...EVENT_FIELDS,
+  'templateSourceDigest',
   'lastError',
 ]);
 
@@ -263,10 +274,20 @@ function errorValue(raw) {
   return { value: raw.replace(EMBEDDED_KEY, REDACTED_KEY).trim() };
 }
 
+/** The host's template_digest (hcw-coder-automation.py): SHA-256, 64 lower-case hex characters. */
+const TEMPLATE_DIGEST = /^[0-9a-f]{64}$/;
+
+function digestValue(key, raw) {
+  return typeof raw === 'string' && TEMPLATE_DIGEST.test(raw)
+    ? { value: raw }
+    : { error: `report.${key} must be a SHA-256 digest: 64 lower-case hex characters` };
+}
+
 /** One report field, checked and normalised: `{ value }` or `{ error }`. */
 function reportValue(key, kind, raw) {
   if (kind === 'date') return dateValue(key, raw);
   if (kind === 'version') return versionValue(raw);
+  if (kind === 'digest') return digestValue(key, raw);
   return errorValue(raw);
 }
 

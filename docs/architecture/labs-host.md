@@ -43,6 +43,19 @@ playbook; a change to the Coder template reaches Coder when the owner pushes
 the template after that run ([runbook](../runbooks/labs-host.md#after-a-merge-the-playbook-then-the-template-at-once)).
 Nothing does either on a schedule (#950).
 
+The site watches the gap rather than closing it (#1009). The playbook's last
+task records the commit the host converged from in
+`/etc/hcw/applied-commit.json`, the agent sends it on every heartbeat, and
+`checkAgentHealth` reads `main`'s commits under `lab-host/` and `vps-agent/`
+from GitHub's public API once an hour. The Health Hub's **Lab host runs
+main** probe turns critical when one of those commits has waited more than a
+day unapplied, and the Labs **Agents** tab shows each host's commit and that
+verdict. **Coder template published** turns critical when the template Coder
+serves is not the one in the commit the host converged from, from the two
+digests the host's daily Coder upkeep report carries. Both raise; neither
+runs anything. The nightly check-mode run and the worktree-based `--check`
+that #950 also asks for are not part of this.
+
 The read-only review of 2026-10-08 (#1009) found the host last converged
 around 2026-10-07T04:33Z, with the agent last restarted at 04:33:04Z. These
 changes merged after that and were not on it:

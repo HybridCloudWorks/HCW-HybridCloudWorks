@@ -663,13 +663,23 @@ def deliver(config, status_token, report):
     return answer
 
 
-def report_fields(state, checked_at):
-    """The report: what is known, and nothing that is not."""
+def report_fields(state, checked_at, source_digest=None):
+    """The report: what is known, and nothing that is not.
+
+    templateDigest is the digest of what push-template last published (the
+    state's, from template_digest at that push); templateSourceDigest is the
+    same digest of the checkout as it is now, which bootstrap.sh leaves at the
+    commit the host converged from. The site compares the two and raises a
+    template Coder serves that is not the converged commit's, such as a
+    bootstrap whose publish failed or was skipped (#1009, finding 8).
+    """
     report = {"checkedAt": iso(checked_at)}
     for field in ("statusTokenExpiresAt", "statusTokenRotatedAt", "rotationTokenExpiresAt",
-                  "templatePushedAt", "templateVersion"):
+                  "templatePushedAt", "templateVersion", "templateDigest"):
         if state.get(field):
             report[field] = state[field]
+    if source_digest:
+        report["templateSourceDigest"] = source_digest
     return report
 
 
@@ -847,7 +857,7 @@ def run(config, args):
                 prune(coder, config, token, keys, state, started)
             except Failure as error:
                 errors.append(str(error))
-        report = report_fields(state, started)
+        report = report_fields(state, started, source_digest_or_none(config))
         if errors:
             report["lastError"] = clip(errors)
         try:
@@ -996,6 +1006,19 @@ def template_digest(config):
         with open(path, "rb") as handle:
             digest.update(name.encode() + b"\0" + hashlib.sha256(handle.read()).hexdigest().encode() + b"\0")
     return digest.hexdigest()
+
+
+def source_digest_or_none(config):
+    """template_digest of the checkout for the daily report, or None when it cannot be read.
+
+    The report goes out either way: an unreadable checkout leaves the field
+    out, and the site then says it cannot compare, rather than the whole
+    report, and the status token's news with it, being lost.
+    """
+    try:
+        return template_digest(config)
+    except OSError:
+        return None
 
 
 def push_template(config, args):

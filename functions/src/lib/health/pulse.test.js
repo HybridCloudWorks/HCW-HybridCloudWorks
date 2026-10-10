@@ -80,13 +80,33 @@ const stored = (store, probeId) => store.data.get(resultDocId(probeId));
 
 describe('the pulse run', () => {
   it('records every check it can make on its own, as the pulse, then its heartbeat', async () => {
+    const digest = 'a'.repeat(64);
     const store = memStore({
-      agents: [{ id: 'a1', lastSeenAt: new Date(nowMs - 20 * 1000).toISOString() }],
+      agents: [
+        {
+          id: 'a1',
+          active: true,
+          lastSeenAt: new Date(nowMs - 20 * 1000).toISOString(),
+          applied: { commit: 'c'.repeat(40), committedAt: minutesAgo(600), appliedAt: minutesAgo(300) },
+        },
+      ],
       providers: [{ id: 'anthropic', enabled: true, status: 'connected', lastTested: minutesAgo(60), lastTestedBy: 'probe' }],
       mcp: [{ id: 'plaud', enabled: true, status: 'connected', lastTested: minutesAgo(10) }],
     });
+    // The two documents the lab recurrence checks read (#1009): main read an
+    // hour ago with nothing new under lab-host/, and a Coder report whose
+    // published template is the checkout's.
+    store.data.set('lab_drift', { id: 'lab_drift', since: minutesAgo(600), hostCommits: [], lastSuccessAt: minutesAgo(60) });
+    store.data.set('coder_automation', {
+      id: 'coder_automation',
+      reportedAt: minutesAgo(120),
+      templatePushedAt: minutesAgo(3000),
+      templateVersion: 'brave_turing1',
+      templateDigest: digest,
+      templateSourceDigest: digest,
+    });
     const summary = await pulse(store).run();
-    expect(summary).toMatchObject({ checks: 14, recorded: 14, failures: 0 });
+    expect(summary).toMatchObject({ checks: 16, recorded: 16, failures: 0 });
 
     for (const id of [
       'cosmos',
@@ -103,6 +123,8 @@ describe('the pulse run', () => {
       'lab-agents',
       'ai-providers',
       'mcp-servers',
+      'lab-drift',
+      'coder-template',
     ]) {
       const doc = stored(store, id);
       expect(doc, id).toBeTruthy();
@@ -118,14 +140,16 @@ describe('the pulse run', () => {
       lastBeatAt: NOW.toISOString(),
       intervalMs: PULSE_INTERVAL_MS,
       lateAfterMs: PULSE_LATE_AFTER_MS,
-      checks: 14,
-      recorded: 14,
+      checks: 16,
+      recorded: 16,
       failures: [],
     });
     expect(store.upsertDoc.mock.calls.at(-1)[1].id).toBe(PULSE_DOC_ID);
-    // Nothing third-party: only reads of our own containers.
+    // Nothing third-party: only reads of our own containers. The registry is
+    // read twice, once for the heartbeats and once for the applied commits.
     expect(store.queryDocs.mock.calls.map(([container]) => container).sort()).toEqual([
       'ai_providers',
+      'lab_agents',
       'lab_agents',
       'mcp_servers',
     ]);

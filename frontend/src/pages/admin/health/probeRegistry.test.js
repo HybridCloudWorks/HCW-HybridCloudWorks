@@ -36,6 +36,7 @@ import {
   resolveProbe,
   runAiProviders,
   runLabAgents,
+  runLabCheck,
   runMcpServers,
   mcpServersVerdict,
   runNewsletterBuild,
@@ -462,6 +463,41 @@ describe('the heartbeat and sync runners', () => {
   beforeEach(() => {
     getJSON.mockReset();
     postJSON.mockReset();
+  });
+
+  it('repeats the labs snapshot’s verdict for a lab recurrence check, detail included (#1009)', async () => {
+    postJSON.mockResolvedValueOnce({
+      checks: {
+        'lab-drift': {
+          status: 'critical',
+          summary:
+            'vps-hostinger-01 is behind main: 2 changes under lab-host/ or vps-agent/ merged after 01234567, the oldest 2 d ago. Run bootstrap.sh on the lab host.',
+          detail: 'bbbbbbbb 2026-10-08T00:00:00.000Z LAB-5',
+        },
+      },
+    });
+    expect(await runLabCheck('lab-drift')).toMatchObject({
+      status: 'critical',
+      summary: expect.stringContaining('is behind main'),
+      detail: 'bbbbbbbb 2026-10-08T00:00:00.000Z LAB-5',
+    });
+    expect(postJSON).toHaveBeenCalledWith('getLabsSnapshot', {});
+  });
+
+  it('calls a lab check unknown on an API that does not send it, and a failed read by its kind', async () => {
+    postJSON.mockResolvedValueOnce({ agents: [] });
+    expect(await runLabCheck('coder-template')).toMatchObject({
+      status: 'unknown',
+      summary: expect.stringContaining('does not carry this check'),
+    });
+    postJSON.mockRejectedValueOnce(new Error('Failed to fetch'));
+    expect(await runLabCheck('coder-template')).toMatchObject({ status: 'offline' });
+  });
+
+  it('registers both lab checks as live, Test-all-safe probes that read the snapshot', () => {
+    for (const id of ['lab-drift', 'coder-template']) {
+      expect(byId(id), id).toMatchObject({ kind: 'live', safe: true, hub: 'enhanced' });
+    }
   });
 
   it('calls the lab offline when no agent has beaten within its window', async () => {

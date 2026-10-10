@@ -363,3 +363,41 @@ describe('Remove', () => {
     expect(state.refresh).not.toHaveBeenCalled();
   });
 });
+
+describe('The applied commit and the drift verdict (#1009)', () => {
+  const applied = {
+    commit: '0123456789abcdef0123456789abcdef01234567',
+    committedAt: '2026-09-26T10:00:00.000Z',
+    appliedAt: '2026-09-27T04:31:07.000Z',
+  };
+
+  it('shows the commit the host converged from and the server’s verdict on it, in its colour', () => {
+    const drift = {
+      status: 'critical',
+      summary: `${AGENT_ID} is behind main: 2 changes under lab-host/ or vps-agent/ merged after 01234567, the oldest 2 d ago. Run bootstrap.sh on the lab host.`,
+    };
+    render(<AgentsTab hub={hub({ agents: [agent({ applied, drift })] })} />);
+
+    expect(screen.getByText(/^commit 01234567 · converged /)).toBeInTheDocument();
+    const line = screen.getByTestId('agent-drift');
+    expect(line).toHaveTextContent(drift.summary);
+    expect(line).toHaveAttribute('data-status', 'critical');
+    expect(line.className).toMatch(/text-rose-600/);
+  });
+
+  it('says a host that never reported is behind, with no commit line to show', () => {
+    const drift = {
+      status: 'critical',
+      summary: `${AGENT_ID} has not reported the commit it converged from.`,
+    };
+    render(<AgentsTab hub={hub({ agents: [agent({ applied: null, drift })] })} />);
+    expect(screen.queryByText(/^commit /)).not.toBeInTheDocument();
+    expect(screen.getByTestId('agent-drift')).toHaveTextContent('has not reported the commit');
+  });
+
+  it('shows nothing for an API that sends neither', () => {
+    render(<AgentsTab hub={hub({ agents: [agent()] })} />);
+    expect(screen.queryByTestId('agent-drift')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^commit /)).not.toBeInTheDocument();
+  });
+});

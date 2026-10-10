@@ -5,6 +5,7 @@
  * math over ISO timestamps.
  */
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import {
   AGENT_DOWN_STATUSES,
   AGENT_STALE_AFTER_MS,
@@ -272,6 +273,95 @@ describe('getLabsSnapshot', () => {
       },
       { agentId: 'legacy', active: false, oid: null, registeredAt: null },
     ]);
+  });
+
+  it('carries each host’s applied commit, its drift verdict, and the lab checks by probe id (#1009)', async () => {
+    const applied = {
+      commit: 'a'.repeat(40),
+      committedAt: '2026-08-05T05:00:00.000Z',
+      appliedAt: '2026-08-06T05:00:00.000Z',
+    };
+    const docs = {
+      // main read an hour ago: one lab-host change two days after the applied commit.
+      lab_drift: {
+        id: 'lab_drift',
+        since: applied.committedAt,
+        lastSuccessAt: '2026-08-07T04:30:00.000Z',
+        hostCommits: [{ sha: 'b'.repeat(40), committedAt: '2026-08-06T00:00:00.000Z', title: 'LAB-5' }],
+      },
+    };
+    const store = makeStore({
+      readDoc: vi.fn(async (_c, id) => docs[id] ?? null),
+      queryDocs: vi.fn(async (container, query) => {
+        if (query.includes('VALUE COUNT')) return [0];
+        if (container === 'lab_agents') {
+          return [
+            { id: 'behind', active: true, applied },
+            { id: 'silent', active: true },
+          ];
+        }
+        return [];
+      }),
+    });
+    const h = createLabHandlers({ guard: guardAs('viewer'), store, ...fixed });
+    const body = JSON.parse((await h.getLabsSnapshot(makeRequest({}), context)).body);
+
+    const [behind, silent] = body.agents;
+    expect(behind.applied).toEqual(applied);
+    expect(behind.drift.status).toBe('critical');
+    expect(behind.drift.summary).toMatch(/^behind is behind main: 1 change/);
+    expect(silent.applied).toBeNull();
+    expect(silent.drift.summary).toMatch(/has not reported the commit it converged from/);
+    expect(Object.keys(body.checks).sort()).toEqual(['coder-template', 'lab-drift']);
+    expect(body.checks['lab-drift'].status).toBe('critical');
+    expect(body.checks['lab-drift']).not.toHaveProperty('agents');
+    expect(body.checks['coder-template'].status).toBe('unknown');
+  });
+
+  it('still answers when the lab checks cannot be read, with each check unknown', async () => {
+    const store = makeStore({
+      readDoc: vi.fn(async () => {
+        throw new Error('Cosmos said 503');
+      }),
+      queryDocs: vi.fn(async (container, query) => {
+        if (query.includes('VALUE COUNT')) return [0];
+        return container === 'lab_agents' ? [{ id: 'vps-1', active: true }] : [];
+      }),
+    });
+    const h = createLabHandlers({ guard: guardAs('viewer'), store, ...fixed });
+    const res = await h.getLabsSnapshot(makeRequest({}), context);
+    expect(res.status).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.checks['lab-drift'].status).toBe('unknown');
+    expect(body.checks['coder-template'].status).toBe('unknown');
+    expect(body.agents[0].drift).toBeNull();
+  });
+
+  it('answers without the checks, and a content-free warning, when they cannot be loaded at all', async () => {
+    const warn = vi.fn();
+    const store = makeStore({
+      queryDocs: vi.fn(async (container, query) => {
+        if (query.includes('VALUE COUNT')) return [0];
+        return container === 'lab_agents' ? [{ id: 'vps-1', active: true }] : [];
+      }),
+    });
+    const readChecks = vi.fn(async () => {
+      throw Object.assign(new Error('module vps-1 failed'), { code: 'ERR_MODULE_NOT_FOUND' });
+    });
+    const h = createLabHandlers({ guard: guardAs('viewer'), store, ...fixed, readChecks });
+    const res = await h.getLabsSnapshot(makeRequest({}), { ...context, warn });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body).checks).toEqual({});
+    expect(warn).toHaveBeenCalledWith('getLabsSnapshot: the lab checks could not be read (ERR_MODULE_NOT_FOUND)');
+  });
+
+  it('keeps the checks out of this module’s static imports, which the browser-side tests load', () => {
+    // health/pulse-checks.js imports this module for the online rule, and the
+    // frontend's statusParity.test.js imports pulse-checks.js under jsdom; the
+    // checks bring the Cosmos and Key Vault clients, which cannot load there.
+    const source = readFileSync(new URL('./labs.js', import.meta.url), 'utf8');
+    const staticImports = [...source.matchAll(/^import .* from '([^']+)';$/gm)].map((m) => m[1]);
+    expect(staticImports).toEqual(['node:crypto']);
   });
 });
 

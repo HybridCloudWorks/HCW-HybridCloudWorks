@@ -721,10 +721,14 @@ calls = world.cli_calls()[before:]
 check("it reports once, without a status token", len(calls) == 1 and "statusToken" not in calls[0]["payload"],
       json.dumps(calls))
 report = calls[0]["payload"]["report"] if calls else {}
-check("the report says when it checked and when the rotation credential expires, and nothing it does not know",
-      set(report) == {"checkedAt", "rotationTokenExpiresAt"}, json.dumps(report))
+check("the report says when it checked, when the rotation credential expires and the checkout's template digest, and nothing it does not know",
+      set(report) == {"checkedAt", "rotationTokenExpiresAt", "templateSourceDigest"}, json.dumps(report))
 check("the report's times are UTC, to the second",
-      all(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value) for value in report.values()), json.dumps(report))
+      all(re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", value)
+          for key, value in report.items() if key != "templateSourceDigest"), json.dumps(report))
+check("and no published digest before anything was published, so the site cannot mistake the checkout's for one",
+      "templateDigest" not in report and re.fullmatch(r"[0-9a-f]{64}", report.get("templateSourceDigest", "")),
+      json.dumps(report))
 argv = world.lines(world.run_log)[-1] if world.run_log.exists() else []
 check("the CLI runs as the agent's user and group, with its environment file and checkout",
       f"--uid={config['agent_user']}" in argv and f"--gid={config['agent_group']}" in argv
@@ -907,20 +911,38 @@ check("the daily report carries the template's publish time and version",
       result.returncode == 0 and report.get("templateVersion") == "brave_turing6"
       and report.get("templatePushedAt", "").startswith(today()),
       json.dumps(report) + result.stderr)
+check("and the published template's digest beside the checkout's, equal straight after a publish (#1009)",
+      re.fullmatch(r"[0-9a-f]{64}", report.get("templateDigest", ""))
+      and report.get("templateDigest") == world.state().get("templateDigest")
+      and report.get("templateSourceDigest") == report.get("templateDigest"),
+      json.dumps(report))
+(world.template / "main.tf").write_text('resource "x" "never-published" {}\n', encoding="utf-8")
+result = world.helper("run")
+report = world.cli_calls()[-1]["payload"]["report"]
+check("a checkout that moved on without a publish reports a source digest the published one does not match",
+      result.returncode == 0 and re.fullmatch(r"[0-9a-f]{64}", report.get("templateSourceDigest", ""))
+      and report.get("templateSourceDigest") != report.get("templateDigest")
+      and report.get("templateDigest") == world.state().get("templateDigest"),
+      json.dumps(report) + result.stderr)
+result = world.helper("push-template")
+check("and the next publish brings the two back together",
+      result.returncode == 0 and len(world.lines(world.push_log)) == 7, result.stdout + result.stderr)
 world.fake.keys.pop(world.credential().split("-")[0])
 result = world.helper("push-template")
 check("a rotation credential Coder refuses skips the publish (exit 3) and says to seed again",
       result.returncode == 3 and "seed --force" in result.stdout, result.stdout)
 
 REPORT_FIELDS = {"checkedAt", "statusTokenExpiresAt", "statusTokenRotatedAt", "rotationTokenExpiresAt",
-                 "templatePushedAt", "templateVersion", "lastError"}
-TIMES = REPORT_FIELDS - {"templateVersion", "lastError"}
+                 "templatePushedAt", "templateVersion", "templateDigest", "templateSourceDigest", "lastError"}
+DIGESTS = {"templateDigest", "templateSourceDigest"}
+TIMES = REPORT_FIELDS - {"templateVersion", "lastError"} - DIGESTS
 payloads = [call["payload"] for call in world.cli_calls()]
 bad = [p for p in payloads
        if set(p) - {"statusToken", "report"} or set(p.get("report", {})) - REPORT_FIELDS
        or any(not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", p["report"][field])
-              for field in TIMES & set(p.get("report", {})))]
-check(f"all {len(payloads)} payloads hold only statusToken and report, the seven report fields, and times with seconds and a zone",
+              for field in TIMES & set(p.get("report", {})))
+       or any(not re.fullmatch(r"[0-9a-f]{64}", p["report"][field]) for field in DIGESTS & set(p.get("report", {})))]
+check(f"all {len(payloads)} payloads hold only statusToken and report, the nine report fields, times with seconds and a zone, and hex digests",
       payloads and not bad, json.dumps(bad[:1]))
 leaks = world.leaks()
 check("no token is in anything the helper printed, its state, or any report", not leaks, ", ".join(leaks))

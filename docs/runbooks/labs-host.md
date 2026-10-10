@@ -707,6 +707,32 @@ closes the gap, so it follows the run, not the next day.
    https://github.com/saulpatinojr/HCW-HybridCloudWorks.git`, once, and
    every run logs `fetching` with the address it really fetches from.
 
+   The run's last task, **Record the commit this host converged from, for
+   the agent's heartbeat**, is `changed` on every successful run. Within a
+   minute the agent's card on
+   <https://hybridcloudworks.com/admin/labs?tab=agents> reads `commit
+   <first 8 of the sha the run logged> · converged <now>`, and the line
+   under it begins `vps-hostinger-01 converged from` and ends `nothing under
+   lab-host/ or vps-agent/ has merged to main since.` Two other endings are
+   about the site's read of `main`, not the host:
+
+   - `main has not been read yet.` `checkAgentHealth` has not run since the
+     Functions deploy that brought the check. It reads `main` on its first
+     run, so this clears within five minutes.
+   - `main could not be read (<code>: <reason>).` The read was attempted and
+     failed, and the code says why: `RATE_LIMITED` (GitHub's unauthenticated
+     limit for the Function App's outbound address is used up; the reason
+     says when it resets), `TIMEOUT` or `FETCH_FAILED` (GitHub did not
+     answer), `UPSTREAM_STATUS` (GitHub answered with an error). It is tried
+     again every hour and clears only after a read succeeds. If it is still
+     there a day later, the host's lag is unknown and the **Lab host runs
+     main** card says so.
+   - Any verdict followed by `The latest read of main failed (<code>:
+     <reason>); this is from the read <n> h ago.` The newest hourly read
+     failed, for the reasons above, and the verdict comes from the last good
+     one. It stands while that read is under six hours old; after that a
+     healthy verdict turns unknown, and a host already behind stays critical.
+
 2. Straight after, PowerShell on the workstation. Make the short-lived
    `hcw-setup` token in a pane as step 1 of "The status token for the
    site" in `lab-host/README.md` shows, paste this line, then paste the

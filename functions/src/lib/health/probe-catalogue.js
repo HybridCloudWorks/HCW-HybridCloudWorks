@@ -55,6 +55,10 @@ export const HEALTH_PROBES = Object.freeze({
   // Enhanced
   elevenlabs: probe('live', 'editor'),
   'lab-agents': probe('live', 'viewer'),
+  // #1009: the host runs main, and Coder serves its template. Read from the
+  // Labs snapshot in a browser, recorded by the pulse every five minutes.
+  'lab-drift': probe('live', 'viewer'),
+  'coder-template': probe('live', 'viewer'),
   'labs-noop': probe('session', 'editor'),
   'labs-unauth': probe('session', 'viewer'),
   'hybrid-lab': probe('live', 'viewer'),
