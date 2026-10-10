@@ -1346,7 +1346,8 @@ locals {
   #
   # The set must equal the `timer` list in functions/function-inventory.json,
   # and each pair must match its NCRONTAB in functions/src/functions/:
-  # scripts/timer-alert-schedules.test.mjs fails, naming the timer, when a
+  # functions/src/functions/timer-alert-schedules.test.js (`npm test` in
+  # functions/) fails, naming the timer, when a
   # timer is added, removed or rescheduled without this map. 2026-01-01 was a
   # Thursday, so the weekly anchors are 2026-01-02 (Friday), 2026-01-04
   # (Sunday) and 2026-01-05 (Monday); the test checks each weekday too.

@@ -534,6 +534,13 @@ $me = (az ad signed-in-user show -o json | ConvertFrom-Json).id
 $ip = Invoke-RestMethod -Uri https://api.ipify.org
 ```
 
+An empty result here means you hold no direct assignment on the account
+already, so the delete at the end removes only what this test adds:
+
+```powershell
+az role assignment list --assignee $me --scope $sa -o json | ConvertFrom-Json | Select-Object roleDefinitionName, scope
+```
+
 ```powershell
 az role assignment create --assignee-object-id $me --assignee-principal-type User --role "Storage Queue Data Contributor" --scope $sa -o none
 ```
@@ -578,8 +585,9 @@ That is that rule's test done as well.
 **`alert-swa-bandwidth`**: lower the threshold to one byte for an hour and
 put it back. Driving 2.7 GB of real traffic would spend nearly 3% of the
 month's allowance, and Cloudflare's cache would absorb most of it before it
-reached the Static Web App. The first lines read the rule as ARM holds it and
-keep the real threshold in `$orig`:
+reached the Static Web App. The first lines read the rule as ARM holds it,
+keep the real threshold in `$orig`, and name a temporary file of this test's
+own, so nothing already on disk is overwritten:
 
 ```powershell
 $u = 'https://management.azure.com' + (az monitor metrics alert show -n alert-swa-bandwidth-prod-cus -g rg-web-site-prod-cus -o json | ConvertFrom-Json).id + '?api-version=2018-03-01'
@@ -587,6 +595,10 @@ $u = 'https://management.azure.com' + (az monitor metrics alert show -n alert-sw
 
 ```powershell
 $a = az rest --method get --url $u -o json | ConvertFrom-Json
+```
+
+```powershell
+$f = Join-Path ([IO.Path]::GetTempPath()) ('plat4-swa-' + [guid]::NewGuid() + '.json')
 ```
 
 ```powershell
@@ -598,11 +610,11 @@ $a.properties.criteria.allOf[0].threshold = 1
 ```
 
 ```powershell
-[IO.File]::WriteAllText("$PWD\plat4-swa.json", ($a | ConvertTo-Json -Depth 20))
+[IO.File]::WriteAllText($f, ($a | ConvertTo-Json -Depth 20))
 ```
 
 ```powershell
-az rest --method put --url $u --body '@plat4-swa.json' -o none
+az rest --method put --url $u --body "@$f" -o none
 ```
 
 Success is `alert-swa-bandwidth-prod-cus` at the next hourly evaluation, as
@@ -613,32 +625,37 @@ $a.properties.criteria.allOf[0].threshold = $orig
 ```
 
 ```powershell
-[IO.File]::WriteAllText("$PWD\plat4-swa.json", ($a | ConvertTo-Json -Depth 20))
+[IO.File]::WriteAllText($f, ($a | ConvertTo-Json -Depth 20))
 ```
 
 ```powershell
-az rest --method put --url $u --body '@plat4-swa.json' -o none
+az rest --method put --url $u --body "@$f" -o none
 ```
 
 ```powershell
 (az monitor metrics alert show -n alert-swa-bandwidth-prod-cus -g rg-web-site-prod-cus -o json | ConvertFrom-Json).criteria.allOf[0].threshold
 ```
 
-Success is `2666666666`. Then remove the file:
+Success is `2666666666`. Then remove the test's own file, and nothing else:
 
 ```powershell
-Remove-Item plat4-swa.json
+Remove-Item -LiteralPath $f
 ```
 
 An HCP Terraform plan taken while the threshold is lowered shows it as drift;
 the restore ends that.
 
 **`alert-kv-errors` and `alert-kv-data-write`**: one refused write
-fires both. It updates the attributes of a secret that does not exist, so even
-if it got through it would change nothing.
+fires both. It updates the attributes of a secret that does not exist, named
+with this moment's time so it cannot be an existing secret, so even if it got
+through it would change nothing.
 
 ```powershell
-az keyvault secret set-attributes --vault-name kv-site-prod-cus-01 --name plat4-fire-test --enabled false
+$sn = 'plat4-fire-test-' + (Get-Date -Format 'yyyyMMddHHmmss')
+```
+
+```powershell
+az keyvault secret set-attributes --vault-name kv-site-prod-cus-01 --name $sn --enabled false
 ```
 
 The command failing is the expected result: `Forbidden` (the firewall or the
@@ -679,17 +696,23 @@ resolves on its own once the burst leaves the 15-minute window.
 
 **`alert-kv-config-write`**: add a tag to the site vault and take it off.
 A tag write is a Resource Manager write on the vault and touches nothing else.
+The key carries this moment's time, so it cannot be a tag the vault already
+has, and the delete removes that key alone.
 
 ```powershell
 $kv = (az keyvault show -n kv-site-prod-cus-01 -g rg-sec-site-prod-cus -o json | ConvertFrom-Json).id
 ```
 
 ```powershell
-az tag update --resource-id $kv --operation Merge --tags plat4FireTest=2026-10 -o none
+$tk = 'plat4FireTest' + (Get-Date -Format 'yyyyMMddHHmmss')
 ```
 
 ```powershell
-az tag update --resource-id $kv --operation Delete --tags plat4FireTest=2026-10 -o none
+az tag update --resource-id $kv --operation Merge --tags "$tk=1" -o none
+```
+
+```powershell
+az tag update --resource-id $kv --operation Delete --tags "$tk=1" -o none
 ```
 
 Success is two notifications for `alert-kv-config-write-prod-cus`, one per
