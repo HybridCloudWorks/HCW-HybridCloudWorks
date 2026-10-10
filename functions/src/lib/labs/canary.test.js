@@ -281,6 +281,50 @@ describe('a job it cannot follow', () => {
   });
 });
 
+describe('a run that dies after the job exists', () => {
+  it('reserves the id first, so the next run settles the job even when the record could not be written', async () => {
+    const s = store();
+    const realReplace = s.replaceDocIfMatch.getMockImplementation();
+    // The reservation is the record's first write (a create); the run's last
+    // write, a replace of the record, fails.
+    s.replaceDocIfMatch.mockImplementation(async (container, doc, options) => {
+      if (container === 'admin_config') throw Object.assign(new Error('Cosmos is down'), { code: 503 });
+      return realReplace(container, doc, options);
+    });
+    const first = harness({ s, script: [{ at: 1, act: claim(5_000) }] });
+    await expect(first.canary.run()).rejects.toMatchObject({ code: 503 });
+    // The reservation went in with create, before the job did.
+    const order = s.createDoc.mock.calls.map(([container]) => container);
+    expect(order).toEqual(['admin_config', 'lab_jobs']);
+    expect(s.data.admin_config.get(LAB_CANARY_DOC_ID).pendingJobId).toBe(JOB_ID);
+    expect(s.data.lab_jobs.get(JOB_ID).status).toBe('claimed');
+
+    // The agent finishes it; the next run, with the store back, deletes it
+    // before anything new is enqueued.
+    s.agentWrites(JOB_ID, { status: 'succeeded', exitCode: 0, output: `hcw-canary ${JOB_ID}`, finishedAt: at(9_000) });
+    s.replaceDocIfMatch.mockImplementation(realReplace);
+    const second = harness({ s });
+    await second.canary.run();
+    expect(s.data.lab_jobs.size).toBe(0);
+    expect(s.data.admin_config.get(LAB_CANARY_DOC_ID).pendingJobId).toBeNull();
+  });
+
+  it('enqueues nothing when the reservation cannot be written', async () => {
+    const s = store({ canary: { id: LAB_CANARY_DOC_ID, consecutiveFailures: 0 } });
+    s.replaceDocIfMatch.mockRejectedValueOnce(Object.assign(new Error('changed'), { code: 412 }));
+    const h = harness({ s });
+    await expect(h.canary.run()).rejects.toMatchObject({ code: 412 });
+    expect(s.createDoc).not.toHaveBeenCalledWith('lab_jobs', expect.anything());
+  });
+
+  it('reads a reservation for a job that was never created as gone', async () => {
+    const s = store({ canary: { id: LAB_CANARY_DOC_ID, pendingJobId: 'never-created' } });
+    const h = harness({ s });
+    expect((await h.canary.run()).outcome).toBe('not-claimed');
+    expect(s.data.admin_config.get(LAB_CANARY_DOC_ID).pendingJobId).toBeNull();
+  });
+});
+
 describe('what an earlier run left', () => {
   const leftover = (fields) => ({ id: JOB_ID, type: 'shell-echo', createdAt: at(-3_600_000), ...fields });
 

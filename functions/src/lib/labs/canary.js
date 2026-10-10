@@ -27,6 +27,14 @@
  * enqueues nothing and says so. So the Labs job list holds at most one canary
  * job at a time, and only while it is in flight.
  *
+ * THE ID IS RESERVED BEFORE THE JOB EXISTS (CodeRabbit, #1055). A run writes
+ * the new job's id to the record as `pendingJobId`, under the record's ETag,
+ * and only then creates the job; the run's last write clears it or keeps it.
+ * So an invocation that dies, or a record that cannot be written, after the
+ * create still leaves the id where the next run looks, and that run settles
+ * the job before it enqueues anything. A reservation for a job that was never
+ * created is read as gone, and costs nothing.
+ *
  * NOT ENQUEUED INTO A VOID. With no active agent registered for `shell-echo`,
  * or none online, the run records that (a registry or an outage, which the
  * lab-agents probe already reports) and enqueues nothing, so a host that is
@@ -267,9 +275,30 @@ export function createLabCanary({
     };
   }
 
-  /** Enqueue, wait, judge, clean up: `{ result, pendingJobId }`. */
+  /**
+   * Write the job's id to the record as `pendingJobId` before the job exists,
+   * under the record's ETag. Throws when it cannot, and then nothing is
+   * enqueued: a job whose id is not recorded is one no later run can find.
+   */
+  async function reserve(jobId) {
+    const current = await readState();
+    const next = {
+      ...(current ?? {
+        id: LAB_CANARY_DOC_ID,
+        configScope: ADMIN_CONFIG_PARTITION,
+        docType: LAB_CANARY_DOC_TYPE,
+        jobType: CANARY_JOB_TYPE,
+      }),
+      pendingJobId: jobId,
+    };
+    if (current) await store.replaceDocIfMatch('admin_config', { ...next, _etag: current._etag }, PK);
+    else await store.createDoc('admin_config', next);
+  }
+
+  /** Reserve, enqueue, wait, judge, clean up: `{ result, pendingJobId }`. */
   async function runJob(startedMs) {
     const jobId = uuid();
+    await reserve(jobId);
     await store.createDoc('lab_jobs', canaryJob(jobId, new Date(startedMs).toISOString()));
     // From here the job exists, so whatever fails while it is followed, its id
     // must reach the record: the next run settles it, and enqueues nothing new

@@ -34,7 +34,9 @@ This project has not cut a tagged release; entries are grouped under
     deadline is cancelled and deleted; one still claimed is left to finish,
     and the next run deletes it (or withdraws it past the claim lease) and
     enqueues nothing new meanwhile. Each run is recorded with its claim and
-    run times in `admin_config/lab_canary`.
+    run times in `admin_config/lab_canary`, where the job's id is reserved
+    under the record's ETag before the job is created, so a run that dies
+    or cannot write its record never loses a job to the next.
   - Every read of Coder with `CODER-STATUS-TOKEN` records Coder's answer in
     `admin_config/coder_status_token` (`recordTokenAnswer`, ETag-guarded,
     an unchanged answer at most hourly, one outage keeping its start). A
