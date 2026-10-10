@@ -20,9 +20,10 @@
 # Twenty-one days is three Monday runs, so a row is on the board for at least
 # two working weeks before its alarm, whatever weekday that falls on.
 #
-# The org board's auto-add picks the issue up. GITHUB_TOKEN cannot write an
-# org project's fields, so its Priority is set by whoever triages the board;
-# the body says what is due and when, which is what the priority depends on.
+# The issue is not added to the Work Board on its own: the board is a user
+# project with no auto-add for new issues, and GITHUB_TOKEN cannot write a
+# user project. Whoever triages adds it and sets its Priority; the body says
+# what is due and when, which is what the priority depends on.
 name: Warn Catalogue Due
 
 on:

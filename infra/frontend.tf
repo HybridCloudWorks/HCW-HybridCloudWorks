@@ -165,7 +165,11 @@ resource "cloudflare_dns_record" "azure_functions" {
 }
 
 # Documentation site on GitHub Pages (issue #360): docs.<domain> is a CNAME to
-# the organization's Pages host. DNS-only rather than proxied, deliberately:
+# the repository owner's Pages host, saulpatinojr.github.io since the
+# repository moved to a personal account on 2026-10-07 (it named the former
+# organisation's host until then; both resolve to GitHub's Pages addresses, so
+# the change is invisible to visitors, and GitHub's custom-domain check expects
+# the owner's own host). DNS-only rather than proxied, deliberately:
 # GitHub issues and renews the certificate for a Pages custom domain by
 # checking the CNAME resolves to *.github.io, and a proxied record answers
 # with Cloudflare's addresses instead, which leaves the domain stuck at
@@ -180,7 +184,7 @@ resource "cloudflare_dns_record" "azure_functions" {
 resource "cloudflare_dns_record" "docs_pages" {
   zone_id = var.cloudflare_zone_id
   name    = "docs.${var.domain}"
-  content = "hybridcloudworks.github.io"
+  content = "saulpatinojr.github.io"
   type    = "CNAME"
   proxied = false
   ttl     = 300
